@@ -158,6 +158,12 @@ export class Sfx {
       case 'goal':
         this.roar(t);
         break;
+      case 'celebrate':
+        // The camera finds the fans: a second wave of noise, singing and clapping.
+        this.excitement = 1;
+        noiseBurst(c, out, t, { gain: 0.24, attack: 0.3, decay: 2.4, freq: 600, freqEnd: 1200, q: 0.5 });
+        this.clap(t + 0.2, 26, 0.08);
+        break;
       case 'foul':
         this.whistle(t, [0.14, 0.14]);
         this.groan(t + 0.1);

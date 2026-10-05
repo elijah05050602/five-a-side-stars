@@ -1,7 +1,9 @@
 export type AgeGroup = 'U5' | 'U6' | 'U7' | 'U8' | 'U9' | 'U10';
 export const AGE_GROUPS: AgeGroup[] = ['U5', 'U6', 'U7', 'U8', 'U9', 'U10'];
 
-export type Position = 'GK' | 'DEF' | 'ATT';
+export type Position = 'GK' | 'DEF' | 'MID' | 'WING' | 'ATT';
+export const POSITIONS: Position[] = ['GK', 'DEF', 'MID', 'WING', 'ATT'];
+export const POSITION_LABELS: Record<Position, string> = { GK: 'Keeper', DEF: 'Defender', MID: 'Midfielder', WING: 'Winger', ATT: 'Attacker' };
 export type KitPattern = 'plain' | 'stripes' | 'hoops' | 'halves' | 'sash' | 'chevron';
 export const KIT_PATTERNS: KitPattern[] = ['plain', 'stripes', 'hoops', 'halves', 'sash', 'chevron'];
 
@@ -95,7 +97,11 @@ export interface Team {
   createdAt: number;
   /** A career-mode team: its players grow by playing, so stars cannot be spent by hand. */
   career?: boolean;
+  /** How the four outfield starters line up (see src/data/formations.ts). Box (2-2) when missing. */
+  formation?: FormationId;
 }
+
+export type FormationId = 'box' | 'pyramid' | 'arrow' | 'diamond' | 'engine' | 'wall' | 'wings';
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
 

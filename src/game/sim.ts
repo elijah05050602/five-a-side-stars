@@ -1,6 +1,7 @@
 import { AGE_STATS, type AgeStats } from '../data/ageGroups';
-import type { Difficulty, Player, SkillKey, Team } from '../data/types';
+import type { Difficulty, Player, Position, SkillKey, Team } from '../data/types';
 import { startingFive } from '../data/defaults';
+import { assignSlots, formationById } from '../data/formations';
 import { averageStars, skillMul } from '../data/skills';
 import type { InputState } from './input';
 
@@ -69,6 +70,10 @@ export interface SimPlayer {
   radius: number;
   /** Home spot in the formation (absolute world coords). */
   home: V2;
+  /** The job this player does in the team's formation (their spot's position, which can differ from their own). */
+  role: Position;
+  /** Their formation spot: x up from our own goal line as a share of the pitch length, z across it as a share of the width. */
+  slot: V2;
   /** Time remaining before this player may take the ball again after kicking. */
   kickCooldown: number;
   /** Decision timer for AI. */
@@ -306,7 +311,7 @@ export class MatchSim {
         const mul = skillMuls(info, config.home.ageGroup);
         const p: SimPlayer = {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
-          radius: 0.28 * this.stats.scale + 0.08, home: v(), kickCooldown: 0, think: Math.random() * 0.3,
+          radius: 0.28 * this.stats.scale + 0.08, home: v(), role: info.position, slot: v(info.position === 'GK' ? 0.03 : 0.33, 0), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, distanceRun: 0, isKeeper: info.position === 'GK',
           speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
@@ -314,6 +319,9 @@ export class MatchSim {
         };
         this.players.push(p);
       });
+      // Line the outfield players up in the team's formation.
+      const outfield = this.players.filter((p) => p.side === side && !p.isKeeper);
+      assignSlots(outfield, formationById(team.formation)).forEach((slot, p) => { p.role = slot.pos; p.slot = v(slot.x, slot.z); });
     });
     if (config.mode === 'shootout') {
       this.shootout = { taking: 0, results: [[], []], resolved: false, timer: 0, kicked: false };
@@ -406,11 +414,9 @@ export class MatchSim {
       const dir = s === 0 ? 1 : -1; // attacking direction
       const own = this.ownGoalX(s);
       const team = this.teamOf(s);
-      let defI = 0, attI = 0;
       team.forEach((p) => {
         if (p.isKeeper) p.home = v(own + dir * 0.6, 0);
-        else if (p.info.position === 'DEF') { p.home = v(own + dir * L * 0.25, (defI === 0 ? -1 : 1) * W * 0.24); defI++; }
-        else { p.home = v(own + dir * L * 0.42, (attI === 0 ? -1 : 1) * W * 0.18); attI++; }
+        else p.home = v(own + dir * L * p.slot.x, dir * W * p.slot.z);
         p.pos = v(p.home.x, p.home.z);
         p.vel = v();
         p.facing = s === 0 ? 0 : Math.PI;
@@ -419,8 +425,8 @@ export class MatchSim {
         p.diveAnim = 0;
       });
       if (s === side) {
-        // One attacker stands on the ball, the other just behind.
-        const atts = team.filter((p) => p.info.position === 'ATT');
+        // The furthest forward stands on the ball, the next just behind.
+        const atts = this.forwards(team);
         if (atts[0]) { atts[0].pos = v(-dir * 0.4, 0); this.ball.owner = atts[0]; }
         if (atts[1]) atts[1].pos = v(-dir * 2.2, W * 0.1);
       }
@@ -432,9 +438,15 @@ export class MatchSim {
       if (!this.isHuman(hs)) { this.controlledBy[hs] = null; continue; }
       const human = this.teamOf(hs);
       const owner = this.ball.owner as SimPlayer | null;
-      this.controlledBy[hs] = owner && owner.side === hs ? owner : human.find((p) => p.info.position === 'ATT') ?? human[0];
+      this.controlledBy[hs] = owner && owner.side === hs ? owner : this.forwards(human)[0] ?? human[0];
     }
     this.events.push({ type: 'kickoff', side });
+  }
+
+  /** Outfield players, the most attacking first (strikers, then wingers, midfielders, defenders). */
+  private forwards(team: SimPlayer[]): SimPlayer[] {
+    const rank: Record<Position, number> = { ATT: 0, WING: 1, MID: 2, DEF: 3, GK: 4 };
+    return team.filter((p) => !p.isKeeper).sort((a, b) => rank[a.role] - rank[b.role] || b.slot.x - a.slot.x);
   }
 
   togglePause(): void {
@@ -447,7 +459,8 @@ export class MatchSim {
     if (this.phase === 'paused' || this.phase === 'fulltime') return;
     if (this.phase === 'goal') {
       this.phaseTimer += dt;
-      if (this.phaseTimer > (this.mode === 'training' ? 1.6 : 3.2)) {
+      // A match goal holds a little longer so the camera can watch the fans celebrate (MatchScene).
+      if (this.phaseTimer > (this.mode === 'training' ? 1.6 : this.mode === 'match' && !this.shootout ? 4.4 : 3.2)) {
         if (this.shootout) this.advanceShootout();
         else if (this.mode === 'tutorial') return; // the coach puts the ball back
         else if (this.mode === 'training') this.setupKickoff(this.config.humanSide ?? 0);
@@ -823,32 +836,37 @@ export class MatchSim {
         // Support: push up and offer a passing lane.
         const carrier = b.owner!;
         const sideSign = p.home.z >= 0 ? 1 : -1;
-        const up = dir * (p.info.position === 'ATT' ? 5 : 2) * this.stats.scale;
+        const up = dir * ({ ATT: 5, WING: 4.5, MID: 3, DEF: 2, GK: 2 } as Record<Position, number>)[p.role] * this.stats.scale;
+        // Wingers hug the touchline to stretch the play; everyone else offers a lane inside.
+        const lane = p.role === 'WING' ? 0.4 : p.role === 'MID' ? 0.18 : 0.28;
         p.aiTarget = v(
           clamp(carrier.pos.x + up, -this.length / 2 + 2, this.length / 2 - 2),
-          clamp(sideSign * this.width * 0.28 + (carrier.pos.z * 0.2), -this.width / 2 + 1, this.width / 2 - 1),
+          clamp(sideSign * this.width * lane + (carrier.pos.z * 0.2), -this.width / 2 + 1, this.width / 2 - 1),
         );
-        if (p.info.position === 'DEF') p.aiTarget.x = clamp(p.home.x + (b.pos.x - p.home.x) * 0.5, -this.length / 2 + 2, this.length / 2 - 2);
+        if (p.role === 'DEF') p.aiTarget.x = clamp(p.home.x + (b.pos.x - p.home.x) * 0.5, -this.length / 2 + 2, this.length / 2 - 2);
       } else {
         // Defend: drop between the ball and our goal, near the formation spot.
         const toBall = v(b.pos.x - p.home.x, b.pos.z - p.home.z);
-        const shift = p.info.position === 'DEF' ? 0.35 : 0.55;
+        const shift = p.role === 'DEF' ? 0.35 : p.role === 'MID' ? 0.45 : 0.55;
         p.aiTarget = v(p.home.x + toBall.x * shift, p.home.z + toBall.z * shift);
         const carrier = b.owner;
         const inOurHalf = carrier !== null && (carrier.pos.x - 0) * dir < 0;
-        if (carrier && inOurHalf && p.info.position === 'DEF') {
+        if (carrier && inOurHalf && p.role === 'DEF') {
           // Get goal-side of the dribbler and close them down.
           const toGoal = norm(v(own - carrier.pos.x, 0 - carrier.pos.z));
           const gap = dist(carrier.pos, p.pos) < 4 ? 0.6 : 1.6;
           p.aiTarget = v(carrier.pos.x + toGoal.x * gap, carrier.pos.z + toGoal.z * gap + (p.home.z >= 0 ? 0.4 : -0.4));
+        } else if (carrier && inOurHalf && p.role === 'MID') {
+          // Midfielders get back between the ball and our goal to cut out the pass.
+          p.aiTarget = v(clamp(carrier.pos.x - dir * 2, -this.length / 2 + 2, this.length / 2 - 2), p.home.z * 0.4 + carrier.pos.z * 0.5);
         } else if (carrier && inOurHalf) {
-          // Attackers drop back to the halfway line to help.
-          p.aiTarget = v(clamp(carrier.pos.x + dir * 3, -this.length / 2 + 2, this.length / 2 - 2), p.home.z * 0.6 + carrier.pos.z * 0.3);
+          // Attackers drop back to the halfway line to help; wingers stay out wide.
+          p.aiTarget = v(clamp(carrier.pos.x + dir * 3, -this.length / 2 + 2, this.length / 2 - 2), p.role === 'WING' ? p.home.z * 0.85 : p.home.z * 0.6 + carrier.pos.z * 0.3);
         } else {
           // Mark the nearest opponent if they are close to our goal.
           const danger = opps.filter((o) => !o.isKeeper && Math.abs(o.pos.x - own) < this.length * 0.4);
           const m = this.nearest(danger, p.pos);
-          if (m && p.info.position === 'DEF' && dist(m.pos, p.pos) < 5) {
+          if (m && p.role === 'DEF' && dist(m.pos, p.pos) < 5) {
             p.aiTarget = v(m.pos.x + (own - m.pos.x) * 0.25, m.pos.z + (0 - m.pos.z) * 0.25);
           }
         }
@@ -1412,7 +1430,7 @@ export class MatchSim {
     const dir = side === 0 ? 1 : -1;
     const spot = penalty ? v(goal.x - dir * (this.width * 0.26 + 0.6), 0) : v(victim.pos.x, victim.pos.z);
     let taker = victim;
-    if (penalty && victim.isKeeper) taker = this.teamOf(side).find((m) => m.info.position === 'ATT') ?? victim;
+    if (penalty && victim.isKeeper) taker = this.forwards(this.teamOf(side))[0] ?? victim;
     const b = this.ball;
     b.owner = taker;
     b.pos = v(spot.x, spot.z);

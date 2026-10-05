@@ -34,15 +34,25 @@ body {
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
-/* Inner screens sit on the light arcade surface with a faint turf band at the foot. */
+/* Every screen outside a match sits in the lobby's stadium, dimmed a little more than the lobby so cards and text stay easy to read. */
 body:not(.in-match)::before {
   content: '';
   position: fixed; inset: 0;
   background:
-    radial-gradient(1200px 500px at 50% -200px, #dbeeff 0, rgba(219,238,255,0) 70%),
-    linear-gradient(180deg, var(--surface) 0 72%, #e3f5ea 72%, #cdeedc 100%);
+    linear-gradient(180deg, rgba(10,30,59,0.62) 0, rgba(16,32,51,0.32) 35%, rgba(13,28,45,0.68) 75%, #0d1c2d 100%),
+    #102033 url('/art/stadium.jpg') center 30% / cover no-repeat;
+  filter: saturate(1.15) brightness(0.88);
   z-index: 0;
 }
+/* Text that sits straight on the stadium turns white with an ink drop; anything inside a card stays ink. */
+.screen-root:not(.lobby-root) { color: var(--white); --muted: #d6e2f5; --card: rgba(255,255,255,0.97); }
+.screen-root:not(.lobby-root) .sticker.is-missing { opacity: 0.88; background: var(--surface-low); border-color: #c5d1e6; }
+.screen-root:not(.lobby-root) .page-title { color: var(--white); text-shadow: 0 3px 0 var(--navy), 0 0 14px rgba(13,28,45,0.6); }
+.screen-root:not(.lobby-root) .mode-blurb { color: var(--white); opacity: 1; }
+.screen-root:not(.lobby-root) :is(.screen > p, .screen > .muted, .mode-blurb) { text-shadow: 0 2px 0 rgba(13,28,45,0.85), 0 0 10px rgba(13,28,45,0.7); }
+.screen-root:not(.lobby-root) :is(.card, .builder-form, .sticker, .modal, .shell) { color: var(--ink); --muted: #4d5b74; text-shadow: none; }
+.screen-root:not(.lobby-root) .team-card-new { background: rgba(255,255,255,0.88); }
+.screen-root:not(.lobby-root) .btn-back { background-color: var(--white); border: var(--stroke); box-shadow: var(--drop); color: var(--navy); }
 #app { position: fixed; inset: 0; }
 #game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: none; touch-action: none; }
 #game-canvas.is-live { display: block; }
@@ -578,3 +588,27 @@ body.reduce-motion .bind.is-listening { animation: none; }
 .psc-skills { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .9rem; }
 .psc-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .85rem; color: #3a4a63; }
 .psc-stats strong { color: var(--navy); }
+
+/* Positions and formations */
+.chip-mid { background: #e5dcff; }
+.chip-wing { background: #d2f4f6; }
+.formation-row { display: grid; grid-template-columns: 1fr minmax(180px, 240px); gap: 12px; align-items: center; }
+.formation-pills .pill { display: inline-flex; gap: 6px; align-items: baseline; }
+.formation-pills .pill small { opacity: 0.7; font-weight: 600; }
+.formation-pitch { width: 100%; height: auto; }
+.fm-grass { fill: #2eb872; stroke: var(--navy); stroke-width: 2.5; }
+.fm-line { fill: none; stroke: rgba(255,255,255,0.75); stroke-width: 2; }
+.fm-dot circle { fill: #ffd0d8; stroke: var(--navy); stroke-width: 2.5; }
+.fm-dot text { font: 700 11px var(--font); fill: var(--navy); }
+.fm-gk circle { fill: #ffe08a; }
+.fm-def circle { fill: #e3f0ff; }
+.fm-mid circle { fill: #e5dcff; }
+.fm-wing circle { fill: #d2f4f6; }
+@media (max-width: 640px) { .formation-row { grid-template-columns: 1fr; } }
+
+/* Kit strip under the builder preview */
+.kit-strip { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
+.kit-strip-btn { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 10px; border-radius: 14px; border: 2.5px solid transparent; background: #eef2ff; font-family: var(--font); font-weight: 700; color: var(--navy); cursor: pointer; }
+.kit-strip-btn.is-active { border-color: var(--navy); background: var(--yellow); box-shadow: 0 3px 0 var(--navy); }
+.team-card .row { flex-wrap: nowrap; }
+.team-delete { margin-left: auto; }
