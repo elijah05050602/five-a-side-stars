@@ -11,7 +11,7 @@ export type CrowdWeather = 'clear' | 'cloudy' | 'rain' | 'snow';
 export interface CrowdConditions { night?: boolean; weather?: CrowdWeather }
 
 /** What one side of the crowd is doing right now. Neutral fans have their own. */
-type Mood = 'idle' | 'anticipate' | 'cheer' | 'groan' | 'clap' | 'slump';
+type Mood = 'idle' | 'anticipate' | 'cheer' | 'groan' | 'clap' | 'slump' | 'party';
 
 interface SideMood {
   mood: Mood;
@@ -61,6 +61,10 @@ const CASUAL = ['#9bc53d', '#e8e8e8', '#5bc0eb', '#fa7921', '#c3423f', '#8e7dbe'
 const FACES: Expression[] = ['neutral', 'happy', 'sad', 'ouch', 'blink', 'focus'];
 const F = { neutral: 0, happy: 1, sad: 2, ouch: 3, blink: 4, focus: 5 } as const;
 const ATLAS_COLS = 3, ATLAS_ROWS = 2;
+
+const CONFETTI = ['#ffd23f', '#ff6fb5', '#3da5f4', '#2eb872', '#ffffff', '#ff7a00', '#e63946'];
+
+interface Confetto { x: number; y: number; z: number; vx: number; vy: number; vz: number; spin: number; rx: number; ry: number; life: number }
 
 const SEAT_SPACING = 0.55;
 const SHOULDER_Y = 0.5, SHOULDER_X = 0.2, HEAD_Y = 0.79, ARM_LEN = 0.38;
@@ -130,6 +134,11 @@ export class Crowd {
   private shotWatch: { side: 0 | 1; t: number } | null = null;
   private night = false;
   private weather: CrowdWeather = 'clear';
+  /** Confetti thrown by the scoring fans while the camera is on them. */
+  private readonly confetti: THREE.InstancedMesh;
+  private readonly bits: Confetto[] = [];
+  private partySide: 0 | 1 | null = null;
+  private confettiDue = 0;
 
   constructor(private readonly sim: MatchSim, opts: { touch: boolean }) {
     this.calm = getSettings().reduceMotion;
@@ -285,6 +294,12 @@ export class Crowd {
     this.umbrellas = inst(umbrellaGeo, toonBoth, umbrellas);
     this.glows = inst(glowGeo, glowMat, glows);
     this.pompoms = inst(pompomGeo, toon, n);
+    const confettiGeo = new THREE.PlaneGeometry(0.11, 0.07);
+    const confettiMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, toneMapped: false });
+    this.disposables.push(confettiGeo, confettiMat);
+    this.confetti = inst(confettiGeo, confettiMat, lite ? 160 : 320);
+    this.confetti.count = 0;
+    for (let k = 0; k < this.confetti.instanceMatrix.count; k++) this.confetti.setColorAt(k, new THREE.Color(CONFETTI[k % CONFETTI.length]));
     this.scarves = inst(scarfGeo, toon, scarves);
     this.caps = inst(capGeo, toon, caps);
     for (const side of [0, 1]) this.kitBodies.push(inst(bodyGeo, kitMats[side], kitCount[side], true));
@@ -331,6 +346,22 @@ export class Crowd {
   celebrationShot(side: 0 | 1): { pos: THREE.Vector3; look: THREE.Vector3 } {
     const x = this.ends[side], { z0, baseHeight } = this.lay;
     return { pos: new THREE.Vector3(x * 0.8, baseHeight + 3.2, z0 + 6.5), look: new THREE.Vector3(x, baseHeight + 0.9, z0 - 1.2) };
+  }
+
+  /**
+   * Called every frame while the goal camera is on the scoring team's fans: they go wild
+   * (jumping, fist pumps, scarves twirling overhead) and throw confetti. Stops a moment after the calls stop.
+   */
+  celebrate(side: 0 | 1): void {
+    const other: 0 | 1 = side === 0 ? 1 : 0;
+    if (this.partySide !== side) {
+      this.partySide = side;
+      this.confettiDue = 0;
+    }
+    this.set(side, 'party', 0.4);
+    this.set(2, 'clap', 0.4);
+    if (this.moods[other].mood !== 'slump') this.set(other, 'slump', 0.4);
+    this.bump(1);
   }
 
   /** Feed every sim event through here. */
@@ -474,6 +505,28 @@ export class Crowd {
           nod = -0.25;
           break;
         }
+        case 'party': {
+          // Everyone's on their feet; each fan celebrates their own way.
+          rise = 1;
+          const beat = t * 9 * (0.85 + e * 0.25) + f.phase;
+          const b = Math.sin(beat);
+          hop = Math.max(0, b) * 0.34 * e * jump;
+          nod = -0.3 + Math.max(0, b) * 0.12;
+          lean = Math.sin(beat * 0.5) * 0.08;
+          const style = Math.floor(f.phase * 1.7) % 3;
+          if (style === 0) {
+            // Both arms punching the sky on every jump.
+            lf = rf = 2.6 + Math.max(0, b) * 0.35; ls = rs = 0.25 + b * 0.15;
+          } else if (style === 1) {
+            // Alternating fist pumps.
+            lf = 1.9 + b * 0.9; rf = 1.9 - b * 0.9; ls = rs = 0.2;
+          } else {
+            // Arms swinging overhead side to side, scarf-twirl style.
+            const sw = Math.sin(beat * 0.5);
+            lf = rf = 2.8; ls = 0.15 + sw * 0.45; rs = 0.15 - sw * 0.45;
+          }
+          break;
+        }
         case 'groan':
           rise = 0.75; lean = -0.12; nod = -0.3;
           lf = rf = 2.5; ls = rs = 0.85;
@@ -490,7 +543,7 @@ export class Crowd {
           lf = rf = 0.15; ls = rs = 0.05;
           break;
       }
-      if (f.flag >= 0 && (mood === 'cheer' || mood === 'clap')) { rf = 2.6 + Math.sin(t * 7 + f.phase) * 0.35; rs = 0.3; }
+      if (f.flag >= 0 && (mood === 'cheer' || mood === 'clap' || mood === 'party')) { rf = 2.6 + Math.sin(t * 7 + f.phase) * 0.35; rs = 0.3; }
       if (this.waveX !== Infinity) {
         const w = Math.exp(-(((f.x - this.waveX) / 1.3) ** 2));
         rise = Math.max(rise, w);
@@ -501,7 +554,7 @@ export class Crowd {
       if (raining && f.umbrella >= 0) { lf = 1.25; ls = 0.05; }
 
       // Smooth towards the target so moods blend instead of snapping.
-      const k = mood === 'cheer' || mood === 'groan' ? 14 : 8;
+      const k = mood === 'cheer' || mood === 'groan' || mood === 'party' ? 14 : 8;
       f.rise = approach(f.rise, rise, k, dt);
       f.lean = approach(f.lean, lean, k, dt);
       f.nod = approach(f.nod, nod, k, dt);
@@ -514,7 +567,7 @@ export class Crowd {
       f.look = approach(f.look, look, 4, dt);
 
       // Faces follow the mood, with a blink now and then when nothing much is happening.
-      let face: number = mood === 'cheer' || mood === 'clap' ? F.happy : mood === 'groan' ? F.ouch : mood === 'slump' ? F.sad : mood === 'anticipate' ? F.focus : F.neutral;
+      let face: number = mood === 'cheer' || mood === 'clap' || mood === 'party' ? F.happy : mood === 'groan' ? F.ouch : mood === 'slump' ? F.sad : mood === 'anticipate' ? F.focus : F.neutral;
       if (this.waveX !== Infinity && Math.abs(f.x - this.waveX) < 2) face = F.happy;
       f.blink -= dt;
       if (f.blink < 0) { if (face === F.neutral) face = F.blink; if (f.blink < -0.14) f.blink = 2 + Math.random() * 5; }
@@ -522,8 +575,52 @@ export class Crowd {
 
       this.pose(i, f, hop, t);
     }
+    this.updateConfetti(dt);
     for (const m of this.meshes) m.instanceMatrix.needsUpdate = true;
     if (faceChanged) this.faceCell.needsUpdate = true;
+  }
+
+  /** Bursts of confetti from the partying end while it lasts, then each piece flutters down and fades out. */
+  private updateConfetti(dt: number): void {
+    const side = this.partySide;
+    if (side !== null && this.moods[side].mood !== 'party') this.partySide = null;
+    const max = this.confetti.instanceMatrix.count;
+    if (this.partySide !== null) {
+      this.confettiDue += dt * (this.calm ? 40 : 110);
+      const { z0, baseHeight, rows, rowRise, rowDepth } = this.lay;
+      const cx = this.ends[this.partySide];
+      while (this.confettiDue >= 1) {
+        this.confettiDue -= 1;
+        if (this.bits.length >= max) break;
+        const r = Math.random() * rows;
+        this.bits.push({
+          x: cx + (Math.random() - 0.5) * this.len * 0.45,
+          y: baseHeight + r * rowRise + 1.2 + Math.random() * 0.5,
+          z: z0 - r * rowDepth + (Math.random() - 0.5) * 0.4,
+          vx: (Math.random() - 0.5) * 2.2, vy: 1.2 + Math.random() * 2.2, vz: 0.6 + Math.random() * 1.6,
+          spin: 4 + Math.random() * 8, rx: Math.random() * 6, ry: Math.random() * 6,
+          life: 2.6 + Math.random() * 1.4,
+        });
+      }
+    }
+    if (!this.bits.length && this.confetti.count === 0) return;
+    let n = 0;
+    for (let i = this.bits.length - 1; i >= 0; i--) {
+      const b = this.bits[i];
+      b.life -= dt;
+      if (b.life <= 0) { this.bits.splice(i, 1); continue; }
+      // Paper falls slowly and drifts, so drag soon wins over the throw.
+      b.vy -= 6 * dt;
+      const drag = Math.exp(-2.4 * dt);
+      b.vx *= drag; b.vz *= drag; b.vy = Math.max(b.vy * drag, -1.1);
+      b.x += (b.vx + Math.sin(b.rx * 2) * 0.4) * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+      b.rx += b.spin * dt; b.ry += b.spin * 0.6 * dt;
+    }
+    for (const b of this.bits) {
+      const fade = Math.min(1, b.life / 0.5);
+      this.confetti.setMatrixAt(n++, trs(_m, b.x, b.y, b.z, b.rx, b.ry, 0, fade));
+    }
+    this.confetti.count = n;
   }
 
   private pose(i: number, f: Fan, hop: number, t: number): void {

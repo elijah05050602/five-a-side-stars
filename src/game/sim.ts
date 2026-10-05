@@ -445,7 +445,8 @@ export class MatchSim {
     if (this.phase === 'paused' || this.phase === 'fulltime') return;
     if (this.phase === 'goal') {
       this.phaseTimer += dt;
-      if (this.phaseTimer > (this.mode === 'training' ? 1.6 : 3.2)) {
+      // A match goal holds a little longer so the camera can watch the fans celebrate (MatchScene).
+      if (this.phaseTimer > (this.mode === 'training' ? 1.6 : this.mode === 'match' && !this.shootout ? 4.4 : 3.2)) {
         if (this.shootout) this.advanceShootout();
         else if (this.mode === 'tutorial') return; // the coach puts the ball back
         else if (this.mode === 'training') this.setupKickoff(this.config.humanSide ?? 0);

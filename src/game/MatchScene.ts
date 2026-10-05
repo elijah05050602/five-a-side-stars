@@ -70,6 +70,8 @@ export class MatchScene {
   /** Rolling record of the last few seconds, oldest first. */
   private readonly history: ReplayFrame[] = [];
   private replay: { frames: ReplayFrame[]; t: number; wait: number } | null = null;
+  /** The fans have had their moment on camera for this goal (so the second roar plays once). */
+  private celebrated = false;
   private raf = 0;
   private last = 0;
   private acc = 0;
@@ -353,6 +355,10 @@ export class MatchScene {
     const scorer = this.sim.goals[this.sim.goals.length - 1];
     const crowdShot = this.sim.mode === 'match' && this.sim.phase === 'goal' && this.sim.phaseTimer > 1.2 && scorer
       ? this.crowd.celebrationShot(scorer.side) : null;
+    if (crowdShot && scorer) {
+      this.crowd.celebrate(scorer.side);
+      if (!this.celebrated) { this.celebrated = true; this.sfx.play('celebrate'); }
+    } else if (this.sim.phase !== 'goal') this.celebrated = false;
     const k = 1 - Math.pow(crowdShot ? 0.01 : 0.02, dt);
     this.camPos.lerp(crowdShot ? crowdShot.pos : this.cameraGoal(this.camTarget), k);
     this.camLook.lerp(crowdShot ? crowdShot.look : new THREE.Vector3(this.camTarget.x, 0.5, this.camTarget.z), k);
