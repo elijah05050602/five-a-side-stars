@@ -1,0 +1,115 @@
+import type { AgeGroup, Kit, Player, Position, Team } from './types';
+
+export const SKIN_TONES = ['#f6d7c3', '#eab98f', '#d49a6a', '#a86b3c', '#7a4a26', '#4a2d17'];
+export const HAIR_COLOURS = ['#2b1b0e', '#5a3a1a', '#a0522d', '#d9a441', '#f2e2a0', '#1b1b1b', '#c0392b'];
+export const KIT_COLOURS = [
+  '#e63946', '#f4a261', '#ffd23f', '#2eb872', '#1d8f5a', '#3da5f4', '#1b4fd8', '#6a4c93',
+  '#ff6fb5', '#ffffff', '#1b2a41', '#8d99ae', '#111111', '#00c2cb', '#ff7a00', '#7bd389',
+];
+
+const FIRST_NAMES = ['Ava', 'Leo', 'Mia', 'Noah', 'Zoe', 'Kai', 'Isla', 'Max', 'Ruby', 'Finn', 'Nia', 'Theo', 'Elsie', 'Omar', 'Lily', 'Jude', 'Amara', 'Ezra', 'Freya', 'Sami', 'Priya', 'Luca', 'Hana', 'Rafa'];
+const TEAM_WORDS_A = ['Rocket', 'Thunder', 'Sunny', 'Lightning', 'Mighty', 'Flying', 'Super', 'Wild', 'Golden', 'Blue', 'Red', 'Green', 'Comet', 'Jolly'];
+const TEAM_WORDS_B = ['Lions', 'Foxes', 'Tigers', 'Stars', 'Rovers', 'Dragons', 'Owls', 'Sharks', 'Bees', 'Wolves', 'Eagles', 'Pandas', 'Otters', 'Penguins'];
+
+export function uid(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+
+export function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+export function randomTeamName(): string {
+  return `${pick(TEAM_WORDS_A)} ${pick(TEAM_WORDS_B)}`;
+}
+
+export function randomPlayerName(): string {
+  return pick(FIRST_NAMES);
+}
+
+export function shortCode(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  let code = '';
+  if (words.length >= 2) code = words.map((w) => w[0]).join('').slice(0, 3);
+  else code = (words[0] ?? 'TM').slice(0, 3);
+  return code.toUpperCase().padEnd(3, 'X');
+}
+
+export function makePlayer(position: Position, number: number, name = randomPlayerName()): Player {
+  return { id: uid(), name, number, position, skin: pick(SKIN_TONES), hair: pick(HAIR_COLOURS) };
+}
+
+export function defaultSquad(): Player[] {
+  const used = new Set<string>();
+  const nextName = () => {
+    let n = randomPlayerName();
+    let guard = 0;
+    while (used.has(n) && guard++ < 20) n = randomPlayerName();
+    used.add(n);
+    return n;
+  };
+  return [
+    makePlayer('GK', 1, nextName()),
+    makePlayer('DEF', 4, nextName()),
+    makePlayer('DEF', 5, nextName()),
+    makePlayer('ATT', 7, nextName()),
+    makePlayer('ATT', 9, nextName()),
+  ];
+}
+
+export function makeKit(shirt: string, shirt2: string, shorts: string, socks: string, pattern: Kit['pattern'] = 'plain'): Kit {
+  return { pattern, shirt, shirt2, shorts, socks };
+}
+
+export function makeTeam(partial: Partial<Team> & { name: string; ageGroup: AgeGroup }): Team {
+  const name = partial.name;
+  return {
+    id: partial.id ?? uid(),
+    name,
+    short: partial.short ?? shortCode(name),
+    ageGroup: partial.ageGroup,
+    kit: partial.kit ?? makeKit('#e63946', '#ffffff', '#1b2a41', '#e63946', 'plain'),
+    keeperKit: partial.keeperKit ?? makeKit('#ffd23f', '#111111', '#111111', '#ffd23f', 'plain'),
+    players: partial.players ?? defaultSquad(),
+    createdAt: partial.createdAt ?? Date.now(),
+  };
+}
+
+/** Teams every player gets to start with. */
+export function starterTeams(): Team[] {
+  return [
+    makeTeam({
+      id: 'starter-rockets',
+      name: 'Rocket Rovers',
+      ageGroup: 'U8',
+      kit: makeKit('#e63946', '#ffffff', '#1b2a41', '#e63946', 'stripes'),
+      keeperKit: makeKit('#2eb872', '#111111', '#111111', '#2eb872', 'plain'),
+      players: [
+        makePlayer('GK', 1, 'Sami'), makePlayer('DEF', 4, 'Ava'), makePlayer('DEF', 5, 'Kai'), makePlayer('ATT', 7, 'Mia'), makePlayer('ATT', 9, 'Leo'),
+      ],
+    }),
+    makeTeam({
+      id: 'starter-sharks',
+      name: 'Sunny Sharks',
+      ageGroup: 'U8',
+      kit: makeKit('#3da5f4', '#ffd23f', '#ffffff', '#3da5f4', 'hoops'),
+      keeperKit: makeKit('#ff7a00', '#111111', '#111111', '#ff7a00', 'plain'),
+      players: [
+        makePlayer('GK', 1, 'Zoe'), makePlayer('DEF', 2, 'Finn'), makePlayer('DEF', 6, 'Nia'), makePlayer('ATT', 8, 'Theo'), makePlayer('ATT', 10, 'Isla'),
+      ],
+    }),
+  ];
+}
+
+/** A fresh computer-controlled opponent in the same age group with a kit that contrasts with ours. */
+export function generateOpponent(ageGroup: AgeGroup, avoidKit: Kit): Team {
+  const palette = KIT_COLOURS.filter((c) => c !== avoidKit.shirt && c !== avoidKit.shirt2 && c !== '#ffffff' && c !== '#111111');
+  const shirt = pick(palette);
+  const shirt2 = pick(['#ffffff', '#111111', '#ffd23f'].filter((c) => c !== shirt));
+  return makeTeam({
+    name: randomTeamName(),
+    ageGroup,
+    kit: makeKit(shirt, shirt2, pick(['#ffffff', '#111111', '#1b2a41']), shirt, pick(['plain', 'stripes', 'hoops', 'halves', 'sash'])),
+    keeperKit: makeKit(pick(['#2eb872', '#ffd23f', '#6a4c93', '#00c2cb']), '#111111', '#111111', '#111111', 'plain'),
+  });
+}
