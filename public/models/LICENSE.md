@@ -5,7 +5,7 @@ Kay Lousberg (https://kaylousberg.itch.io/kaykit-adventurers), released under
 **CC0 1.0 Universal** (public domain, no attribution required).
 Source: https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0
 
-Changes made for Five-a-Side Stars (see `tools/build-player-model.mjs`):
+Changes made for Goal Rush! (formerly Five-a-Side Stars) (see `tools/build-player-model.mjs`):
 
 - Rogue body with the Rogue, Mage and Knight heads on the shared rig
 - weapons, capes, hats and the pack texture removed

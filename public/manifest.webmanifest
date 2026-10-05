@@ -1,7 +1,7 @@
 {
-  "name": "Five-a-Side Stars",
-  "short_name": "5-a-Side Stars",
-  "description": "Build your kids' football team and play top-down 3D five-a-side matches.",
+  "name": "Goal Rush!",
+  "short_name": "Goal Rush!",
+  "description": "Goal Rush! Build your kids' five-a-side football team and play fast top-down 3D matches.",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",

@@ -1,6 +1,6 @@
-# Five-a-Side Stars
+# Goal Rush!
 
-A top-down 3D 5-a-side football browser game for kids aged 7 and up. You build
+Goal Rush! is a top-down 3D five-a-side football browser game for kids aged 7 and up. You build
 grassroots youth teams in age groups U5 to U10, give the players names, numbers
 and kits, and play short matches against the computer.
 
@@ -67,6 +67,15 @@ U5 to U10 are the age groups of the teams **in the game**, not of the player at
 the keyboard. The age group changes player size, speed, shot power, ball
 control, keeper reach, pitch size and match length. See
 `src/data/ageGroups.ts`.
+
+## Look and feel
+
+The UI follows a Google Stitch design kit: Fredoka type, a sunshine-yellow
+primary, comic-ink navy outlines with hard drop shadows, pill buttons and
+20px cards. The tokens and component rules are in `docs/design-system.md`;
+the shared markup helpers (console bar, page heading, lobby dock) live in
+`src/ui/shell.ts` and the styles in `src/style.css`. Stadium and mascot art
+from the kit is in `public/art/`.
 
 ## Credits
 
