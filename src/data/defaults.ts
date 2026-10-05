@@ -39,7 +39,8 @@ export function shortCode(name: string): string {
 export function makePlayer(position: Position, number: number, name = randomPlayerName(), starter = true): Player {
   return {
     id: uid(), name, number, position, skin: pick(SKIN_TONES), hair: pick(HAIR_COLOURS),
-    hairStyle: pick(['short', 'short', 'spiky', 'spiky', 'long', 'long', 'bald'] as Player['hairStyle'][]), boots: pick(BOOT_COLOURS),
+    hairStyle: pick(['short', 'short', 'spiky', 'spiky', 'long', 'long', 'curly', 'afro', 'buns', 'bald'] as Player['hairStyle'][]),
+    build: pick(['regular', 'regular', 'small', 'tall', 'sturdy'] as Player['build'][]), boots: pick(BOOT_COLOURS), bootStyle: pick(['classic', 'classic', 'stripes', 'toecap', 'twotone'] as Player['bootStyle'][]),
     special: 'none', starter,
   };
 }

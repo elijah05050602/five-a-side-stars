@@ -32,6 +32,8 @@ export interface SimPlayer {
   /** Animation hooks. */
   kickAnim: number;
   diveAnim: number;
+  /** 1 right after being tackled off the ball, fading to 0. */
+  stunAnim: number;
   diveDir: number;
   distanceRun: number;
   isKeeper: boolean;
@@ -185,7 +187,7 @@ export class MatchSim {
         const p: SimPlayer = {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), kickCooldown: 0, think: Math.random() * 0.3,
-          aiTarget: v(), kickAnim: 0, diveAnim: 0, diveDir: 1, distanceRun: 0, isKeeper: info.position === 'GK',
+          aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, distanceRun: 0, isKeeper: info.position === 'GK',
           speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1), tackleTimer: 0, holdTime: 0, stamina: 1, charge: 0, penaltyGuess: 0,
         };
         this.players.push(p);
@@ -362,6 +364,7 @@ export class MatchSim {
     for (const p of this.players) {
       p.kickCooldown = Math.max(0, p.kickCooldown - dt);
       p.tackleTimer = Math.max(0, p.tackleTimer - dt);
+      p.stunAnim = Math.max(0, p.stunAnim - dt * 1.5);
       p.holdTime = this.ball.owner === p ? p.holdTime + dt : 0;
       if (this.controlledBy[p.side] !== p) p.stamina = Math.min(1, p.stamina + dt / 4);
       p.kickAnim = Math.max(0, p.kickAnim - dt * 4);
@@ -948,6 +951,7 @@ export class MatchSim {
               // Ball changes hands and squirts loose a little.
               b.owner = null;
               o.kickCooldown = 0.5;
+              o.stunAnim = 1;
               const n = norm(v(p.pos.x - o.pos.x, p.pos.z - o.pos.z));
               b.vel = v(n.x * 2.5 + p.vel.x * 0.5, n.z * 2.5 + p.vel.z * 0.5);
               b.lastTouch = p;

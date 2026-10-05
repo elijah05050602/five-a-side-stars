@@ -4,7 +4,8 @@ import { Input, P1_KEYS, P2_KEYS, SOLO_KEYS } from './input';
 import { buildPitch, pitchExtras } from './Pitch';
 import { Commentator } from './commentary';
 import { Weather, resolveConditions, type Conditions, type WeatherChoice } from './Weather';
-import { PlayerModel } from './PlayerModel';
+import { PlayerModel, type AnimState } from './PlayerModel';
+import type { Expression } from './playerFace';
 import { MatchSim, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
@@ -19,7 +20,7 @@ export interface SceneOptions {
 
 /** One recorded frame of the match, used for the instant replay. */
 interface ReplayFrame {
-  players: { x: number; z: number; facing: number; speed: number; kick: number; dive: number; diveDir: number }[];
+  players: { x: number; z: number; facing: number; speed: number; kick: number; dive: number; diveDir: number; stun: number }[];
   ball: { x: number; y: number; z: number; vx: number; vz: number };
 }
 
@@ -99,7 +100,10 @@ export class MatchScene {
     sc.top = this.sim.width / 2 + 6; sc.bottom = -this.sim.width / 2 - 6;
     sc.near = 1; sc.far = 80;
     sun.shadow.bias = -0.0005;
-    this.scene.add(sun, new THREE.HemisphereLight(0xdff3ff, 0x3b7f4e, 1.25));
+    // A cool rim light from behind the camera's far side lifts faces and shirt numbers off the grass.
+    const rim = new THREE.DirectionalLight(0xbfe3ff, 0.9);
+    rim.position.set(14, 10, -18);
+    this.scene.add(sun, rim, new THREE.HemisphereLight(0xdff3ff, 0x3b7f4e, 1.25));
 
     const pitch = buildPitch({ length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth });
     this.scene.add(pitch);
@@ -143,7 +147,7 @@ export class MatchScene {
   private record(): void {
     const b = this.sim.ball;
     this.history.push({
-      players: this.sim.players.map((p) => ({ x: p.pos.x, z: p.pos.z, facing: p.facing, speed: Math.hypot(p.vel.x, p.vel.z), kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir })),
+      players: this.sim.players.map((p) => ({ x: p.pos.x, z: p.pos.z, facing: p.facing, speed: Math.hypot(p.vel.x, p.vel.z), kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim })),
       ball: { x: b.pos.x, y: b.y, z: b.pos.z, vx: b.vel.x, vz: b.vel.z },
     });
     if (this.history.length > 170) this.history.shift();
@@ -162,9 +166,8 @@ export class MatchScene {
     this.sim.players.forEach((p, i) => {
       const m = this.models.get(p)!, fp = f.players[i];
       m.group.position.set(fp.x, 0, fp.z);
-      m.setCheer(false);
       m.setFacing(fp.facing);
-      m.animate(fp.speed, fp.kick, fp.dive, fp.diveDir, dt * speed, scale, 0);
+      m.animate(dt * speed, { speed: fp.speed, kick: fp.kick, dive: fp.dive, diveDir: fp.diveDir, stun: fp.stun, tackle: 0, scale, wobble: 0, mood: 'focus', gazeX: 0, gazeY: 0, cheer: false });
       m.setSelected(false, 0xffffff);
     });
     this.ball.update(f.ball.x, f.ball.y, f.ball.z, this.sim.ball.radius, f.ball.vx, f.ball.vz, dt * speed);
@@ -202,7 +205,7 @@ export class MatchScene {
     const aspect = this.camera.aspect;
     // A little more tilt than straight down, so faces, kits and the stand show.
     const height = (this.sim.width * 0.84) / Math.min(1.9, Math.max(1.0, aspect)) + 4.2;
-    return new THREE.Vector3(target.x, height, target.z + height * 0.8);
+    return new THREE.Vector3(target.x, height, target.z + height * 0.9);
   }
 
   private frame = (now: number): void => {
@@ -244,6 +247,7 @@ export class MatchScene {
     for (const n of this.extras.nets) n.update(dt);
 
     // Sync models
+    const b = this.sim.ball;
     const scale = this.sim.stats.scale;
     if (this.runReplay(dt, scale)) {
       const goal = this.cameraGoal(this.camTarget);
@@ -255,18 +259,29 @@ export class MatchScene {
     }
     const wobble = getSettings().reduceMotion ? 0 : Math.max(0, 0.75 - this.sim.stats.control) * 2;
     const lastGoal = this.sim.goals[this.sim.goals.length - 1];
-    const cheering = this.sim.phase === 'goal' && lastGoal ? lastGoal.side : -1;
+    const celebrating = this.sim.phase === 'goal' && lastGoal ? lastGoal.side : -1;
+    const sprintSpeed = this.sim.stats.speed * 1.05;
     for (const p of this.sim.players) {
       const m = this.models.get(p)!;
       m.group.position.set(p.pos.x, 0, p.pos.z);
-      m.setCheer(p.side === cheering);
       m.setFacing(p.facing);
-      m.animate(Math.hypot(p.vel.x, p.vel.z), p.kickAnim, p.diveAnim, p.diveDir, dt, scale, wobble);
+      const speed = Math.hypot(p.vel.x, p.vel.z);
+      // The face follows the moment: joy or gloom after a goal, a wince when knocked, focus on the ball.
+      let mood: Expression = 'neutral';
+      if (celebrating >= 0) mood = celebrating === p.side ? 'happy' : 'sad';
+      else if (p.stunAnim > 0 || p.diveAnim > 0) mood = 'ouch';
+      else if (b.owner === p || speed > sprintSpeed) mood = 'focus';
+      // Eyes look at the ball: quantised so the face texture rarely needs repainting.
+      const ang = Math.atan2(b.pos.z - p.pos.z, b.pos.x - p.pos.x) - p.facing;
+      const ahead = Math.cos(ang) > -0.2;
+      const gazeX = ahead ? Math.round(Math.sin(ang) * 2) / 2 : 0;
+      const gazeY = ahead && Math.hypot(b.pos.x - p.pos.x, b.pos.z - p.pos.z) < 2.5 * scale ? 0.5 : 0;
+      const st: AnimState = { speed, kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, tackle: p.tackleTimer, scale, wobble, mood, gazeX, gazeY, cheer: celebrating === p.side };
+      m.animate(dt, st);
       const isP1 = p === this.sim.controlled;
       const isP2 = p === this.sim.controlled2;
       m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? 0xffd23f : isP2 ? 0x00e5ff : 0xffffff);
     }
-    const b = this.sim.ball;
     this.ball.update(b.pos.x, b.y, b.pos.z, b.radius, b.vel.x, b.vel.z, dt);
 
     // Camera follows a blend of the ball and the controlled player, clamped to the pitch.
