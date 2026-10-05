@@ -1,22 +1,25 @@
 import * as THREE from 'three';
-import type { Kit } from '../data/types';
+import type { BootStyle, Kit } from '../data/types';
 
 /**
  * The player model's UVs point at cells on an 8x4 grid (see tools/build-player-model.mjs).
  * This paints that grid with a kit and a look, so one small texture recolours the whole kid.
+ * The 'leg' and 'boot' cells are vertical strips (v = top..bottom of the part), so bands of
+ * colour land at exact heights: shorts hem, bare leg, sock top, sock, boot, sole.
  */
 const CELL: Record<string, [number, number]> = {
   skin: [0, 0], hair: [1, 0], eyes: [2, 0], brow: [3, 0],
-  shirt: [0, 1], shirt2: [1, 1], shorts: [2, 1], socks: [3, 1], belt: [4, 1], buckle: [5, 1],
+  shirt: [0, 1], shirt2: [1, 1], shorts: [2, 1], leg: [3, 1], boot: [4, 1],
 };
-const C = 64; // pixels per cell
+const C = 96; // pixels per cell
 
-export interface LookColours { skin: string; hair: string; boots: string; bald?: boolean }
+export interface LookColours { skin: string; hair: string; boots: string; bootStyle?: BootStyle; bald?: boolean }
 
 const cache = new Map<string, THREE.CanvasTexture>();
 
 export function playerAtlas(kit: Kit, look: LookColours): THREE.CanvasTexture {
-  const key = `${kit.pattern}|${kit.shirt}|${kit.shirt2}|${kit.shorts}|${kit.socks}|${look.skin}|${look.hair}|${look.boots}|${look.bald ? 1 : 0}`;
+  const style = look.bootStyle ?? 'classic';
+  const key = `${kit.pattern}|${kit.shirt}|${kit.shirt2}|${kit.shorts}|${kit.socks}|${look.skin}|${look.hair}|${look.boots}|${style}|${look.bald ? 1 : 0}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const canvas = document.createElement('canvas');
@@ -30,22 +33,66 @@ export function playerAtlas(kit: Kit, look: LookColours): THREE.CanvasTexture {
   fill('shirt', kit.shirt);
   fill('shirt2', kit.shirt2);
   fill('shorts', kit.shorts);
-  fill('belt', shade(kit.shorts, 0.72));
-  fill('buckle', '#e9eef5');
-  // Socks cell: the upper part of the cell lands on the ankle, the lower part on the boot.
-  fill('socks', kit.socks);
-  { const [x, y] = CELL.socks; ctx.fillStyle = look.boots; ctx.fillRect(x * C, y * C + C / 2, C, C / 2); }
-  // Kit pattern inside the shirt cell. The chest spans the cell left to right, top to bottom.
+
+  // Upper leg strip: the shorts reach a little below the hem, then bare leg.
+  fill('leg', look.skin);
+  {
+    const [x, y] = CELL.leg;
+    ctx.fillStyle = kit.shorts; ctx.fillRect(x * C, y * C, C, C * 0.6);
+    ctx.fillStyle = shade(kit.shorts, 0.8); ctx.fillRect(x * C, y * C + C * 0.56, C, C * 0.04);
+  }
+  // Foot strip: sock with a white top band, then the boot and its sole. u runs heel..toe.
+  {
+    const [x, y] = CELL.boot;
+    ctx.save();
+    ctx.translate(x * C, y * C);
+    ctx.fillStyle = kit.socks; ctx.fillRect(0, 0, C, C);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, C, C * 0.09);
+    const top = C * 0.45;
+    ctx.fillStyle = look.boots; ctx.fillRect(0, top, C, C - top);
+    const accent = contrastColour(look.boots) === '#ffffff' ? '#ffffff' : '#1b2a41';
+    ctx.fillStyle = accent;
+    switch (style) {
+      case 'stripes':
+        for (let i = 0; i < 3; i++) {
+          const u = C * (0.32 + i * 0.13);
+          ctx.beginPath(); ctx.moveTo(u, top); ctx.lineTo(u + C * 0.07, top); ctx.lineTo(u + C * 0.2, C * 0.9); ctx.lineTo(u + C * 0.13, C * 0.9); ctx.closePath(); ctx.fill();
+        }
+        break;
+      case 'toecap':
+        ctx.fillRect(C * 0.74, top, C * 0.26, C - top);
+        ctx.fillRect(0, top, C * 0.16, C - top);
+        break;
+      case 'twotone':
+        ctx.fillStyle = shade(look.boots, 0.55);
+        ctx.beginPath(); ctx.moveTo(0, top); ctx.lineTo(C * 0.55, top); ctx.lineTo(C * 0.4, C); ctx.lineTo(0, C); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = accent; ctx.fillRect(C * 0.47, top, C * 0.05, C - top);
+        break;
+      default:
+        break;
+    }
+    // Sole, with laces hinted as a light line on top of the foot.
+    ctx.fillStyle = look.boots === '#ffffff' ? '#1b2a41' : '#f3f3f3';
+    ctx.fillRect(0, C * 0.9, C, C * 0.1);
+    ctx.restore();
+  }
+
+  // Kit pattern inside the shirt cell. In the model's UVs, v runs down the chest: the top 56% of
+  // the cell is the shirt, the rest is the tunic ring under the waistband, painted as shorts so the
+  // shirt reads as tucked in.
   const [sx, sy] = CELL.shirt;
+  const H = C * 0.56;
   ctx.save();
   ctx.translate(sx * C, sy * C);
+  ctx.fillStyle = kit.shorts; ctx.fillRect(0, H, C, C - H);
+  ctx.beginPath(); ctx.rect(0, 0, C, H); ctx.clip();
   ctx.fillStyle = kit.shirt2;
   switch (kit.pattern) {
-    case 'stripes': for (let i = 0; i < 4; i++) ctx.fillRect(i * (C / 4), 0, C / 8, C); break;
-    case 'hoops': for (let i = 0; i < 3; i++) ctx.fillRect(0, C * 0.2 + i * (C / 4), C, C / 8); break;
-    case 'halves': ctx.fillRect(0, 0, C / 2, C); break;
-    case 'sash': ctx.beginPath(); ctx.moveTo(C * 0.45, 0); ctx.lineTo(C * 0.8, 0); ctx.lineTo(C * 0.35, C); ctx.lineTo(0, C); ctx.closePath(); ctx.fill(); break;
-    case 'chevron': ctx.beginPath(); ctx.moveTo(0, C * 0.15); ctx.lineTo(C / 2, C * 0.55); ctx.lineTo(C, C * 0.15); ctx.lineTo(C, C * 0.4); ctx.lineTo(C / 2, C * 0.8); ctx.lineTo(0, C * 0.4); ctx.closePath(); ctx.fill(); break;
+    case 'stripes': for (let i = 0; i < 4; i++) ctx.fillRect(i * (C / 4), 0, C / 8, H); break;
+    case 'hoops': for (let i = 0; i < 3; i++) ctx.fillRect(0, H * 0.2 + i * (H / 4), C, H / 8); break;
+    case 'halves': ctx.fillRect(0, 0, C / 2, H); break;
+    case 'sash': ctx.beginPath(); ctx.moveTo(C * 0.45, 0); ctx.lineTo(C * 0.8, 0); ctx.lineTo(C * 0.35, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill(); break;
+    case 'chevron': ctx.beginPath(); ctx.moveTo(0, H * 0.15); ctx.lineTo(C / 2, H * 0.55); ctx.lineTo(C, H * 0.15); ctx.lineTo(C, H * 0.4); ctx.lineTo(C / 2, H * 0.8); ctx.lineTo(0, H * 0.4); ctx.closePath(); ctx.fill(); break;
     default: break;
   }
   ctx.restore();
@@ -89,7 +136,7 @@ export function numberTexture(n: number, colour: string): THREE.CanvasTexture {
   return tex;
 }
 
-/** White or dark, whichever reads better on the shirt. */
+/** White or dark, whichever reads better on the colour. */
 export function contrastColour(hex: string): string {
   const c = new THREE.Color(hex);
   const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;

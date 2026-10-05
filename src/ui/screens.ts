@@ -1,7 +1,7 @@
 import { AGE_STATS } from '../data/ageGroups';
 import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode, startingFive } from '../data/defaults';
 import { deleteTeam, getLeague, getSettings, getTeam, getTeams, resetAll, saveTeam, setLeague, updateSettings } from '../data/storage';
-import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, SPECIALS, type AgeGroup, type BadgeShape, type Build, type Difficulty, type HairStyle, type Kit, type Position, type Special, type Team } from '../data/types';
+import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type Difficulty, type HairStyle, type Kit, type Position, type Special, type Team } from '../data/types';
 import { kitsClash } from '../game/kitTexture';
 import type { MatchResult, SimMode } from '../game/MatchScene';
 import { STICKERS, getProgress, lockedIcons, recordSeason, recordTrophy, unlockedIcons, type Sticker } from '../data/progress';
@@ -335,7 +335,8 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
         <div class="field"><span>Hair style</span><div class="pills">${HAIR_STYLES.map((h) => `<button class="pill ${p.hairStyle === h ? 'is-active' : ''}" data-hairstyle="${h}">${HAIR_STYLE_LABELS[h]}</button>`).join('')}</div></div>
         <div class="field"><span>Build</span><div class="pills">${BUILDS.map((b) => `<button class="pill ${(p.build ?? 'regular') === b ? 'is-active' : ''}" data-build="${b}">${b[0].toUpperCase() + b.slice(1)}</button>`).join('')}</div></div>
         <div class="field"><span>Hair colour</span><div class="swatches">${HAIR_COLOURS.map((c) => `<button class="swatch round ${p.hair === c ? 'is-active' : ''}" style="background:${c}" data-hair="${c}"></button>`).join('')}</div></div>
-        <div class="field"><span>Boots</span><div class="swatches">${BOOT_COLOURS.map((c) => `<button class="swatch ${p.boots === c ? 'is-active' : ''}" style="background:${c}" data-boots="${c}"></button>`).join('')}</div></div>
+        <div class="field"><span>Boots</span><div class="swatches">${BOOT_COLOURS.map((c) => `<button class="swatch ${p.boots === c ? 'is-active' : ''}" style="background:${c}" data-boots="${c}"></button>`).join('')}</div>
+          <div class="pills">${BOOT_STYLES.map((b) => `<button class="pill ${(p.bootStyle ?? 'classic') === b ? 'is-active' : ''}" data-bootstyle="${b}">${BOOT_STYLE_LABELS[b]}</button>`).join('')}</div></div>
       </div>`;
     form.querySelector('#p-add')?.addEventListener('click', () => {
       const used = new Set(team.players.map((x) => x.number));
@@ -353,6 +354,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     form.querySelectorAll<HTMLElement>('[data-special]').forEach((b) => b.addEventListener('click', () => { p.special = b.dataset.special as Special; renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-hairstyle]').forEach((b) => b.addEventListener('click', () => { p.hairStyle = b.dataset.hairstyle as HairStyle; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-boots]').forEach((b) => b.addEventListener('click', () => { p.boots = b.dataset.boots!; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots); renderSquad(form); }));
+    form.querySelectorAll<HTMLElement>('[data-bootstyle]').forEach((b) => b.addEventListener('click', () => { p.bootStyle = b.dataset.bootstyle as BootStyle; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots, p.bootStyle); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-build]').forEach((b) => b.addEventListener('click', () => { p.build = b.dataset.build as Build; preview?.setBuild(p.build); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-player]').forEach((b) => b.addEventListener('click', () => { selectedPlayer = Number(b.dataset.player); render(); }));
     const nameEl = form.querySelector<HTMLInputElement>('#p-name')!;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Build, Kit, Player } from '../data/types';
+import type { BootStyle, Build, Kit, Player } from '../data/types';
 import { cloneRig, loadPlayerAsset, playerAssetNow, type PlayerAsset } from './playerAsset';
 import { contrastColour, numberTexture, playerAtlas } from './playerAtlas';
 import { faceTexture, type Expression } from './playerFace';
@@ -94,6 +94,7 @@ export class PlayerModel {
   private skin: string;
   private hair: string;
   private boots: string;
+  private bootStyle: BootStyle;
   private hairStyle: Player['hairStyle'];
   private build: Build;
   private readonly isKeeper: boolean;
@@ -115,7 +116,7 @@ export class PlayerModel {
 
   constructor(private readonly player: Player, kit: Kit, scale: number) {
     this.kit = kit; this.number = player.number; this.skin = player.skin; this.hair = player.hair;
-    this.boots = player.boots ?? '#222222'; this.hairStyle = player.hairStyle ?? 'short'; this.build = player.build ?? 'regular';
+    this.boots = player.boots ?? '#222222'; this.bootStyle = player.bootStyle ?? 'classic'; this.hairStyle = player.hairStyle ?? 'short'; this.build = player.build ?? 'regular';
     this.isKeeper = player.position === 'GK';
     this.scale = scale;
     this.material = toonMaterial({ map: this.atlas() });
@@ -142,7 +143,7 @@ export class PlayerModel {
 
   private atlas(): THREE.CanvasTexture {
     const bald = this.hairStyle === 'bald' || this.hairStyle === 'afro';
-    return playerAtlas(this.kit, { skin: this.skin, hair: this.hair, boots: this.boots, bald });
+    return playerAtlas(this.kit, { skin: this.skin, hair: this.hair, boots: this.boots, bootStyle: this.bootStyle, bald });
   }
 
   private buildRig(asset: PlayerAsset): void {
@@ -256,9 +257,10 @@ export class PlayerModel {
     this.fallback?.setKit(kit, number);
   }
 
-  setLook(skin: string, hair: string, hairStyle?: Player['hairStyle'], boots?: string): void {
+  setLook(skin: string, hair: string, hairStyle?: Player['hairStyle'], boots?: string, bootStyle?: BootStyle): void {
     this.skin = skin; this.hair = hair;
     if (boots) this.boots = boots;
+    if (bootStyle) this.bootStyle = bootStyle;
     if (hairStyle) this.hairStyle = hairStyle;
     this.material.map = this.atlas();
     this.material.needsUpdate = true;
