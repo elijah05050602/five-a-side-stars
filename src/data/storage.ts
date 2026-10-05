@@ -1,7 +1,7 @@
 import { awayKitFor, makeBadge, starterTeams } from './defaults';
 import type { LeagueState } from '../game/league';
 import type { CareerState } from '../game/career';
-import { ensureSkills } from './skills';
+import { ensureSkills, fitSkills } from './skills';
 import type { Progress } from './progress';
 import type { Team } from './types';
 
@@ -49,7 +49,9 @@ function migrateTeam(t: Team): Team {
   if (!team.badge) team.badge = makeBadge(team.kit.shirt, team.kit.shirt2);
   team.players = team.players.map((p, i) => {
     const old = p as Partial<Team['players'][number]>;
-    return ensureSkills({ ...p, hairStyle: old.hairStyle ?? 'short', boots: old.boots ?? '#222222', special: old.special ?? 'none', starter: old.starter ?? i < 5 }, team.ageGroup);
+    const player = ensureSkills({ ...p, hairStyle: old.hairStyle ?? 'short', boots: old.boots ?? '#222222', special: old.special ?? 'none', starter: old.starter ?? i < 5 }, team.ageGroup);
+    // Teams saved before the star budget (or moved down an age group) can carry too many stars; trim them so no one is blocked.
+    return { ...player, skills: fitSkills(player, team.ageGroup, !team.career) };
   });
   return team;
 }
