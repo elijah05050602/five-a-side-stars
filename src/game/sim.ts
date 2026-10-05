@@ -371,9 +371,30 @@ export class MatchSim {
       else this.driveAI(p, dt);
     }
     this.integratePlayers(dt);
+    this.updateFacing(dt);
     this.integrateBall(dt);
     this.resolvePossession(dt);
     this.checkGoal();
+  }
+
+  /**
+   * Where players look. Whoever has the ball faces the way they dribble;
+   * everyone else faces where they are running, or watches the ball when they
+   * are standing or jogging. Turns are rate-limited so heads do not snap.
+   */
+  private updateFacing(dt: number): void {
+    const b = this.ball;
+    for (const p of this.players) {
+      if (p.isKeeper || b.owner === p || p.diveAnim > 0) continue;
+      const speed = len(p.vel);
+      const want = speed > 1.6
+        ? Math.atan2(p.vel.z, p.vel.x)
+        : Math.atan2(b.pos.z - p.pos.z, b.pos.x - p.pos.x);
+      let d = want - p.facing;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      const maxTurn = 14 * dt;
+      p.facing += clamp(d, -maxTurn, maxTurn);
+    }
   }
 
   /** One penalty: set piece, kick, then wait for a goal, a save or the ball to die. */
@@ -405,6 +426,7 @@ export class MatchSim {
       else this.driveAI(p, dt);
     }
     this.integratePlayers(dt);
+    this.updateFacing(dt);
     this.integrateBall(dt);
     this.resolvePossession(dt);
     this.checkGoal();
@@ -492,7 +514,7 @@ export class MatchSim {
     const max = this.stats.speed * sprint * dribble * p.speedMul;
     const target = l > 0.05 ? v(want.x * max, want.z * max) : v();
     this.steer(p, target, 22);
-    if (l > 0.05) p.facing = Math.atan2(want.z, want.x);
+    if (l > 0.05 && this.ball.owner === p) p.facing = Math.atan2(want.z, want.x); // off the ball, updateFacing decides
     if (this.ball.owner === p) {
       if (input.shootHeld) {
         p.charge = Math.min(1, p.charge + _dt / 0.7);
@@ -777,7 +799,7 @@ export class MatchSim {
     const slow = Math.min(1, d / 0.8);
     const n = norm(to);
     this.steer(p, v(n.x * max * slow, n.z * max * slow), 18);
-    if (d > 0.2 && !p.isKeeper) p.facing = Math.atan2(n.z, n.x);
+    if (d > 0.2 && !p.isKeeper && this.ball.owner === p) p.facing = Math.atan2(n.z, n.x); // others look via updateFacing
   }
 
   private integratePlayers(dt: number): void {
