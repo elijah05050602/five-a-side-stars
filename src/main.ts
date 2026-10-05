@@ -36,13 +36,13 @@ const router: Router = {
     document.body.classList.add('in-match');
     music.setQuiet(true);
     const mode = o.mode ?? 'match';
-    match = new MatchScene(canvas, ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode },
+    match = new MatchScene(canvas, ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode, cpuLevel: o.cpuLevel },
       (result) => {
         match = null;
         const stickers = recordResult(result);
-        router.go({ name: 'results', result, stickers, tournament: o.tournament });
+        router.go({ name: 'results', result, stickers, tournament: o.tournament, league: o.league });
       },
-      () => { match = null; router.go(o.tournament ? { name: 'tournament', state: o.tournament } : { name: 'menu' }); });
+      () => { match = null; router.go(o.tournament ? { name: 'tournament', state: o.tournament } : o.league ? { name: 'league' } : { name: 'menu' }); });
   },
 };
 

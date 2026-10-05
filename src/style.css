@@ -287,3 +287,35 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .plain-list { padding-left: 18px; line-height: 1.45; }
 .plain-list li { margin-bottom: 6px; }
 body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+
+/* ---------- League mode ---------- */
+.tier-list { margin: 4px 0 0 18px; padding: 0; line-height: 1.5; }
+.tier-banner { max-width: 900px; margin: 0 auto 14px; padding: 16px 20px; border-radius: var(--radius); color: #fff; background: linear-gradient(135deg, #6b8e23, #2eb872); box-shadow: var(--shadow); text-align: center; position: relative; }
+.tier-banner h2 { margin: 2px 0; font-size: 1.8rem; }
+.tier-banner p { margin: 0 0 8px; opacity: .92; }
+.tier-num { font-size: .85rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; opacity: .9; }
+.tier-5 { background: linear-gradient(135deg, #8d6e63, #a1887f); }
+.tier-4 { background: linear-gradient(135deg, #3da5f4, #6cc4ff); }
+.tier-3 { background: linear-gradient(135deg, #5c6bc0, #7e57c2); }
+.tier-2 { background: linear-gradient(135deg, #f4511e, #ffb300); }
+.tier-1 { background: linear-gradient(135deg, #1b2a41, #c9a227); }
+.tier-ladder { display: flex; gap: 6px; justify-content: center; }
+.rung { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; background: rgba(255,255,255,.25); border: 2px solid rgba(255,255,255,.5); }
+.rung.is-reached { background: rgba(255,255,255,.55); color: var(--navy); }
+.rung.is-here { background: var(--yellow); color: var(--navy); border-color: #fff; transform: scale(1.15); }
+.league-body { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; max-width: 900px; margin: 0 auto; align-items: flex-start; }
+.table-card { flex: 2 1 420px; overflow-x: auto; }
+.next-card { flex: 1 1 260px; display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+.next-card .vs-mid { text-align: center; }
+.league-table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+.league-table th, .league-table td { padding: 6px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; }
+.league-table th { font-size: .75rem; text-transform: uppercase; color: #64748b; }
+.league-table .t-name { text-align: left; white-space: nowrap; }
+.league-table .t-name svg { vertical-align: middle; }
+.league-table tr.is-you { background: #fff8dc; font-weight: 700; }
+.league-table tr.is-up td:first-child { box-shadow: inset 4px 0 0 var(--green); }
+.league-table tr.is-down td:first-child { box-shadow: inset 4px 0 0 #e63946; }
+.outcome-card { max-width: 900px; margin: 0 auto 14px; text-align: center; }
+.outcome-promoted, .outcome-champion { border: 3px solid var(--yellow); background: linear-gradient(160deg, #fff8dc, #fff); }
+.outcome-relegated { border: 3px solid #e63946; }
+.history summary { cursor: pointer; font-weight: 700; }

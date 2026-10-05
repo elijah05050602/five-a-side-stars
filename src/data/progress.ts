@@ -1,6 +1,7 @@
 import type { MatchResult } from '../game/MatchScene';
 import { loadSave, persist } from './storage';
 import type { AgeGroup } from './types';
+import type { SeasonRecord } from '../game/league';
 
 /** Everything the sticker album and unlockables are built from. Lives in the save file. */
 export interface Progress {
@@ -43,6 +44,8 @@ export const STICKERS: Sticker[] = [
   { id: 'two-player', emoji: '👯', name: 'Best Mates', how: 'Play a two-player match.' },
   { id: 'all-ages', emoji: '📏', name: 'Growing Up', how: 'Play a match with a team from every age group.', unlocks: '🦖' },
   { id: 'ten-matches', emoji: '🔟', name: 'Regular', how: 'Finish ten matches.', unlocks: '🌈' },
+  { id: 'promoted', emoji: '⬆️', name: 'Going Up!', how: 'Win promotion in League mode.', unlocks: '🏅' },
+  { id: 'league-champ', emoji: '👑', name: 'League Legends', how: 'Win the Star Premier League (Tier 1).', unlocks: '🏟️' },
 ];
 
 export function getProgress(): Progress {
@@ -113,6 +116,16 @@ export function recordResult(r: MatchResult): Sticker[] {
   if ([...perScorer.values()].some((n) => n >= 3)) award(p, 'hat-trick', out);
   if (h > a && behind) award(p, 'comeback', out);
   if (r.shootoutWon) { p.shootoutsWon++; award(p, 'shootout', out); }
+  persist();
+  return out;
+}
+
+/** Record the end of a league season and return any new stickers. */
+export function recordSeason(rec: SeasonRecord): Sticker[] {
+  const p = getProgress();
+  const out: Sticker[] = [];
+  if (rec.outcome === 'promoted') award(p, 'promoted', out);
+  if (rec.outcome === 'champion') award(p, 'league-champ', out);
   persist();
   return out;
 }

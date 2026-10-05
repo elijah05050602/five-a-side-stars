@@ -1,4 +1,5 @@
 import { awayKitFor, makeBadge, starterTeams } from './defaults';
+import type { LeagueState } from '../game/league';
 import type { Progress } from './progress';
 import type { Team } from './types';
 
@@ -8,6 +9,7 @@ interface SaveFile {
   teams: Team[];
   settings: { sound: boolean; music: boolean; reduceMotion: boolean; halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard' };
   progress?: Progress;
+  league?: LeagueState | null;
 }
 
 let cache: SaveFile | null = null;
@@ -87,6 +89,15 @@ export function getSettings(): SaveFile['settings'] {
 export function updateSettings(patch: Partial<SaveFile['settings']>): void {
   const save = loadSave();
   save.settings = { ...save.settings, ...patch };
+  persist();
+}
+
+export function getLeague(): LeagueState | null {
+  return loadSave().league ?? null;
+}
+
+export function setLeague(league: LeagueState | null): void {
+  loadSave().league = league;
   persist();
 }
 

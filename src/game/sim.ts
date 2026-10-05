@@ -98,6 +98,11 @@ export interface SimConfig {
   humanSide2?: Side | null;
   /** match (default), a penalty shoot-out, or target practice against a lone keeper. */
   mode?: 'match' | 'shootout' | 'training';
+  /**
+   * Fine-grained computer strength for league play: 0 is a touch below Easy,
+   * 1 is a touch above Hard. When set it overrides `difficulty`.
+   */
+  cpuLevel?: number;
 }
 
 export interface Shootout {
@@ -118,6 +123,16 @@ const DIFF = {
   normal: { speed: 1.0, think: 0.35, accuracy: 0.8, tackle: 0.9, humanTackle: 0.85, shootRange: 0.38 },
   hard: { speed: 1.08, think: 0.2, accuracy: 1.0, tackle: 1.2, humanTackle: 0.6, shootRange: 0.45 },
 } as const;
+
+type DiffSettings = { speed: number; think: number; accuracy: number; tackle: number; humanTackle: number; shootRange: number };
+
+/** Blend the Easy/Normal/Hard presets into a continuous strength scale. */
+function diffForLevel(level: number): DiffSettings {
+  const t = Math.max(-0.15, Math.min(1.15, level));
+  const [a, b, u] = t < 0.5 ? [DIFF.easy, DIFF.normal, t * 2] : [DIFF.normal, DIFF.hard, (t - 0.5) * 2];
+  const mix = (k: keyof DiffSettings) => a[k] + (b[k] - a[k]) * u;
+  return { speed: mix('speed'), think: mix('think'), accuracy: mix('accuracy'), tackle: mix('tackle'), humanTackle: mix('humanTackle'), shootRange: mix('shootRange') };
+}
 
 export class MatchSim {
   readonly stats: AgeStats;
@@ -144,6 +159,7 @@ export class MatchSim {
   setPiece: SetPiece | null = null;
   fouls: [number, number] = [0, 0];
   shootout: Shootout | null = null;
+  private readonly diff: DiffSettings;
   /** Training: points scored (a normal goal is 1, a rocket is 2). */
   trainingPoints = 0;
   get mode(): 'match' | 'shootout' | 'training' { return this.config.mode ?? 'match'; }
@@ -159,7 +175,8 @@ export class MatchSim {
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
     this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false };
-    const diff = DIFF[config.difficulty];
+    this.diff = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.difficulty];
+    const diff = this.diff;
     ([0, 1] as Side[]).forEach((side) => {
       const team = this.teams[side];
       const isCpu = !this.isHuman(side);
@@ -494,7 +511,7 @@ export class MatchSim {
   // ---------- AI ----------
 
   private driveAI(p: SimPlayer, dt: number): void {
-    const diff = DIFF[this.config.difficulty];
+    const diff = this.diff;
     const isCpuTeam = !this.isHuman(p.side);
     p.think -= dt;
     const b = this.ball;
@@ -871,7 +888,7 @@ export class MatchSim {
         const d = dist(p.pos, b.pos);
         if (d < controlR * 0.95) {
           const isCpu = !this.isHuman(p.side);
-          const diff = DIFF[this.config.difficulty];
+          const diff = this.diff;
           const base = p.isKeeper ? 0.95 : 0.5;
           // Tackling head-on is much easier than chasing from behind.
           const toBall = norm(v(b.pos.x - p.pos.x, b.pos.z - p.pos.z));
@@ -1008,7 +1025,7 @@ export class MatchSim {
   shoot(p: SimPlayer, aim: V2 | null, powerMul = 1): void {
     const goal = v(this.goalX(p.side), 0);
     const isCpu = !this.isHuman(p.side);
-    const acc = isCpu ? DIFF[this.config.difficulty].accuracy : 1;
+    const acc = isCpu ? this.diff.accuracy : 1;
     // Aim at a corner, with a wobble that shrinks with control.
     const spread = (1 - this.stats.control) * 0.9 + (isCpu ? (1 - acc) * 0.8 : 0.15);
     const penalty = this.setPiece?.kind === 'penalty' && this.setPiece.taker === p;

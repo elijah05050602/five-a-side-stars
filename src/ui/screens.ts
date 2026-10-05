@@ -1,10 +1,11 @@
 import { AGE_STATS } from '../data/ageGroups';
 import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode, startingFive } from '../data/defaults';
-import { deleteTeam, getSettings, getTeam, getTeams, resetAll, saveTeam, updateSettings } from '../data/storage';
+import { deleteTeam, getLeague, getSettings, getTeam, getTeams, resetAll, saveTeam, setLeague, updateSettings } from '../data/storage';
 import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, HAIR_STYLES, KIT_PATTERNS, SPECIALS, type AgeGroup, type BadgeShape, type Difficulty, type HairStyle, type Kit, type Position, type Special, type Team } from '../data/types';
 import { kitsClash } from '../game/kitTexture';
 import type { MatchResult, SimMode } from '../game/MatchScene';
-import { STICKERS, getProgress, lockedIcons, recordTrophy, unlockedIcons, type Sticker } from '../data/progress';
+import { STICKERS, getProgress, lockedIcons, recordSeason, recordTrophy, unlockedIcons, type Sticker } from '../data/progress';
+import { TIERS, applyLeagueResult, computeTable, createLeague, nextFixture, nextSeason, seasonOutcome, seasonOver, tierInfo, yourPosition } from '../game/league';
 import { applyResult, createTournament, currentFixture, humanStillIn, teamById, type Fixture, type TournamentState } from '../game/tournament';
 import { esc } from './hud';
 import { badgeSvg, kitChip } from './kitPreview';
@@ -23,6 +24,9 @@ export interface StartOptions {
   twoPlayer?: boolean;
   mode?: SimMode;
   tournament?: TournamentState;
+  /** League match: the result feeds the saved league table. */
+  league?: boolean;
+  cpuLevel?: number;
 }
 
 export interface Router {
@@ -30,15 +34,16 @@ export interface Router {
   startMatch(o: StartOptions): void;
 }
 
-export type SetupMode = SimMode | 'tournament';
+export type SetupMode = SimMode | 'tournament' | 'league';
 
 export type Screen =
   | { name: 'menu' }
   | { name: 'teams' }
   | { name: 'builder'; teamId?: string }
   | { name: 'setup'; homeId?: string; mode?: SetupMode }
-  | { name: 'results'; result: MatchResult; stickers?: Sticker[]; tournament?: TournamentState }
+  | { name: 'results'; result: MatchResult; stickers?: Sticker[]; tournament?: TournamentState; league?: boolean }
   | { name: 'tournament'; state: TournamentState }
+  | { name: 'league' }
   | { name: 'album' }
   | { name: 'parents' };
 
@@ -54,8 +59,9 @@ export function renderScreen(root: HTMLElement, screen: Screen, router: Router):
     case 'teams': return renderTeams(root, router);
     case 'builder': return renderBuilder(root, router, screen.teamId);
     case 'setup': return renderSetup(root, router, screen.homeId, screen.mode ?? 'match');
-    case 'results': return renderResults(root, router, screen.result, screen.stickers ?? [], screen.tournament);
+    case 'results': return renderResults(root, router, screen.result, screen.stickers ?? [], screen.tournament, screen.league);
     case 'tournament': return renderTournament(root, router, screen.state);
+    case 'league': return renderLeague(root, router);
     case 'album': return renderAlbum(root, router);
     case 'parents': return renderParents(root, router);
   }
@@ -77,7 +83,10 @@ function renderMenu(root: HTMLElement, router: Router): void {
       <div class="logo"><span class="logo-ball">⚽</span><h1>Five-a-Side<br/>Stars</h1><p class="tagline">Build your team. Play the match. Score the winner!</p></div>
       <div class="menu-buttons">
         <button class="btn btn-primary btn-big" id="m-play">⚡ Quick Match</button>
-        <button class="btn btn-yellow btn-big" id="m-cup">🏆 Tournament</button>
+        <div class="menu-row">
+          <button class="btn btn-yellow" id="m-cup">🏆 Tournament</button>
+          <button class="btn btn-yellow" id="m-league">📋 League${getLeague() ? ` <span class="pill-badge">Tier ${getLeague()!.tier}</span>` : ''}</button>
+        </div>
         <div class="menu-row">
           <button class="btn btn-blue" id="m-pens">🥅 Penalties</button>
           <button class="btn btn-blue" id="m-train">🎯 Training</button>
@@ -93,6 +102,7 @@ function renderMenu(root: HTMLElement, router: Router): void {
     </div>`;
   root.querySelector('#m-play')!.addEventListener('click', () => router.go({ name: 'setup' }));
   root.querySelector('#m-cup')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'tournament' }));
+  root.querySelector('#m-league')!.addEventListener('click', () => router.go(getLeague() ? { name: 'league' } : { name: 'setup', mode: 'league' }));
   root.querySelector('#m-pens')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'shootout' }));
   root.querySelector('#m-train')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'training' }));
   root.querySelector('#m-teams')!.addEventListener('click', () => router.go({ name: 'teams' }));
@@ -384,6 +394,7 @@ const MODE_INFO: Record<SetupMode, { title: string; go: string; blurb: string }>
   tournament: { title: 'Tournament', go: '🏆 Start the cup!', blurb: 'Four teams, two semi-finals and a final. Win both of your games to lift the trophy. Draws go to penalties!' },
   shootout: { title: 'Penalty Shoot-out', go: '🥅 Start the shoot-out!', blurb: 'Best of five penalties each, then sudden death. Hold shoot to power up and aim with the stick. In goal, move to dive!' },
   training: { title: 'Shooting Training', go: '🎯 Start training!', blurb: 'Just you, a keeper and a bag of balls. Score as many as you can before the time runs out. Rocket shots count double!' },
+  league: { title: 'League', go: '📋 Start in Tier 5!', blurb: 'Five leagues, from the Acorn League at Tier 5 up to the Star Premier League at Tier 1. Play five matches a season: finish in the top two to go up, bottom to go down. The teams get tougher every tier. Your league is saved, so you can come back any time.' },
 };
 
 function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: SetupMode = 'match'): void {
@@ -395,7 +406,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
   let difficulty: Difficulty = settings.difficulty;
   let halfSeconds = mode === 'training' ? 90 : settings.halfLengthSeconds;
   let twoPlayer = false;
-  const hasKeyboard = window.matchMedia('(pointer: fine)').matches && mode !== 'training';
+  const hasKeyboard = window.matchMedia('(pointer: fine)').matches && mode !== 'training' && mode !== 'league';
   const info = MODE_INFO[mode];
   const lengthLabel = mode === 'training' ? 'Time' : mode === 'shootout' ? '' : 'Half length';
   const lengths = mode === 'training' ? [60, 90, 120, 180] : [60, 120, 180, 300];
@@ -408,7 +419,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
       <div class="screen setup">
         ${topBar(info.title)}
         ${info.blurb ? `<p class="mode-blurb">${esc(info.blurb)}</p>` : ''}
-        <div class="vs ${mode === 'training' || mode === 'tournament' ? 'vs-solo' : ''}">
+        <div class="vs ${mode === 'training' || mode === 'tournament' || mode === 'league' ? 'vs-solo' : ''}">
           <div class="card vs-card">
             <span class="muted">Your team</span>
             <div class="row">${badgeSvg(home.badge, 64)}${kitChip(homeK.kit, 64)}</div>
@@ -416,7 +427,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
             <span class="chip chip-age">${home.ageGroup}</span>
             <select id="s-home">${teams.map((t) => `<option value="${t.id}" ${t.id === home.id ? 'selected' : ''}>${esc(t.name)} (${t.ageGroup})</option>`).join('')}</select>
           </div>
-          ${mode === 'training' ? '' : mode === 'tournament' ? `<div class="vs-mid">+</div><div class="card vs-card"><span class="muted">${twoPlayer ? 'Player 2 and two more teams' : 'Three computer teams'}</span><div class="row cup-marks">🛡️ 🛡️ 🛡️</div><h3>${twoPlayer ? `${esc(away.name)} + 2 surprise teams` : 'Surprise opponents'}</h3><span class="chip chip-age">${home.ageGroup}</span>${twoPlayer ? `<select id="s-away">${sameAge.map((t) => `<option value="${t.id}" ${t.id === opponentId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}</div>` : `<div class="vs-mid">VS</div>
+          ${mode === 'training' || mode === 'league' ? '' : mode === 'tournament' ? `<div class="vs-mid">+</div><div class="card vs-card"><span class="muted">${twoPlayer ? 'Player 2 and two more teams' : 'Three computer teams'}</span><div class="row cup-marks">🛡️ 🛡️ 🛡️</div><h3>${twoPlayer ? `${esc(away.name)} + 2 surprise teams` : 'Surprise opponents'}</h3><span class="chip chip-age">${home.ageGroup}</span>${twoPlayer ? `<select id="s-away">${sameAge.map((t) => `<option value="${t.id}" ${t.id === opponentId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}</div>` : `<div class="vs-mid">VS</div>
           <div class="card vs-card">
             <span class="muted">${twoPlayer ? 'Player 2' : 'Opponent (computer)'}</span>
             <div class="row">${badgeSvg(away.badge, 64)}${kitChip(awayK.kit, 64)}</div>
@@ -434,14 +445,14 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
             <div class="pills"><button class="pill ${!twoPlayer ? 'is-active' : ''}" data-players="1">1 player</button><button class="pill ${twoPlayer ? 'is-active' : ''}" data-players="2">2 players, one keyboard</button></div>
             ${twoPlayer ? '<p class="muted">Player 1: WASD, Space, Z, left Shift. Player 2: arrows, Enter, /, right Shift.</p>' : ''}
           </div>` : ''}
-          <div class="field"><span>Computer difficulty</span>
+          ${mode === 'league' ? `<div class="field"><span>Tiers</span><ol class="tier-list">${TIERS.map((t) => `<li><strong>Tier ${t.tier}</strong> ${esc(t.name)}</li>`).join('')}</ol></div>` : `<div class="field"><span>Computer difficulty</span>
             <div class="pills">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="pill ${d === difficulty ? 'is-active' : ''}" data-diff="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div>
-          </div>
+          </div>`}
           ${lengthLabel ? `<div class="field"><span>${lengthLabel}</span>
             <div class="pills">${lengths.map((s) => `<button class="pill ${s === halfSeconds ? 'is-active' : ''}" data-len="${s}">${s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`}</button>`).join('')}</div>
           </div>` : ''}
         </div>
-        ${swapped && mode !== 'training' && mode !== 'tournament' ? `<p class="warn">👕 The kits clash, so ${esc(swapped)} will wear their away kit.</p>` : ''}
+        ${swapped && mode !== 'training' && mode !== 'tournament' && mode !== 'league' ? `<p class="warn">👕 The kits clash, so ${esc(swapped)} will wear their away kit.</p>` : ''}
         <button class="btn btn-primary btn-big btn-kickoff" id="s-go">${info.go}</button>
       </div>`;
     wire(root, () => router.go({ name: 'menu' }));
@@ -470,6 +481,12 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
         router.go({ name: 'tournament', state });
         return;
       }
+      if (mode === 'league') {
+        if (getLeague() && !confirm('Start a new league career? Your current league will be deleted.')) return;
+        setLeague(createLeague(home, halfSeconds));
+        router.go({ name: 'league' });
+        return;
+      }
       const [h, a] = resolveKits(home, awayTeam);
       router.startMatch({ home: h, away: a, difficulty, halfSeconds, twoPlayer, mode: mode === 'training' ? 'training' : mode === 'shootout' ? 'shootout' : 'match' });
     });
@@ -496,9 +513,19 @@ function stickerBanner(stickers: Sticker[]): string {
   return `<div class="new-stickers">${stickers.map((s) => `<div class="sticker sticker-new"><span class="sticker-emoji">${s.emoji}</span><strong>${esc(s.name)}</strong><small>New sticker!</small></div>`).join('')}</div>`;
 }
 
-function renderResults(root: HTMLElement, router: Router, r: MatchResult, stickers: Sticker[], tournament?: TournamentState): void {
+function renderResults(root: HTMLElement, router: Router, r: MatchResult, stickers: Sticker[], tournament?: TournamentState, league?: boolean): void {
   const [h, a] = r.score;
   if (tournament) applyResult(tournament, r);
+  let leagueNote = '';
+  if (league) {
+    const ls = getLeague();
+    const you = ls && getTeam(ls.teamId);
+    if (ls && you) {
+      applyLeagueResult(ls, you, r);
+      setLeague(ls);
+      leagueNote = `<p class="muted">${esc(tierInfo(ls.tier).name)} · round ${Math.min(ls.round, ls.rounds.length)} of ${ls.rounds.length} played · you are ${ordinal(yourPosition(ls, you))}</p>`;
+    }
+  }
   let headline = h === a ? "It's a draw!" : h > a ? `${r.home.name} win!` : `${r.away.name} win!`;
   if (r.mode === 'training') headline = r.trainingPoints >= 10 ? 'Sharp shooting!' : r.trainingPoints >= 5 ? 'Nice work!' : 'Keep practising!';
   if (r.mode === 'shootout') headline = h > a ? `${r.home.name} win the shoot-out!` : `${r.away.name} win the shoot-out!`;
@@ -525,9 +552,10 @@ function renderResults(root: HTMLElement, router: Router, r: MatchResult, sticke
           ${r.goals.map((g) => `<li>${g.side === 0 ? '⚽ ' : ''}<strong>${esc(g.scorer.name)}</strong> #${g.scorer.number}${g.ownGoal ? ' (og)' : ''} <span class="muted">${g.minute}'</span>${g.side === 1 ? ' ⚽' : ''}</li>`).join('')}
         </ul>` : ''}
         ${motm ? `<div class="motm">🏆 Player of the match: <strong>${esc(motm.name)}</strong> #${motm.number}</div>` : ''}
+        ${leagueNote}
         ${stickerBanner(stickers)}
         <div class="row">
-          ${tournament ? `<button class="btn btn-primary btn-big" id="r-cup">${tournament.needsShootout ? '🥅 Penalty shoot-out!' : '🏆 Back to the cup'}</button>` : `<button class="btn btn-primary btn-big" id="r-again">Play again</button>`}
+          ${tournament ? `<button class="btn btn-primary btn-big" id="r-cup">${tournament.needsShootout ? '🥅 Penalty shoot-out!' : '🏆 Back to the cup'}</button>` : league ? '<button class="btn btn-primary btn-big" id="r-league">📋 Back to the league</button>' : `<button class="btn btn-primary btn-big" id="r-again">Play again</button>`}
           <button class="btn btn-ghost btn-big" id="r-menu">Main menu</button>
         </div>
       </div>
@@ -540,7 +568,81 @@ function renderResults(root: HTMLElement, router: Router, r: MatchResult, sticke
       router.startMatch({ home: f.home, away: f.away, difficulty: tournament!.difficulty, halfSeconds: 60, twoPlayer: tournament!.twoPlayer, mode: 'shootout', tournament });
     } else router.go({ name: 'tournament', state: tournament! });
   });
+  root.querySelector('#r-league')?.addEventListener('click', () => router.go({ name: 'league' }));
   root.querySelector('#r-menu')!.addEventListener('click', () => router.go({ name: 'menu' }));
+}
+
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+}
+
+// ---------- League ----------
+
+function renderLeague(root: HTMLElement, router: Router): void {
+  const ls = getLeague();
+  const you = ls && getTeam(ls.teamId);
+  if (!ls || !you) {
+    if (ls) setLeague(null); // the team was deleted
+    router.go({ name: 'setup', mode: 'league' });
+    return;
+  }
+  const info = tierInfo(ls.tier);
+  const table = computeTable(ls, you);
+  const over = seasonOver(ls);
+  const next = nextFixture(ls, you);
+  const outcome = over ? seasonOutcome(ls, you) : null;
+  const stickers = outcome ? recordSeason(outcome) : [];
+  const outcomeText = outcome
+    ? outcome.outcome === 'champion' ? `🏆 Champions of the ${info.name}! You are league legends.`
+      : outcome.outcome === 'promoted' ? `⬆️ You finished ${ordinal(outcome.position)}: promoted to Tier ${ls.tier - 1}, the ${tierInfo(ls.tier - 1).name}!`
+        : outcome.outcome === 'relegated' ? `⬇️ You finished ${ordinal(outcome.position)}: down to Tier ${ls.tier + 1}, the ${tierInfo(ls.tier + 1).name}. You will bounce back!`
+          : outcome.position === 1 ? `🥇 You won the ${info.name}! Already at the top, so one more season to defend it.` : `You finished ${ordinal(outcome.position)}: staying in the ${info.name} for another season.`
+    : '';
+  root.innerHTML = `
+    <div class="screen league">
+      ${topBar('League')}
+      <div class="tier-banner tier-${ls.tier}">
+        <span class="tier-num">Tier ${ls.tier}</span>
+        <h2>${esc(info.name)}</h2>
+        <p>${esc(info.blurb)} · Season ${ls.season}</p>
+        <div class="tier-ladder">${TIERS.map((t) => `<span class="rung ${t.tier === ls.tier ? 'is-here' : ''} ${t.tier >= ls.bestTier && t.tier !== ls.tier ? 'is-reached' : ''}" title="${esc(t.name)}">${t.tier}</span>`).join('')}</div>
+      </div>
+      ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p>${stickerBanner(stickers)}</div>` : ''}
+      <div class="league-body">
+        <div class="card table-card">
+          <table class="league-table">
+            <thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead>
+            <tbody>
+              ${table.map((row, i) => `<tr class="${row.isYou ? 'is-you' : ''} ${i < 2 && ls.tier > 1 ? 'is-up' : ''} ${i === table.length - 1 && ls.tier < 5 ? 'is-down' : ''}">
+                <td>${i + 1}</td><td class="t-name">${badgeSvg(row.team.badge, 22)} ${esc(row.team.name)}</td><td>${row.played}</td><td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.gf - row.ga > 0 ? '+' : ''}${row.gf - row.ga}</td><td><strong>${row.points}</strong></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+          <p class="muted small">${ls.tier > 1 ? 'Top two go up.' : 'Top of the tree!'} ${ls.tier < 5 ? 'Bottom team goes down.' : ''}</p>
+        </div>
+        <div class="card next-card">
+          ${next ? `
+            <span class="muted">Round ${ls.round + 1} of ${ls.rounds.length}</span>
+            <div class="fx-team ${next.youAreHome ? 'is-you' : ''}">${badgeSvg(next.home.badge, 40)}<span class="fx-name">${esc(next.home.name)}</span></div>
+            <div class="vs-mid">VS</div>
+            <div class="fx-team ${!next.youAreHome ? 'is-you' : ''}">${badgeSvg(next.away.badge, 40)}<span class="fx-name">${esc(next.away.name)}</span></div>
+            <button class="btn btn-primary btn-big" id="l-play">⚽ Play next match</button>` : `
+            <button class="btn btn-primary btn-big" id="l-next">${outcome?.outcome === 'promoted' ? '⬆️ Start next season' : outcome?.outcome === 'relegated' ? '🔁 Start next season' : '▶️ Start next season'}</button>`}
+          ${ls.history.length ? `<details class="history"><summary>Past seasons</summary><ul class="plain-list muted">${ls.history.map((h) => `<li>Season ${h.season}: ${ordinal(h.position)} in ${esc(tierInfo(h.tier).name)} (${h.outcome})</li>`).join('')}</ul></details>` : ''}
+          <button class="btn btn-ghost" id="l-quit">Leave this league</button>
+        </div>
+      </div>
+    </div>`;
+  wire(root, () => router.go({ name: 'menu' }));
+  root.querySelector('#l-play')?.addEventListener('click', () => {
+    const [h, a] = resolveKits(next!.home, next!.away);
+    router.startMatch({ home: h, away: a, difficulty: 'normal', halfSeconds: ls.halfSeconds, mode: 'match', league: true, cpuLevel: info.level });
+  });
+  root.querySelector('#l-next')?.addEventListener('click', () => { setLeague(nextSeason(ls, you)); renderLeague(root, router); });
+  root.querySelector('#l-quit')?.addEventListener('click', () => {
+    if (confirm('Leave this league? Your table and tier will be deleted.')) { setLeague(null); router.go({ name: 'menu' }); }
+  });
 }
 
 // ---------- Tournament ----------

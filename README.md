@@ -20,6 +20,7 @@ npm run preview  # serve the built game
 
 - **Quick Match**: one match against the computer (or a friend on the same keyboard).
 - **Tournament**: a four-team cup with two semi-finals and a final. Draws go to penalties.
+- **League**: a saved career through five tiers, from the Acorn League (Tier 5) up to the Star Premier League (Tier 1). Five matches a season, top two go up, bottom goes down, and the computer teams get stronger every tier.
 - **Penalties**: a best-of-five shoot-out, then sudden death. You take and save.
 - **Training**: just you and a keeper; score as many as you can before time runs out (rocket shots count double).
 - **Sticker album**: finish matches, win cups and hit milestones to collect stickers; some unlock extra badge icons.
