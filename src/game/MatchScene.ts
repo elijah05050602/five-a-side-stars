@@ -49,6 +49,7 @@ export class MatchScene {
   private acc = 0;
   private readonly camTarget = new THREE.Vector3();
   private readonly camPos = new THREE.Vector3();
+  private readonly camLook = new THREE.Vector3();
   private disposed = false;
   private readonly onResize = () => this.resize();
 
@@ -118,6 +119,7 @@ export class MatchScene {
     this.camTarget.set(0, 0, 0);
     this.camPos.copy(this.cameraGoal(this.camTarget));
     this.camera.position.copy(this.camPos);
+    this.camLook.set(0, 0.5, 0);
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.frame);
   }
@@ -217,10 +219,15 @@ export class MatchScene {
     focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.32, this.sim.length * 0.32);
     focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.2, this.sim.width * 0.2);
     this.camTarget.lerp(focus, 1 - Math.pow(0.02, dt));
-    const goal = this.cameraGoal(this.camTarget);
-    this.camPos.lerp(goal, 1 - Math.pow(0.02, dt));
+    // After a goal in a match, swing round to the scoring team's fans going wild, then back for kick-off.
+    const scorer = this.sim.goals[this.sim.goals.length - 1];
+    const crowdShot = this.sim.mode === 'match' && this.sim.phase === 'goal' && this.sim.phaseTimer > 0.7 && scorer
+      ? this.crowd.celebrationShot(scorer.side) : null;
+    const k = 1 - Math.pow(crowdShot ? 0.01 : 0.02, dt);
+    this.camPos.lerp(crowdShot ? crowdShot.pos : this.cameraGoal(this.camTarget), k);
+    this.camLook.lerp(crowdShot ? crowdShot.look : new THREE.Vector3(this.camTarget.x, 0.5, this.camTarget.z), k);
     this.camera.position.copy(this.camPos);
-    this.camera.lookAt(this.camTarget.x, 0.5, this.camTarget.z);
+    this.camera.lookAt(this.camLook);
 
     this.renderer.render(this.scene, this.camera);
   };

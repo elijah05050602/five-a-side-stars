@@ -101,6 +101,9 @@ export class Crowd {
   private readonly disposables: { dispose(): void }[] = [];
   private readonly calm: boolean;
   private readonly len: number;
+  private readonly lay: ReturnType<typeof standLayout>;
+  /** Middle of each team's end of the stand, for the goal camera. */
+  private readonly ends: [number, number] = [0, 0];
   private time = 0;
   /** Seconds since anything exciting happened, for starting a Mexican wave. */
   private quiet = 0;
@@ -119,6 +122,7 @@ export class Crowd {
     // Seats along the stand rows, home fans to the left, away to the right, a few neutrals mixed in.
     const lay = standLayout(sim.length, sim.width);
     this.len = lay.len;
+    this.lay = lay;
     const kits = [sim.teams[0].kit, sim.teams[1].kit];
     const perRow = Math.floor(lay.len / SEAT_SPACING);
     const empty = lite ? 0.3 : 0.08;
@@ -148,6 +152,10 @@ export class Crowd {
       }
     }
     const n = this.fans.length;
+    for (const side of [0, 1] as const) {
+      const xs = this.fans.filter((f) => f.side === side).map((f) => f.x);
+      this.ends[side] = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : (side === 0 ? -1 : 1) * lay.len / 4;
+    }
 
     // Parts. Geometries are built around the joint they turn about.
     const bodyGeo = new THREE.CapsuleGeometry(0.17, 0.16, 4, 10);
@@ -250,6 +258,12 @@ export class Crowd {
       this.hair.setColorAt(i, hat ? col.copy(f.shirt).lerp(white, 0.15) : f.hair);
     });
     for (const m of this.meshes) if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  }
+
+  /** Where to put the camera, and what to look at, to see one team's fans celebrate. */
+  celebrationShot(side: 0 | 1): { pos: THREE.Vector3; look: THREE.Vector3 } {
+    const x = this.ends[side], { z0, baseHeight } = this.lay;
+    return { pos: new THREE.Vector3(x * 0.8, baseHeight + 3.2, z0 + 6.5), look: new THREE.Vector3(x, baseHeight + 0.9, z0 - 1.2) };
   }
 
   /** Feed every sim event through here. */
