@@ -10,8 +10,8 @@ export function floodlightPositions(L: number, W: number): [number, number, numb
   return out;
 }
 
-/** The parts of the pitch the match scene animates: fans, nets and the big scoreboard. */
-export interface PitchExtras { crowd: Crowd; nets: GoalNet[]; scoreboard: Scoreboard }
+/** The parts of the pitch the match scene animates: the nets and the big scoreboard. */
+export interface PitchExtras { nets: GoalNet[]; scoreboard: Scoreboard }
 export function pitchExtras(pitch: THREE.Group): PitchExtras {
   return pitch.userData.extras as PitchExtras;
 }
@@ -169,15 +169,14 @@ export function buildPitch(d: PitchDims): THREE.Group {
     g.add(buildGoal(sx, d), net.group);
   }
 
-  // A stand full of fans along the far side, benches and cones on the near side.
-  const crowd = new Crowd(L, W);
-  g.add(crowd.group);
+  // A small stand full of fans along the far side, benches and cones on the near side.
+  g.add(buildStand(L, W), buildBunting(L, W));
   const scoreboard = new Scoreboard();
   scoreboard.group.position.set(-L / 2 - 7.5, 0, 0);
   scoreboard.group.rotation.y = Math.PI / 2;
   g.add(scoreboard.group);
   for (const [x, y, z] of floodlightPositions(L, W)) g.add(buildFloodlight(x, y, z));
-  g.userData.extras = { crowd, nets, scoreboard } satisfies PitchExtras;
+  g.userData.extras = { nets, scoreboard } satisfies PitchExtras;
   for (const sx of [-1, 1]) g.add(buildBench(sx * L * 0.18, W / 2 + 2.2));
   const coneMat = toonMaterial({ color: 0xff7a00 });
   for (let i = 0; i < 4; i++) {
@@ -228,140 +227,76 @@ function buildFlag(x: number, z: number): THREE.Group {
   return g;
 }
 
-/**
- * Three stepped rows of seats with a crowd of round fans in bright colours.
- * The fans sway with the excitement of the match and jump when a goal goes in.
- */
-export class Crowd {
-  readonly group = new THREE.Group();
-  private readonly bodies: THREE.InstancedMesh;
-  private readonly heads: THREE.InstancedMesh;
-  private readonly base: { x: number; y: number; z: number; phase: number; side: 0 | 1 | -1; gone: boolean }[] = [];
-  private readonly scarves: THREE.InstancedMesh;
-  private time = 0;
-  private jump = 0;
-  private jumpSide: 0 | 1 | -1 = -1;
-
-  constructor(L: number, W: number) {
-    const g = this.group;
-    const len = L * 0.8;
-    const z0 = -W / 2 - 3.2;
-    const stepMat = toonMaterial({ color: 0xb8c4d6 });
-    const rows = 3;
-    for (let r = 0; r < rows; r++) {
-      const step = new THREE.Mesh(new THREE.BoxGeometry(len, 0.6 + r * 0.6, 1.2), stepMat);
-      step.position.set(0, (0.6 + r * 0.6) / 2, z0 - r * 1.2);
-      step.receiveShadow = true;
-      step.castShadow = true;
-      g.add(step);
-    }
-    // Roof on two posts, with bunting along the front edge.
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(len + 0.6, 0.12, rows * 1.2 + 0.8), toonMaterial({ color: 0x3da5f4 }));
-    roof.position.set(0, 3.2, z0 - (rows - 1) * 0.6);
-    roof.castShadow = true;
-    g.add(roof);
-    const postMat = toonMaterial({ color: 0x1b2a41 });
-    for (const sx of [-1, 1]) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.2, 6), postMat);
-      post.position.set(sx * (len / 2 + 0.2), 1.6, z0 - rows * 1.2 + 0.4);
-      g.add(post);
-    }
-    const flagCount = Math.floor(len / 0.5);
-    const tri = new THREE.Shape();
-    tri.moveTo(-0.18, 0); tri.lineTo(0.18, 0); tri.lineTo(0, -0.32); tri.closePath();
-    const bunting = new THREE.InstancedMesh(new THREE.ShapeGeometry(tri), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), flagCount);
-    const bm = new THREE.Matrix4();
-    const bc = new THREE.Color();
-    for (let i = 0; i < flagCount; i++) {
-      bm.makeTranslation(-len / 2 + 0.25 + i * 0.5, 3.1 - Math.abs(Math.sin(i * 0.9)) * 0.08, z0 + 0.95);
-      bunting.setMatrixAt(i, bm);
-      bunting.setColorAt(i, bc.set(KIT_PALETTE[i % KIT_PALETTE.length]));
-    }
-    g.add(bunting);
-
-    // The crowd: little heads on little bodies, as instanced spheres, plus a scarf each.
-    const perRow = Math.floor(len / 0.55);
-    const n = perRow * rows;
-    this.bodies = new THREE.InstancedMesh(new THREE.SphereGeometry(0.24, 8, 6), toonMaterial({ color: 0xffffff }), n);
-    this.heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.15, 8, 6), toonMaterial({ color: 0xffffff }), n);
-    this.scarves = new THREE.InstancedMesh(new THREE.BoxGeometry(0.34, 0.07, 0.3), toonMaterial({ color: 0xffffff }), n);
-    const m = new THREE.Matrix4();
-    const colour = new THREE.Color();
-    const skins = ['#f6d7c3', '#eab98f', '#d49a6a', '#a86b3c', '#7a4a26', '#4a2d17'];
-    let k = 0;
-    for (let r = 0; r < rows; r++) {
-      for (let i = 0; i < perRow; i++) {
-        const x = -len / 2 + 0.3 + i * 0.55 + (Math.random() - 0.5) * 0.15;
-        const y = 0.6 + r * 0.6;
-        const z = z0 - r * 1.2 + (Math.random() - 0.5) * 0.2;
-        const gone = Math.random() < 0.1;
-        // Left half of the stand mostly supports the home side, right half the away side.
-        const side: 0 | 1 | -1 = gone ? -1 : Math.random() < 0.15 ? -1 : (i < perRow / 2 ? 0 : 1);
-        this.base.push({ x, y, z, phase: Math.random() * Math.PI * 2, side, gone });
-        if (gone) { m.makeScale(0, 0, 0); this.bodies.setMatrixAt(k, m); this.heads.setMatrixAt(k, m); this.scarves.setMatrixAt(k, m); k++; continue; }
-        m.makeTranslation(x, y + 0.2, z);
-        this.bodies.setMatrixAt(k, m);
-        this.bodies.setColorAt(k, colour.set(KIT_PALETTE[Math.floor(Math.random() * KIT_PALETTE.length)]));
-        m.makeTranslation(x, y + 0.5, z);
-        this.heads.setMatrixAt(k, m);
-        this.heads.setColorAt(k, colour.set(skins[Math.floor(Math.random() * skins.length)]));
-        m.makeTranslation(x, y + 0.36, z);
-        this.scarves.setMatrixAt(k, m);
-        this.scarves.setColorAt(k, colour.set(KIT_PALETTE[Math.floor(Math.random() * KIT_PALETTE.length)]));
-        k++;
-      }
-    }
-    this.bodies.castShadow = this.heads.castShadow = true;
-    g.add(this.bodies, this.heads, this.scarves);
+/** Three stepped rows of seats with a crowd of round fans in bright colours. */
+function buildStand(L: number, W: number): THREE.Group {
+  const g = new THREE.Group();
+  const len = L * 0.8;
+  const z0 = -W / 2 - 3.2;
+  const stepMat = toonMaterial({ color: 0xb8c4d6 });
+  const rows = 3;
+  for (let r = 0; r < rows; r++) {
+    const step = new THREE.Mesh(new THREE.BoxGeometry(len, 0.6 + r * 0.6, 1.2), stepMat);
+    step.position.set(0, (0.6 + r * 0.6) / 2, z0 - r * 1.2);
+    step.receiveShadow = true;
+    step.castShadow = true;
+    g.add(step);
   }
-
-  /** Dress the fans in the two teams' colours. */
-  dress(home: { shirt: string; shirt2: string }, away: { shirt: string; shirt2: string }): void {
-    const colour = new THREE.Color();
-    this.base.forEach((f, k) => {
-      if (f.side === -1 || f.gone) return;
-      const kit = f.side === 0 ? home : away;
-      this.bodies.setColorAt(k, colour.set(Math.random() < 0.7 ? kit.shirt : kit.shirt2));
-      this.scarves.setColorAt(k, colour.set(Math.random() < 0.5 ? kit.shirt : kit.shirt2));
-    });
-    this.bodies.instanceColor!.needsUpdate = true;
-    this.scarves.instanceColor!.needsUpdate = true;
+  // Roof on two posts
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(len + 0.6, 0.12, rows * 1.2 + 0.8), toonMaterial({ color: 0x3da5f4 }));
+  roof.position.set(0, 3.2, z0 - (rows - 1) * 0.6);
+  roof.castShadow = true;
+  g.add(roof);
+  const postMat = toonMaterial({ color: 0x1b2a41 });
+  for (const sx of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.2, 6), postMat);
+    post.position.set(sx * (len / 2 + 0.2), 1.6, z0 - rows * 1.2 + 0.4);
+    g.add(post);
   }
-
-  /**
-   * excitement 0..1 sets how much the fans bounce; cheerSide (0 or 1) makes
-   * that side's fans leap about after a goal while the others sit still.
-   */
-  update(dt: number, excitement: number, cheerSide: 0 | 1 | -1): void {
-    this.time += dt;
-    if (cheerSide !== -1 && this.jumpSide !== cheerSide) { this.jump = 3; this.jumpSide = cheerSide; }
-    if (cheerSide === -1) this.jumpSide = -1;
-    this.jump = Math.max(0, this.jump - dt);
-    const m = new THREE.Matrix4();
-    const amp = 0.02 + excitement * 0.08;
-    const t = this.time;
-    this.base.forEach((f, k) => {
-      if (f.gone) return;
-      let dy = Math.sin(t * (2.2 + excitement * 3) + f.phase) * amp;
-      let sway = 0;
-      if (this.jump > 0 && f.side === this.jumpSide) {
-        dy += Math.abs(Math.sin(t * 7 + f.phase)) * 0.45 * Math.min(1, this.jump);
-        sway = Math.sin(t * 7 + f.phase) * 0.06;
-      } else if (this.jump > 0 && f.side !== -1) {
-        dy -= 0.04; // the other lot slump a little
-      }
-      m.makeTranslation(f.x + sway, f.y + 0.2 + dy, f.z);
-      this.bodies.setMatrixAt(k, m);
-      m.makeTranslation(f.x + sway, f.y + 0.5 + dy, f.z);
-      this.heads.setMatrixAt(k, m);
-      const up = this.jump > 0 && f.side === this.jumpSide; // scarves held aloft
-      m.makeTranslation(f.x + sway, f.y + (up ? 0.72 : 0.36) + dy, f.z);
-      this.scarves.setMatrixAt(k, m);
-    });
-    this.bodies.instanceMatrix.needsUpdate = true;
-    this.heads.instanceMatrix.needsUpdate = true;
-    this.scarves.instanceMatrix.needsUpdate = true;
+  // The crowd: little heads on little bodies, as instanced spheres.
+  const perRow = Math.floor(len / 0.55);
+  const n = perRow * rows;
+  const bodies = new THREE.InstancedMesh(new THREE.SphereGeometry(0.24, 8, 6), toonMaterial({ color: 0xffffff }), n);
+  const heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.15, 8, 6), toonMaterial({ color: 0xffffff }), n);
+  const m = new THREE.Matrix4();
+  const colour = new THREE.Color();
+  const skins = ['#f6d7c3', '#eab98f', '#d49a6a', '#a86b3c', '#7a4a26', '#4a2d17'];
+  let k = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let i = 0; i < perRow; i++) {
+      if (Math.random() < 0.12) { bodies.setMatrixAt(k, new THREE.Matrix4().makeScale(0, 0, 0)); heads.setMatrixAt(k, new THREE.Matrix4().makeScale(0, 0, 0)); k++; continue; }
+      const x = -len / 2 + 0.3 + i * 0.55 + (Math.random() - 0.5) * 0.15;
+      const y = 0.6 + r * 0.6;
+      const z = z0 - r * 1.2 + (Math.random() - 0.5) * 0.2;
+      m.makeTranslation(x, y + 0.2, z);
+      bodies.setMatrixAt(k, m);
+      bodies.setColorAt(k, colour.set(KIT_PALETTE[Math.floor(Math.random() * KIT_PALETTE.length)]));
+      m.makeTranslation(x, y + 0.5, z);
+      heads.setMatrixAt(k, m);
+      heads.setColorAt(k, colour.set(skins[Math.floor(Math.random() * skins.length)]));
+      k++;
+    }
   }
+  bodies.castShadow = heads.castShadow = true;
+  g.add(bodies, heads);
+  return g;
+}
+
+/** A string of little coloured flags along the front of the stand roof. */
+function buildBunting(L: number, W: number): THREE.InstancedMesh {
+  const len = L * 0.8;
+  const z0 = -W / 2 - 3.2;
+  const count = Math.floor(len / 0.5);
+  const tri = new THREE.Shape();
+  tri.moveTo(-0.18, 0); tri.lineTo(0.18, 0); tri.lineTo(0, -0.32); tri.closePath();
+  const bunting = new THREE.InstancedMesh(new THREE.ShapeGeometry(tri), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), count);
+  const m = new THREE.Matrix4();
+  const c = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    m.makeTranslation(-len / 2 + 0.25 + i * 0.5, 3.1 - Math.abs(Math.sin(i * 0.9)) * 0.08, z0 + 0.95);
+    bunting.setMatrixAt(i, m);
+    bunting.setColorAt(i, c.set(KIT_PALETTE[i % KIT_PALETTE.length]));
+  }
+  return bunting;
 }
 
 function buildBench(x: number, z: number): THREE.Group {

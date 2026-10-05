@@ -106,7 +106,6 @@ export class MatchScene {
     this.extras = pitchExtras(pitch);
     this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, touch);
     this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, 0, 0);
-    this.extras.crowd.dress(this.sim.teams[0].kit, this.sim.teams[1].kit);
 
     for (const p of this.sim.players) {
       const team = this.sim.teams[p.side];
@@ -242,8 +241,6 @@ export class MatchScene {
     if (quip) this.hud.say(quip);
     this.sfx.update(dt, this.sim);
     this.weather.update(dt);
-    const lastGoalSide = this.sim.goals[this.sim.goals.length - 1]?.side ?? -1;
-    this.extras.crowd.update(dt, this.sfx.level, this.sim.phase === 'goal' ? lastGoalSide : -1);
     for (const n of this.extras.nets) n.update(dt);
 
     // Sync models
