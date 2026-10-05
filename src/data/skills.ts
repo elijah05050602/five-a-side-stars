@@ -74,12 +74,23 @@ export function randomSkills(position: Position, age: AgeGroup): Skills {
 
 /**
  * Make a player's stars legal for an age group: nothing above the cap, nothing
- * below one. Used when a team changes age group in the builder. Stars over the
- * budget are left for the builder to point out; stars under it are a gift.
+ * below one, and (unless `keepBudget` is false, as on career teams that earn
+ * stars by playing) no more than the age's budget in total. Stars over the
+ * budget come off the player's strongest skill first, keeping the one their
+ * position leans on most. Stars under the budget are a gift.
  */
-export function fitSkills(p: Player, age: AgeGroup): Skills {
+export function fitSkills(p: Player, age: AgeGroup, keepBudget = true): Skills {
   const s = { ...p.skills };
-  for (const k of SKILL_KEYS) s[k] = clampStars(s[k], age);
+  for (const k of SKILL_KEYS) s[k] = clampStars(Number.isFinite(s[k]) ? s[k] : MIN_STARS, age);
+  if (!keepBudget) return s;
+  const w = WEIGHTS[p.position] ?? WEIGHTS.DEF;
+  let guard = 0;
+  while (totalStars(s) > STAR_BUDGET[age] && guard++ < 50) {
+    const open = SKILL_KEYS.filter((k) => s[k] > MIN_STARS);
+    if (!open.length) break;
+    open.sort((a, b) => s[b] - s[a] || w[a] - w[b]);
+    s[open[0]]--;
+  }
   return s;
 }
 

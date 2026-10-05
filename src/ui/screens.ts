@@ -190,6 +190,7 @@ function renderTeams(root: HTMLElement, router: Router): void {
 function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void {
   const existing = teamId ? getTeam(teamId) : undefined;
   const team: Team = existing ? structuredClone(existing) : makeTeam({ name: randomTeamName(), ageGroup: 'U8' });
+  for (const p of team.players) p.skills = fitSkills(p, team.ageGroup, !team.career);
   let step: 0 | 1 | 2 = 0;
   let kitTab: 'kit' | 'awayKit' | 'keeperKit' = 'kit';
   let selectedPlayer = 0;
@@ -307,7 +308,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     form.querySelectorAll<HTMLElement>('[data-age]').forEach((b) => b.addEventListener('click', () => {
       team.ageGroup = b.dataset.age as AgeGroup;
       // Stars follow the age group: nothing above its cap, nothing over its budget.
-      for (const p of team.players) p.skills = fitSkills(p, team.ageGroup);
+      for (const p of team.players) p.skills = fitSkills(p, team.ageGroup, !team.career);
       render();
     }));
   };
