@@ -205,6 +205,10 @@ The design system commits strictly to organic, pillow-like geometries to sustain
 - **Pitch Card:** Background `rgba(255, 255, 255, 0.94)`, border `3px solid #1B2A41`, radius `20px`, shadow `0 6px 0 #1B2A41`. Inside padding: `24px`.
 - **Card Headers:** Feature an overlapping colored header tab or banner anchored to the top border with hard offset contrast.
 
+### Screen Backdrop
+- Every screen outside a match sits on the lobby's stadium art (`public/art/stadium.jpg`), drawn once by `body::before` in `src/style.css` with a navy dimming gradient. The lobby draws its own brighter copy with sparkles.
+- Text straight on the stadium (page titles, blurbs) is white with a navy drop; anything inside a `.card`, `.builder-form` or `.sticker` stays ink. New screens only need to put their content in cards to read well.
+
 ### Chips & Status Pills
 - Compact badges with `radius: 9999px`, `2px solid #1B2A41`, height `32px`, typography `label-sm`.
 - Status varieties: Energy (Yellow `#FFD23F`), Match Ready (Green `#2EB872`), Skill Boost (Deep Blue `#1B4FD8` with white text).
