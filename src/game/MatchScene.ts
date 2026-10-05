@@ -4,7 +4,7 @@ import { Input, P1_KEYS, P2_KEYS, SOLO_KEYS } from './input';
 import { buildPitch } from './Pitch';
 import { PlayerModel, type AnimState } from './PlayerModel';
 import type { Expression } from './playerFace';
-import { MatchSim, type SimConfig, type SimPlayer, type Side } from './sim';
+import { MatchSim, RUNOFF_END, RUNOFF_SIDE, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
 import { getSettings } from '../data/storage';
@@ -82,7 +82,8 @@ export class MatchScene {
     rim.position.set(14, 10, -18);
     this.scene.add(sun, rim, new THREE.HemisphereLight(0xdff3ff, 0x3b7f4e, 1.25));
 
-    this.scene.add(buildPitch({ length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth }));
+    const runoff = this.sim.mode === 'match';
+    this.scene.add(buildPitch({ length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth, runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0 }));
 
     for (const p of this.sim.players) {
       const team = this.sim.teams[p.side];
@@ -105,6 +106,7 @@ export class MatchScene {
     this.input.attachButton(this.hud.btnPass, 'pass');
     this.input.attachButton(this.hud.btnSprint, 'sprint');
     this.input.attachButton(this.hud.btnSwitch, 'switch');
+    this.input.attachButton(this.hud.btnTrick, 'trick');
 
     window.addEventListener('resize', this.onResize);
     this.resize();
@@ -160,7 +162,7 @@ export class MatchScene {
     const step = 1 / 60;
     let steps = 0;
     while (this.acc >= step && steps < 8) {
-      const once = { shoot: false, pass: false, switchPlayer: false, pause: false };
+      const once = { shoot: false, pass: false, switchPlayer: false, pause: false, trick: false };
       this.sim.step(step, steps === 0 ? input : { ...input, ...once }, input2 ? (steps === 0 ? input2 : { ...input2, ...once }) : undefined);
       this.acc -= step;
       steps++;
@@ -191,7 +193,7 @@ export class MatchScene {
       const ahead = Math.cos(ang) > -0.2;
       const gazeX = ahead ? Math.round(Math.sin(ang) * 2) / 2 : 0;
       const gazeY = ahead && Math.hypot(b.pos.x - p.pos.x, b.pos.z - p.pos.z) < 2.5 * scale ? 0.5 : 0;
-      const st: AnimState = { speed, kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, tackle: p.tackleTimer, scale, wobble, mood, gazeX, gazeY, cheer: celebrating === p.side };
+      const st: AnimState = { speed, kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, tackle: p.tackleTimer, scale, wobble, mood, gazeX, gazeY, cheer: celebrating === p.side, stepover: p.trickKind === 'stepover' ? p.trickAnim : 0, stepoverDir: p.trickDir };
       m.animate(dt, st);
       const isP1 = p === this.sim.controlled;
       const isP2 = p === this.sim.controlled2;

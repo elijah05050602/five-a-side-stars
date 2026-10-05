@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { addOutline, toonMaterial } from './toon';
 
-export interface PitchDims { length: number; width: number; goalWidth: number; goalHeight: number; goalDepth: number }
+export interface PitchDims {
+  length: number; width: number; goalWidth: number; goalHeight: number; goalDepth: number;
+  /** Grass between the lines and the boards (0 = boards on the lines, as in training). */
+  runoffSide?: number; runoffEnd?: number;
+}
 
 const KIT_PALETTE = ['#e63946', '#3da5f4', '#ffd23f', '#2eb872', '#ff6fb5', '#ff7a00', '#6a4c93', '#ffffff', '#1b2a41'];
 
@@ -142,12 +146,19 @@ export function buildPitch(d: PitchDims): THREE.Group {
     g.add(cap);
   };
   const t = 0.15;
-  board(0, -W / 2 - t / 2, L + t * 2, t);
-  board(0, W / 2 + t / 2, L + t * 2, t);
-  const sideLen = (W - d.goalWidth) / 2;
+  const rs = d.runoffSide ?? 0, re = d.runoffEnd ?? 0;
+  const bl = L + re * 2, bw = W + rs * 2;
+  board(0, -bw / 2 - t / 2, bl + t * 2, t);
+  board(0, bw / 2 + t / 2, bl + t * 2, t);
   for (const sx of [-1, 1]) {
-    board(sx * (L / 2 + t / 2), -(d.goalWidth / 2 + sideLen / 2), t, sideLen);
-    board(sx * (L / 2 + t / 2), d.goalWidth / 2 + sideLen / 2, t, sideLen);
+    if (re > d.goalDepth) {
+      // Boards set back behind the goal, so the ball can run out for a goal kick or a corner.
+      board(sx * (bl / 2 + t / 2), 0, t, bw);
+    } else {
+      const sideLen = (W - d.goalWidth) / 2;
+      board(sx * (L / 2 + t / 2), -(d.goalWidth / 2 + sideLen / 2), t, sideLen);
+      board(sx * (L / 2 + t / 2), d.goalWidth / 2 + sideLen / 2, t, sideLen);
+    }
     g.add(buildGoal(sx, d));
   }
 

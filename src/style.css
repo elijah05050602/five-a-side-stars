@@ -184,6 +184,7 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .abtn-pass { background: var(--blue); color: var(--white); }
 .abtn-sprint { background: var(--green); color: var(--white); }
 .abtn-switch { background: var(--white); }
+.abtn-trick { grid-column: 2; justify-self: center; width: 68px; height: 68px; font-size: 14px; background: #9b5de5; color: var(--white); }
 
 .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(27,42,65,0.45); }
 .overlay[hidden] { display: none; }

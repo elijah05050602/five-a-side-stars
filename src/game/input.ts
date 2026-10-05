@@ -8,29 +8,30 @@ export interface InputState {
   sprint: boolean;
   switchPlayer: boolean; // pressed this frame
   pause: boolean; // pressed this frame
+  trick: boolean; // pressed this frame: step-over or nutmeg
 }
 
 /** Which physical keys (KeyboardEvent.code) drive each action. */
 export interface KeyMap {
   up: string[]; down: string[]; left: string[]; right: string[];
-  shoot: string[]; pass: string[]; sprint: string[]; switch: string[]; pause: string[];
+  shoot: string[]; pass: string[]; sprint: string[]; switch: string[]; pause: string[]; trick: string[];
 }
 
 /** Single player: arrows and WASD both work, with several shoot and pass keys. */
 export const SOLO_KEYS: KeyMap = {
   up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
   shoot: ['Space', 'KeyX', 'KeyK'], pass: ['KeyZ', 'Enter', 'KeyJ'], sprint: ['ShiftLeft', 'ShiftRight', 'KeyL'],
-  switch: ['KeyQ', 'KeyE'], pause: ['Escape', 'KeyP'],
+  switch: ['KeyQ', 'KeyE'], pause: ['Escape', 'KeyP'], trick: ['KeyC', 'KeyU'],
 };
 /** Two players on one keyboard: player 1 on the left-hand side. */
 export const P1_KEYS: KeyMap = {
   up: ['KeyW'], down: ['KeyS'], left: ['KeyA'], right: ['KeyD'],
-  shoot: ['Space', 'KeyF'], pass: ['KeyZ', 'KeyG'], sprint: ['ShiftLeft'], switch: ['KeyQ'], pause: ['Escape', 'KeyP'],
+  shoot: ['Space', 'KeyF'], pass: ['KeyZ', 'KeyG'], sprint: ['ShiftLeft'], switch: ['KeyQ'], pause: ['Escape', 'KeyP'], trick: ['KeyC', 'KeyH'],
 };
 /** Two players on one keyboard: player 2 on the arrow keys. */
 export const P2_KEYS: KeyMap = {
   up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'],
-  shoot: ['Enter', 'Numpad0'], pass: ['Slash', 'NumpadDecimal'], sprint: ['ShiftRight', 'ControlRight'], switch: ['Period', 'NumpadEnter'], pause: ['Escape'],
+  shoot: ['Enter', 'Numpad0'], pass: ['Slash', 'NumpadDecimal'], sprint: ['ShiftRight', 'ControlRight'], switch: ['Period', 'NumpadEnter'], pause: ['Escape'], trick: ['Quote', 'Numpad1'],
 };
 
 export class Input {
@@ -112,7 +113,7 @@ export class Input {
   }
 
   /** Attach a touch button that maps to an action name. */
-  attachButton(el: HTMLElement, action: 'shoot' | 'pass' | 'sprint' | 'switch'): void {
+  attachButton(el: HTMLElement, action: 'shoot' | 'pass' | 'sprint' | 'switch' | 'trick'): void {
     const down = (e: PointerEvent) => {
       e.preventDefault();
       el.setPointerCapture(e.pointerId);
@@ -163,6 +164,7 @@ export class Input {
       sprint: held(m.sprint) || this.touchHeld.has('sprint'),
       switchPlayer: hit(m.switch) || this.touchPressed.has('switch'),
       pause: hit(m.pause),
+      trick: hit(m.trick) || this.touchPressed.has('trick'),
     };
     this.pressed.clear();
     this.touchPressed.clear();

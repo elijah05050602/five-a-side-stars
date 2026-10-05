@@ -35,7 +35,7 @@ export interface Router {
   startMatch(o: StartOptions): void;
 }
 
-export type SetupMode = SimMode | 'tournament' | 'league';
+export type SetupMode = Exclude<SimMode, 'tutorial'> | 'tournament' | 'league';
 
 export type Screen =
   | { name: 'menu' }
@@ -569,7 +569,7 @@ function renderResults(root: HTMLElement, router: Router, r: MatchResult, sticke
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
-  root.querySelector('#r-again')?.addEventListener('click', () => router.go({ name: 'setup', homeId: r.home.id, mode: r.mode }));
+  root.querySelector('#r-again')?.addEventListener('click', () => router.go({ name: 'setup', homeId: r.home.id, mode: r.mode === 'tutorial' ? 'match' : r.mode }));
   root.querySelector('#r-cup')?.addEventListener('click', () => {
     if (tournament!.needsShootout) {
       const f = currentFixture(tournament!)!;

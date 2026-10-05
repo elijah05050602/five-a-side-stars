@@ -9,6 +9,7 @@ export interface HudRefs {
   btnPass: HTMLElement;
   btnSprint: HTMLElement;
   btnSwitch: HTMLElement;
+  btnTrick: HTMLElement;
   update(sim: MatchSim, events: SimEvent[]): void;
   destroy(): void;
 }
@@ -68,6 +69,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       <div class="touch-controls">
         <div class="joystick" id="joy"><div class="joy-knob" id="joy-knob"></div></div>
         <div class="action-buttons">
+          <button class="abtn abtn-trick" id="btn-trick">Trick</button>
           <button class="abtn abtn-switch" id="btn-switch">Switch</button>
           <button class="abtn abtn-sprint" id="btn-sprint">Sprint</button>
           <button class="abtn abtn-pass" id="btn-pass">Pass</button>
@@ -116,8 +118,8 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
             : mode === 'training'
               ? '<p class="muted">Collect the ball, run at goal and hold shoot to power up. Hard shots that fly in are worth 2 points.</p>'
               : s.config.humanSide2 != null
-                ? '<p class="muted"><strong>Player 1:</strong> WASD to move, hold Space to shoot, Z to pass, left Shift to sprint, Q to switch.<br/><strong>Player 2:</strong> arrows to move, hold Enter to shoot, / to pass, right Shift to sprint, . to switch.</p>'
-                : '<p class="muted">Arrow keys or WASD to move. Hold Space to power up a shot and release to shoot, Z to pass, Shift to sprint, Q to switch player.</p>'}
+                ? '<p class="muted"><strong>Player 1:</strong> WASD to move, hold Space to shoot, Z to pass, left Shift to sprint, Q to switch, C for a trick.<br/><strong>Player 2:</strong> arrows to move, hold Enter to shoot, / to pass, right Shift to sprint, . to switch, \' for a trick.</p>'
+                : '<p class="muted">Arrow keys or WASD to move. Hold Space to power up a shot and release to shoot, Z to pass, Shift to sprint, Q to switch player, C for a step-over or nutmeg.</p>'}
           <div class="row">
             <button class="btn btn-primary" id="ov-resume">Keep playing</button>
             <button class="btn btn-ghost" id="ov-quit">Quit match</button>
@@ -150,6 +152,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     btnPass: q('btn-pass'),
     btnSprint: q('btn-sprint'),
     btnSwitch: q('btn-switch'),
+    btnTrick: q('btn-trick'),
     update(s, events) {
       sbH.textContent = String(s.score[0]);
       if (mode !== 'training') sbA.textContent = String(s.score[1]);
@@ -196,7 +199,27 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
             : `<div class="save-text">Foul! Free kick to ${esc(victimTeam.name)}</div>`, 1800);
         } else if (ev.type === 'kickoff' && s.clock > 0.1) {
           showBanner(`<div class="save-text">Kick off!</div>`, 900);
+        } else if (ev.type === 'restart') {
+          const team = s.teams[ev.side!];
+          const what = ev.kind === 'corner' ? 'Corner' : ev.kind === 'goalkick' ? 'Goal kick' : 'Throw-in';
+          showBanner(`<div class="save-text">${what} to ${esc(team.name)}</div>`, 1400);
+        } else if (ev.type === 'trick' && ev.ok) {
+          showBanner(ev.kind === 'nutmeg'
+            ? `<div class="goal-text goal-text-small">NUTMEG!</div><div class="goal-sub">${esc(ev.player?.name ?? '')} through the legs!</div>`
+            : `<div class="save-text">Step-over! ${esc(ev.player?.name ?? '')} sends them the wrong way!</div>`, 1300);
         }
+      }
+      if (mode === 'match') {
+        // Coach the human taker through their own set pieces.
+        const sp = s.phase === 'setpiece' ? s.setPiece : null;
+        const mine = sp && sp.placed && (sp.taker === s.controlled || sp.taker === s.controlled2) ? sp : null;
+        const keys = mine && sp!.taker === s.controlled2 ? P2_TIP_KEYS : touch ? TOUCH_TIP_KEYS : P1_TIP_KEYS;
+        const text = !mine ? '' : mine.kind === 'throwin' ? `Throw-in: aim, then ${keys.pass} to throw it to a team-mate`
+          : mine.kind === 'corner' ? `Corner: hold ${keys.shoot} to cross it into the box, or ${keys.pass} for a short one`
+          : mine.kind === 'goalkick' ? `Goal kick: hold ${keys.shoot} to boot it, or ${keys.pass} to a team-mate`
+          : mine.kind === 'freekick' ? `Free kick: aim, then hold ${keys.shoot} to shoot or ${keys.pass} to pass`
+          : `Penalty: aim, hold ${keys.shoot} and let go!`;
+        if (tip.textContent !== text) tip.textContent = text;
       }
       if (s.phase !== lastPhase) {
         lastPhase = s.phase;
@@ -209,6 +232,11 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     },
   };
 }
+
+const touch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+const P1_TIP_KEYS = { shoot: 'Space', pass: 'Z' };
+const P2_TIP_KEYS = { shoot: 'Enter', pass: '/' };
+const TOUCH_TIP_KEYS = { shoot: 'Shoot', pass: 'Pass' };
 
 const GOAL_LINES = ['What a strike!', 'Top corner!', 'The keeper had no chance!', 'Cool as you like!', 'Smashed it!', 'Into the net!', 'Goal of the season?', 'Brilliant finish!'];
 const SAVE_LINES = ['What a stop!', 'Fingertips!', 'Safe hands!', 'Denied!'];

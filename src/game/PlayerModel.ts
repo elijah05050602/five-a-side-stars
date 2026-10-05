@@ -34,6 +34,9 @@ export interface AnimState {
   gazeY: number;
   /** Jump for joy (goal celebration). */
   cheer: boolean;
+  /** Step-over skill move: 1 as it starts, fading to 0; stepoverDir is which way the feint goes (-1 or 1). */
+  stepover?: number;
+  stepoverDir?: number;
 }
 
 export const IDLE_STATE: AnimState = { speed: 0, kick: 0, dive: 0, diveDir: 1, stun: 0, tackle: 0, scale: 1, wobble: 0, mood: 'neutral', gazeX: 0, gazeY: 0, cheer: false };
@@ -102,6 +105,7 @@ export class PlayerModel {
 
   private loco: Loco = 'idle';
   private oneShot: THREE.AnimationAction | null = null;
+  private wasStepping = false;
   private wasKicking = false;
   private wasDiving = false;
   private wasStunned = false;
@@ -315,6 +319,10 @@ export class PlayerModel {
 
     // One-shots: a kick snaps in over the run; a dive plays once and holds; a tackle knocks you.
     const kicking = st.kick > 0, diving = st.dive > 0, stunned = st.stun > 0, tackling = st.tackle > 0;
+    const stepping = (st.stepover ?? 0) > 0;
+    // Step-over: a quick dodge one way over the ball (the clip is played fast so it reads as a feint).
+    if (stepping && !this.wasStepping && !kicking && !diving) this.startOneShot((st.stepoverDir ?? 1) > 0 ? 'Dodge_Right' : 'Dodge_Left', 2.6, false);
+    this.wasStepping = stepping;
     if (kicking && !this.wasKicking) this.startOneShot('Unarmed_Melee_Attack_Kick', 2.4, false);
     const toRight = st.diveDir * Math.cos(this.facing) > 0;
     if (diving && !this.wasDiving) this.startOneShot(toRight ? 'Dodge_Right' : 'Dodge_Left', 1.1, true);
@@ -343,6 +351,7 @@ export class PlayerModel {
     roll += st.wobble * Math.sin(performance.now() / 180) * 0.12 * Math.min(1, norm / 2);
     if (kicking) lift += 0.07 * scale * Math.sin(st.kick * Math.PI);
     if (stunned) roll += 0.22 * st.stun * Math.sin(st.stun * Math.PI * 3);
+    if (stepping) roll += (st.stepoverDir ?? 1) * 0.3 * Math.sin((1 - st.stepover!) * Math.PI * 2);
     if (this.slide > 0) {
       // Slide tackle: sit back and drop, then spring up.
       this.slide = Math.max(0, this.slide - dt);
