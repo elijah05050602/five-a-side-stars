@@ -16,6 +16,7 @@ import { isNameOk } from '../data/wordFilter';
 import { music } from '../game/music';
 import { applyMotionSetting } from './motion';
 import pkg from '../../package.json';
+import { dock, pageHead, shellBar, wireShell, type ShellTab } from './shell';
 
 export interface StartOptions {
   home: Team;
@@ -53,6 +54,8 @@ let cleanup: (() => void) | null = null;
 export function renderScreen(root: HTMLElement, screen: Screen, router: Router): void {
   cleanup?.();
   cleanup = null;
+  currentRouter = router;
+  onEscape = null;
   root.innerHTML = '';
   root.className = 'screen-root';
   switch (screen.name) {
@@ -68,47 +71,72 @@ export function renderScreen(root: HTMLElement, screen: Screen, router: Router):
   }
 }
 
-function topBar(title: string): string {
-  return `<header class="topbar"><button class="btn btn-back" data-back aria-label="Back">←</button><h1>${esc(title)}</h1></header>`;
+let currentRouter: Router;
+let onEscape: (() => void) | null = null;
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && onEscape && !document.body.classList.contains('in-match')) { e.preventDefault(); onEscape(); } });
+
+function topBar(title: string, tab: ShellTab = 'none', backLabel = 'Lobby', extra = ''): string {
+  return shellBar(tab) + pageHead(title, backLabel, extra);
 }
 
 function wire(root: HTMLElement, back: () => void): void {
   root.querySelector('[data-back]')?.addEventListener('click', back);
+  wireShell(root, currentRouter);
+  onEscape = back;
 }
 
 // ---------- Main menu ----------
 
 function renderMenu(root: HTMLElement, router: Router): void {
+  const league = getLeague();
+  const progress = getProgress();
+  const teams = getTeams();
+  const hasKeyboard = window.matchMedia('(pointer: fine)').matches;
+  root.className = 'screen-root lobby-root';
   root.innerHTML = `
-    <div class="screen menu">
-      <div class="logo"><span class="logo-ball">⚽</span><h1>Five-a-Side<br/>Stars</h1><p class="tagline">Build your team. Play the match. Score the winner!</p></div>
-      <div class="menu-buttons">
-        <button class="btn btn-primary btn-big" id="m-play">⚡ Quick Match</button>
-        <div class="menu-row">
-          <button class="btn btn-yellow" id="m-cup">🏆 Tournament</button>
-          <button class="btn btn-yellow" id="m-league">📋 League${getLeague() ? ` <span class="pill-badge">Tier ${getLeague()!.tier}</span>` : ''}</button>
-        </div>
-        <div class="menu-row">
-          <button class="btn btn-blue" id="m-pens">🥅 Penalties</button>
-          <button class="btn btn-blue" id="m-train">🎯 Training</button>
-        </div>
-        <div class="menu-row">
-          <button class="btn btn-ghost" id="m-teams">👕 My Teams</button>
-          <button class="btn btn-ghost" id="m-album">📒 Stickers <span class="pill-badge">${getProgress().stickers.length}/${STICKERS.length}</span></button>
-        </div>
-        <button class="btn btn-ghost" id="m-parents">🛡️ Parents</button>
+    <div class="lobby-bg" aria-hidden="true"><span class="spark s1">⭐</span><span class="spark s2">✨</span><span class="spark s3">⚡</span><span class="spark s4">⭐</span></div>
+    <div class="screen lobby">
+      ${shellBar('lobby')}
+      <div class="hero">
+        <h1 class="title"><span class="title-goal">GOAL</span><span class="title-rush">RUSH!</span></h1>
+        <div class="ribbon"><span>★</span> BUILD YOUR SQUAD • RULE THE PITCH <span>★</span></div>
       </div>
-      <p class="hint">Keyboard: arrows or WASD to run · hold Space to shoot · Z pass · Shift sprint · Q switch</p>
-      <p class="version">v${pkg.version} · works offline once loaded · no accounts, no adverts</p>
+      <div class="stage">
+        <div class="mascot">
+          <div class="mascot-pod"><img src="./art/mascot.jpg" alt="" width="512" height="512" /></div>
+          <div class="mascot-chip"><span class="mascot-num">${teams.length}</span><span><strong>${teams.length === 1 ? 'Team ready' : 'Teams ready'}</strong><small>${esc(teams[0]?.name ?? 'Create a team')}</small></span></div>
+        </div>
+        <div class="portals">
+          <button class="launcher" id="m-play">
+            <span class="launcher-bolt">⚡</span>
+            <span class="launcher-text"><small>Play now</small><strong>QUICK MATCH</strong><span>Against the computer, or a friend on the same keyboard</span></span>
+            <span class="launcher-go">KICK OFF ⚽</span>
+          </button>
+          <div class="portal-grid">
+            <button class="portal portal-gold" id="m-cup"><span class="portal-icon">🏆</span><span class="portal-text"><small>Four-team cup</small><strong>TOURNAMENT</strong><span>Two semis and a final</span></span></button>
+            <button class="portal portal-green" id="m-league"><span class="portal-icon">📋</span><span class="portal-text"><small>${league ? `Tier ${league.tier} · season ${league.season}` : 'Five tiers to climb'}</small><strong>LEAGUE</strong><span>${league ? 'Carry on your season' : 'Start in the Acorn League'}</span></span></button>
+            <button class="portal portal-sky" id="m-pens"><span class="portal-icon">🥅</span><span class="portal-text"><small>Shoot-out</small><strong>PENALTIES</strong><span>Best of five, then sudden death</span></span></button>
+            <button class="portal portal-sky" id="m-train"><span class="portal-icon">🎯</span><span class="portal-text"><small>Skill challenge</small><strong>TRAINING</strong><span>Score as many as you can</span></span></button>
+            <button class="portal portal-white" id="m-teams"><span class="portal-icon">👕</span><span class="portal-text"><small>Locker room</small><strong>MY SQUAD</strong><span>Badges, kits and players</span></span></button>
+            <button class="portal portal-white" id="m-album"><span class="portal-icon">📒</span><span class="portal-text"><small>Collector · ${progress.stickers.length} / ${STICKERS.length}</small><strong>STICKERS</strong><span class="mini-bar"><i style="width:${Math.round((progress.stickers.length / STICKERS.length) * 100)}%"></i></span></span></button>
+          </div>
+        </div>
+      </div>
+      ${hasKeyboard ? dock() : '<footer class="dock dock-touch"><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></footer>'}
+      <p class="version">Goal Rush! v${pkg.version} · works offline once loaded · no accounts, no adverts</p>
     </div>`;
+  wireShell(root, router);
+  onEscape = null;
   root.querySelector('#m-play')!.addEventListener('click', () => router.go({ name: 'setup' }));
   root.querySelector('#m-cup')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'tournament' }));
-  root.querySelector('#m-league')!.addEventListener('click', () => router.go(getLeague() ? { name: 'league' } : { name: 'setup', mode: 'league' }));
+  root.querySelector('#m-league')!.addEventListener('click', () => router.go(league ? { name: 'league' } : { name: 'setup', mode: 'league' }));
   root.querySelector('#m-pens')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'shootout' }));
   root.querySelector('#m-train')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'training' }));
   root.querySelector('#m-teams')!.addEventListener('click', () => router.go({ name: 'teams' }));
   root.querySelector('#m-album')!.addEventListener('click', () => router.go({ name: 'album' }));
-  root.querySelector('#m-parents')!.addEventListener('click', () => router.go({ name: 'parents' }));
+  const onKey = (e: KeyboardEvent) => { if (e.code === 'Space' && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); router.go({ name: 'setup' }); } };
+  window.addEventListener('keydown', onKey);
+  cleanup = () => window.removeEventListener('keydown', onKey);
 }
 
 // ---------- Teams list ----------
@@ -117,7 +145,7 @@ function renderTeams(root: HTMLElement, router: Router): void {
   const teams = getTeams();
   root.innerHTML = `
     <div class="screen">
-      ${topBar('My Teams')}
+      ${topBar('My Squad', 'squad')}
       <div class="team-grid">
         ${teams.map((t) => `
           <div class="card team-card" data-id="${t.id}">
@@ -154,9 +182,9 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     const stats = AGE_STATS[team.ageGroup];
     root.innerHTML = `
       <div class="screen builder">
-        ${topBar(existing ? 'Edit Team' : 'Create Team')}
+        ${topBar(existing ? 'Edit Team' : 'Create Team', 'squad', 'Squad')}
         <nav class="steps">
-          ${['1. Club', '2. Kits', '3. Squad'].map((s, i) => `<button class="step ${i === step ? 'is-active' : ''}" data-step="${i}">${s}</button>`).join('')}
+          ${['Club Badge', 'Kits & Boots', 'Squad Lineup'].map((s, i) => `<button class="step ${i === step ? 'is-active' : ''} ${i < step ? 'is-done' : ''}" data-step="${i}"><span class="step-num">${i < step ? '✓' : i + 1}</span>${s}</button>`).join('')}
         </nav>
         <div class="builder-body">
           <div class="builder-form" id="form"></div>
@@ -174,7 +202,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
           ${step > 0 ? '<button class="btn btn-ghost" id="b-prev">Back</button>' : '<span></span>'}
           <span class="row">
             ${step === 2 ? '<button class="btn btn-ghost" id="b-sheet" title="Download a team sheet to print">🖨️ Team sheet</button>' : ''}
-            ${step < 2 ? '<button class="btn btn-primary" id="b-next">Next →</button>' : '<button class="btn btn-primary" id="b-save">Save team ✓</button>'}
+            ${step < 2 ? '<button class="btn btn-primary" id="b-next">Next step →</button>' : '<button class="btn btn-primary" id="b-save">Save squad lineup ⚽</button>'}
           </span>
         </footer>
       </div>`;
@@ -424,7 +452,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
     const [homeK, awayK, swapped] = resolveKits(home, away);
     root.innerHTML = `
       <div class="screen setup">
-        ${topBar(info.title)}
+        ${topBar(info.title, mode === 'tournament' ? 'cup' : mode === 'league' ? 'league' : 'none')}
         ${info.blurb ? `<p class="mode-blurb">${esc(info.blurb)}</p>` : ''}
         <div class="vs ${mode === 'training' || mode === 'tournament' || mode === 'league' ? 'vs-solo' : ''}">
           <div class="card vs-card">
@@ -543,7 +571,7 @@ function renderResults(root: HTMLElement, router: Router, r: MatchResult, sticke
   const soLen = r.shootout ? Math.max(5, r.shootout[0].length, r.shootout[1].length) : 0;
   root.innerHTML = `
     <div class="screen results">
-      ${topBar(r.mode === 'training' ? 'Training over' : r.mode === 'shootout' ? 'Shoot-out over' : 'Full Time')}
+      ${topBar(r.mode === 'training' ? 'Training over' : r.mode === 'shootout' ? 'Shoot-out over' : 'Full Time', tournament ? 'cup' : league ? 'league' : 'none')}
       <div class="card results-card">
         <h2>${esc(headline)}</h2>
         ${r.mode === 'training' ? `
@@ -609,7 +637,7 @@ function renderLeague(root: HTMLElement, router: Router): void {
     : '';
   root.innerHTML = `
     <div class="screen league">
-      ${topBar('League')}
+      ${topBar('League', 'league')}
       <div class="tier-banner tier-${ls.tier}">
         <span class="tier-num">Tier ${ls.tier}</span>
         <h2>${esc(info.name)}</h2>
@@ -681,7 +709,8 @@ function renderTournament(root: HTMLElement, router: Router, s: TournamentState)
   const nextLabel = s.stage === 'semi' ? '⚽ Play your semi-final' : '⚽ Play the final!';
   root.innerHTML = `
     <div class="screen tournament ${youWon ? 'is-champion' : ''}">
-      ${topBar(`${esc(you.ageGroup)} Cup`)}
+      ${topBar(`${you.ageGroup} Cup`, 'cup')}
+      <div class="cup-hero"><div><h2>${s.stage === 'done' ? 'Final whistle!' : s.stage === 'semi' ? 'Semi-finals' : 'The Final'}</h2><p>${s.stage === 'done' ? 'The cup has been lifted. Fancy another go?' : 'Four teams, two semis and a final. Draws go to penalties!'}</p></div></div>
       ${s.stage === 'done' ? `<div class="card trophy-card">
           <div class="trophy">${youWon ? '🏆' : '🥈'}</div>
           <h2>${youWon ? `${esc(you.name)} are the champions!` : stillIn ? 'So close! Runners-up this time.' : `${esc(champion?.name ?? 'Someone')} lifted the cup.`}</h2>
@@ -719,7 +748,7 @@ function renderAlbum(root: HTMLElement, router: Router): void {
   const p = getProgress();
   root.innerHTML = `
     <div class="screen album">
-      ${topBar('Sticker Album')}
+      ${topBar('Sticker Album', 'album')}
       <div class="card stats-card">
         <div class="stat"><strong>${p.played}</strong><span>matches</span></div>
         <div class="stat"><strong>${p.won}</strong><span>wins</span></div>
@@ -765,7 +794,7 @@ function renderParents(root: HTMLElement, router: Router): void {
   const a = 3 + Math.floor(Math.random() * 6), b = 2 + Math.floor(Math.random() * 7);
   root.innerHTML = `
     <div class="screen parents">
-      ${topBar('Parents')}
+      ${topBar('Parents Zone')}
       <div class="card gate-card">
         <h2>Grown-ups only</h2>
         <p class="muted">To open the settings, answer this: what is <strong>${a} × ${b}</strong>?</p>
@@ -791,7 +820,7 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
   const p = getProgress();
   root.innerHTML = `
     <div class="screen parents">
-      ${topBar('Parents')}
+      ${topBar('Parents Zone')}
       <div class="card">
         <h2>Settings</h2>
         <label class="toggle"><input type="checkbox" id="pa-sound" ${s.sound ? 'checked' : ''}/> Sound effects</label>
