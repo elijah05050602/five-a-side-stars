@@ -16,6 +16,15 @@ npm run build    # type-check and build to dist/
 npm run preview  # serve the built game
 ```
 
+## Ways to play
+
+- **Quick Match**: one match against the computer (or a friend on the same keyboard).
+- **Tournament**: a four-team cup with two semi-finals and a final. Draws go to penalties.
+- **Penalties**: a best-of-five shoot-out, then sudden death. You take and save.
+- **Training**: just you and a keeper; score as many as you can before time runs out (rocket shots count double).
+- **Sticker album**: finish matches, win cups and hit milestones to collect stickers; some unlock extra badge icons.
+- **Team sheet**: from the squad step of the team builder, download a printable PNG team sheet.
+
 ## Controls
 
 | Action | Keyboard | Touch |

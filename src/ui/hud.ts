@@ -13,6 +13,10 @@ export interface HudRefs {
 }
 
 function fmtClock(sim: MatchSim): string {
+  if (sim.mode === 'training') {
+    const left = Math.max(0, sim.config.halfSeconds - sim.clock);
+    return `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
+  }
   // Show the match as a 40-minute game, 20 per half, whatever the real length.
   const perHalf = sim.config.halfSeconds;
   const total = perHalf * 2;
@@ -21,16 +25,33 @@ function fmtClock(sim: MatchSim): string {
   return `${String(shown).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
+const PENS_SHOWN = 5;
+
+function pensDots(res: boolean[]): string {
+  const n = Math.max(PENS_SHOWN, res.length);
+  let out = '';
+  for (let i = 0; i < n; i++) out += res[i] === undefined ? '<i class="pen pen-todo"></i>' : res[i] ? '<i class="pen pen-goal">⚽</i>' : '<i class="pen pen-miss">✕</i>';
+  return out;
+}
+
 export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void }): HudRefs {
   const [home, away] = sim.teams;
+  const mode = sim.mode;
   root.innerHTML = `
-    <div class="hud">
+    <div class="hud hud-${mode}">
       <div class="scoreboard">
+        ${mode === 'training' ? `
+        <div class="sb-team sb-home">${badgeSvg(home.badge, 30)}<span class="sb-name">${esc(home.short)}</span></div>
+        <div class="sb-score sb-points"><span id="sb-h">0</span><small>pts</small></div>
+        <div class="sb-team sb-away"><span class="sb-name">🎯</span></div>
+        <div class="sb-clock"><span id="sb-clock">0:00</span><span class="sb-half" id="sb-half">left</span></div>` : `
         <div class="sb-team sb-home">${badgeSvg(home.badge, 30)}<span class="sb-name">${esc(home.short)}</span></div>
         <div class="sb-score"><span id="sb-h">0</span><span class="sb-dash">–</span><span id="sb-a">0</span></div>
         <div class="sb-team sb-away"><span class="sb-name">${esc(away.short)}</span>${badgeSvg(away.badge, 30)}</div>
-        <div class="sb-clock"><span id="sb-clock">00:00</span><span class="sb-half" id="sb-half">1st half</span></div>
+        <div class="sb-clock"><span id="sb-clock">00:00</span><span class="sb-half" id="sb-half">${mode === 'shootout' ? 'penalties' : '1st half'}</span></div>`}
       </div>
+      ${mode === 'shootout' ? `<div class="pens-board"><div class="pens-line"><span class="pens-name">${esc(home.short)}</span><span id="pens-h"></span></div><div class="pens-line"><span class="pens-name">${esc(away.short)}</span><span id="pens-a"></span></div></div>` : ''}
+      <div class="hud-tip" id="hud-tip"></div>
       <button class="hud-pause" id="hud-pause" aria-label="Pause">❚❚</button>
       <div class="hud-player-box hud-player-box-p2" id="hud-player-box-2" style="display:none">
         <div class="hud-player hud-player-p2" id="hud-player-2"></div>
@@ -67,8 +88,13 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   const barStamina2 = q('bar-stamina-2');
   const barPower2 = q('bar-power-2');
   const pauseBtn = q<HTMLButtonElement>('hud-pause');
+  const tip = q('hud-tip');
+  const pensH = root.querySelector<HTMLElement>('#pens-h');
+  const pensA = root.querySelector<HTMLElement>('#pens-a');
   let bannerTimer = 0;
   let lastPhase = '';
+  let lastPens = -1;
+  let lastTaking: number | null = null;
   pauseBtn.addEventListener('click', () => cb.onPause());
 
   const showBanner = (html: string, ms: number) => {
@@ -84,9 +110,13 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       overlay.innerHTML = `
         <div class="card overlay-card">
           <h2>Paused</h2>
-          ${s.config.humanSide2 != null
-            ? '<p class="muted"><strong>Player 1:</strong> WASD to move, hold Space to shoot, Z to pass, left Shift to sprint, Q to switch.<br/><strong>Player 2:</strong> arrows to move, hold Enter to shoot, / to pass, right Shift to sprint, . to switch.</p>'
-            : '<p class="muted">Arrow keys or WASD to move. Hold Space to power up a shot and release to shoot, Z to pass, Shift to sprint, Q to switch player.</p>'}
+          ${mode === 'shootout'
+            ? '<p class="muted">Taking a penalty: hold shoot to power up, aim with the stick, release to kick. In goal: push left or right to dive.</p>'
+            : mode === 'training'
+              ? '<p class="muted">Collect the ball, run at goal and hold shoot to power up. Hard shots that fly in are worth 2 points.</p>'
+              : s.config.humanSide2 != null
+                ? '<p class="muted"><strong>Player 1:</strong> WASD to move, hold Space to shoot, Z to pass, left Shift to sprint, Q to switch.<br/><strong>Player 2:</strong> arrows to move, hold Enter to shoot, / to pass, right Shift to sprint, . to switch.</p>'
+                : '<p class="muted">Arrow keys or WASD to move. Hold Space to power up a shot and release to shoot, Z to pass, Shift to sprint, Q to switch player.</p>'}
           <div class="row">
             <button class="btn btn-primary" id="ov-resume">Keep playing</button>
             <button class="btn btn-ghost" id="ov-quit">Quit match</button>
@@ -101,8 +131,8 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       overlay.hidden = false;
       overlay.innerHTML = `
         <div class="card overlay-card">
-          <h2>Full time!</h2>
-          <p class="score-big">${esc(home.short)} ${s.score[0]} – ${s.score[1]} ${esc(away.short)}</p>
+          <h2>${mode === 'training' ? "Time's up!" : mode === 'shootout' ? 'Shoot-out over!' : 'Full time!'}</h2>
+          <p class="score-big">${mode === 'training' ? `${s.trainingPoints} points` : `${esc(home.short)} ${s.score[0]} – ${s.score[1]} ${esc(away.short)}`}</p>
           <button class="btn btn-primary" id="ov-finish">See the results</button>
         </div>`;
       overlay.querySelector('#ov-finish')!.addEventListener('click', () => cb.onFinish());
@@ -121,9 +151,20 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     btnSwitch: q('btn-switch'),
     update(s, events) {
       sbH.textContent = String(s.score[0]);
-      sbA.textContent = String(s.score[1]);
+      if (mode !== 'training') sbA.textContent = String(s.score[1]);
       clock.textContent = fmtClock(s);
-      halfEl.textContent = s.half === 1 ? '1st half' : '2nd half';
+      if (mode === 'match') halfEl.textContent = s.half === 1 ? '1st half' : '2nd half';
+      if (s.shootout && pensH && pensA) {
+        const so = s.shootout;
+        const n = so.results[0].length + so.results[1].length;
+        if (n !== lastPens) { lastPens = n; pensH.innerHTML = pensDots(so.results[0]); pensA.innerHTML = pensDots(so.results[1]); }
+        if (so.taking !== lastTaking || s.phase === 'setpiece') {
+          lastTaking = so.taking;
+          const human = s.isHuman(so.taking);
+          const humanKeeper = s.isHuman((1 - so.taking) as 0 | 1);
+          tip.textContent = s.phase === 'setpiece' ? (human ? `${esc(s.teams[so.taking].short)} to take: hold shoot, aim, release!` : humanKeeper ? 'You are in goal: push left or right to dive!' : `${s.teams[so.taking].short} to take…`) : '';
+        }
+      }
       if (s.controlled) {
         playerLabel.textContent = `#${s.controlled.info.number} ${s.controlled.info.name}`;
         playerBox.style.display = '';
@@ -145,6 +186,8 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
           confetti(root, team.kit.shirt, team.kit.shirt2);
         } else if (ev.type === 'save') {
           showBanner(`<div class="save-text">Great save, ${esc(ev.player?.name ?? 'keeper')}!</div>`, 1200);
+        } else if (ev.type === 'miss') {
+          showBanner(`<div class="save-text">Missed!</div>`, 1200);
         } else if (ev.type === 'foul') {
           const victimTeam = s.teams[1 - ev.side!];
           showBanner(ev.kind === 'penalty'

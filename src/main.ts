@@ -1,8 +1,8 @@
 import './style.css';
 import { MatchScene } from './game/MatchScene';
+import { recordResult } from './data/progress';
 import { loadSave } from './data/storage';
-import type { Difficulty, Team } from './data/types';
-import { renderScreen, type Router, type Screen } from './ui/screens';
+import { renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLElement;
@@ -17,15 +17,20 @@ const router: Router = {
     document.body.classList.remove('in-match');
     renderScreen(ui, screen, router);
   },
-  startMatch(home: Team, away: Team, difficulty: Difficulty, halfSeconds: number, twoPlayer = false) {
+  startMatch(o: StartOptions) {
     if (match) match.dispose();
     ui.innerHTML = '';
     ui.className = 'match-ui';
     canvas.classList.add('is-live');
     document.body.classList.add('in-match');
-    match = new MatchScene(canvas, ui, { home, away, difficulty, halfSeconds, humanSide: 0, humanSide2: twoPlayer ? 1 : null },
-      (result) => { match = null; router.go({ name: 'results', result }); },
-      () => { match = null; router.go({ name: 'menu' }); });
+    const mode = o.mode ?? 'match';
+    match = new MatchScene(canvas, ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode },
+      (result) => {
+        match = null;
+        const stickers = recordResult(result);
+        router.go({ name: 'results', result, stickers, tournament: o.tournament });
+      },
+      () => { match = null; router.go(o.tournament ? { name: 'tournament', state: o.tournament } : { name: 'menu' }); });
   },
 };
 

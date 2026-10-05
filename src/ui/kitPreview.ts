@@ -24,7 +24,7 @@ export function kitChip(kit: Kit, size = 28): string {
       break;
   }
   const shirtPath = 'M8 6 L15 2 Q20 7 25 2 L32 6 L38 14 L31 18 L30 36 L10 36 L9 18 L2 14 Z';
-  return `<svg class="kit-chip" width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true">
+  return `<svg xmlns="http://www.w3.org/2000/svg" class="kit-chip" width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true">
     <defs>${pattern}</defs>
     <path d="${shirtPath}" fill="${kit.shirt}" stroke="#1b2a41" stroke-width="1.5" stroke-linejoin="round"/>
     ${pattern ? `<path d="${shirtPath}" fill="url(#${id})"/>` : ''}
@@ -41,7 +41,7 @@ export function badgeSvg(b: Badge, size = 48): string {
     hex: '<path d="M24 3 L42 13.5 V34.5 L24 45 L6 34.5 V13.5 Z"/>',
   }[b.shape];
   const id = `b${Math.random().toString(36).slice(2, 8)}`;
-  return `<svg class="badge" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">
+  return `<svg xmlns="http://www.w3.org/2000/svg" class="badge" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">
     <defs><clipPath id="${id}">${shape}</clipPath></defs>
     <g fill="${b.colour1}" stroke="#1b2a41" stroke-width="2" stroke-linejoin="round">${shape}</g>
     <rect clip-path="url(#${id})" x="24" y="0" width="24" height="48" fill="${b.colour2}" opacity="0.9"/>

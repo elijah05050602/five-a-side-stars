@@ -3,22 +3,39 @@ import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, 
 import { deleteTeam, getSettings, getTeam, getTeams, resetAll, saveTeam, updateSettings } from '../data/storage';
 import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, HAIR_STYLES, KIT_PATTERNS, SPECIALS, type AgeGroup, type BadgeShape, type Difficulty, type HairStyle, type Kit, type Position, type Special, type Team } from '../data/types';
 import { kitsClash } from '../game/kitTexture';
-import type { MatchResult } from '../game/MatchScene';
+import type { MatchResult, SimMode } from '../game/MatchScene';
+import { STICKERS, getProgress, lockedIcons, recordTrophy, unlockedIcons, type Sticker } from '../data/progress';
+import { applyResult, createTournament, currentFixture, humanStillIn, teamById, type Fixture, type TournamentState } from '../game/tournament';
 import { esc } from './hud';
 import { badgeSvg, kitChip } from './kitPreview';
 import { KitPreview3D } from './preview3d';
+import { downloadTeamSheet } from './teamSheet';
+
+export interface StartOptions {
+  home: Team;
+  away: Team;
+  difficulty: Difficulty;
+  halfSeconds: number;
+  twoPlayer?: boolean;
+  mode?: SimMode;
+  tournament?: TournamentState;
+}
 
 export interface Router {
   go(screen: Screen): void;
-  startMatch(home: Team, away: Team, difficulty: Difficulty, halfSeconds: number, twoPlayer?: boolean): void;
+  startMatch(o: StartOptions): void;
 }
+
+export type SetupMode = SimMode | 'tournament';
 
 export type Screen =
   | { name: 'menu' }
   | { name: 'teams' }
   | { name: 'builder'; teamId?: string }
-  | { name: 'setup'; homeId?: string }
-  | { name: 'results'; result: MatchResult }
+  | { name: 'setup'; homeId?: string; mode?: SetupMode }
+  | { name: 'results'; result: MatchResult; stickers?: Sticker[]; tournament?: TournamentState }
+  | { name: 'tournament'; state: TournamentState }
+  | { name: 'album' }
   | { name: 'parents' };
 
 let cleanup: (() => void) | null = null;
@@ -32,8 +49,10 @@ export function renderScreen(root: HTMLElement, screen: Screen, router: Router):
     case 'menu': return renderMenu(root, router);
     case 'teams': return renderTeams(root, router);
     case 'builder': return renderBuilder(root, router, screen.teamId);
-    case 'setup': return renderSetup(root, router, screen.homeId);
-    case 'results': return renderResults(root, router, screen.result);
+    case 'setup': return renderSetup(root, router, screen.homeId, screen.mode ?? 'match');
+    case 'results': return renderResults(root, router, screen.result, screen.stickers ?? [], screen.tournament);
+    case 'tournament': return renderTournament(root, router, screen.state);
+    case 'album': return renderAlbum(root, router);
     case 'parents': return renderParents(root, router);
   }
 }
@@ -54,13 +73,25 @@ function renderMenu(root: HTMLElement, router: Router): void {
       <div class="logo"><span class="logo-ball">⚽</span><h1>Five-a-Side<br/>Stars</h1><p class="tagline">Build your team. Play the match. Score the winner!</p></div>
       <div class="menu-buttons">
         <button class="btn btn-primary btn-big" id="m-play">⚡ Quick Match</button>
-        <button class="btn btn-blue btn-big" id="m-teams">👕 My Teams</button>
-        <button class="btn btn-ghost btn-big" id="m-parents">🛡️ Parents</button>
+        <button class="btn btn-yellow btn-big" id="m-cup">🏆 Tournament</button>
+        <div class="menu-row">
+          <button class="btn btn-blue" id="m-pens">🥅 Penalties</button>
+          <button class="btn btn-blue" id="m-train">🎯 Training</button>
+        </div>
+        <div class="menu-row">
+          <button class="btn btn-ghost" id="m-teams">👕 My Teams</button>
+          <button class="btn btn-ghost" id="m-album">📒 Stickers <span class="pill-badge">${getProgress().stickers.length}/${STICKERS.length}</span></button>
+        </div>
+        <button class="btn btn-ghost" id="m-parents">🛡️ Parents</button>
       </div>
-      <p class="hint">Keyboard: arrows or WASD to run · Space shoot · Z pass · Shift sprint · Q switch</p>
+      <p class="hint">Keyboard: arrows or WASD to run · hold Space to shoot · Z pass · Shift sprint · Q switch</p>
     </div>`;
   root.querySelector('#m-play')!.addEventListener('click', () => router.go({ name: 'setup' }));
+  root.querySelector('#m-cup')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'tournament' }));
+  root.querySelector('#m-pens')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'shootout' }));
+  root.querySelector('#m-train')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'training' }));
   root.querySelector('#m-teams')!.addEventListener('click', () => router.go({ name: 'teams' }));
+  root.querySelector('#m-album')!.addEventListener('click', () => router.go({ name: 'album' }));
   root.querySelector('#m-parents')!.addEventListener('click', () => router.go({ name: 'parents' }));
 }
 
@@ -125,13 +156,23 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
         </div>
         <footer class="builder-footer">
           ${step > 0 ? '<button class="btn btn-ghost" id="b-prev">Back</button>' : '<span></span>'}
-          ${step < 2 ? '<button class="btn btn-primary" id="b-next">Next →</button>' : '<button class="btn btn-primary" id="b-save">Save team ✓</button>'}
+          <span class="row">
+            ${step === 2 ? '<button class="btn btn-ghost" id="b-sheet" title="Download a team sheet to print">🖨️ Team sheet</button>' : ''}
+            ${step < 2 ? '<button class="btn btn-primary" id="b-next">Next →</button>' : '<button class="btn btn-primary" id="b-save">Save team ✓</button>'}
+          </span>
         </footer>
       </div>`;
     wire(root, () => router.go({ name: 'teams' }));
     root.querySelectorAll<HTMLElement>('[data-step]').forEach((b) => b.addEventListener('click', () => { step = Number(b.dataset.step) as 0 | 1 | 2; render(); }));
     root.querySelector('#b-prev')?.addEventListener('click', () => { step = (step - 1) as 0 | 1 | 2; render(); });
     root.querySelector('#b-next')?.addEventListener('click', () => { if (validate()) { step = (step + 1) as 0 | 1 | 2; render(); } });
+    root.querySelector('#b-sheet')?.addEventListener('click', async (e) => {
+      if (!validate()) return;
+      const btn = e.currentTarget as HTMLButtonElement;
+      btn.disabled = true; btn.textContent = 'Drawing…';
+      try { await downloadTeamSheet({ ...team, short: shortCode(team.name) }); } catch { alert('Sorry, the team sheet could not be made on this device.'); }
+      btn.disabled = false; btn.textContent = '🖨️ Team sheet';
+    });
     root.querySelector('#b-save')?.addEventListener('click', () => {
       if (!validate()) return;
       team.short = shortCode(team.name);
@@ -175,7 +216,8 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
         <div class="badge-row">
           <div class="pills">${BADGE_SHAPES.map((sh) => `<button class="pill pill-badge ${team.badge.shape === sh ? 'is-active' : ''}" data-shape="${sh}">${badgeSvg({ ...team.badge, shape: sh }, 36)}</button>`).join('')}</div>
         </div>
-        <div class="icon-grid">${BADGE_ICONS.map((ic) => `<button class="icon-tile ${team.badge.icon === ic ? 'is-active' : ''}" data-icon="${ic}">${ic}</button>`).join('')}</div>
+        <div class="icon-grid">${[...BADGE_ICONS, ...unlockedIcons()].map((ic) => `<button class="icon-tile ${team.badge.icon === ic ? 'is-active' : ''}" data-icon="${ic}">${ic}</button>`).join('')}${lockedIcons().map((l) => `<button class="icon-tile is-locked" disabled title="Unlock with the ${esc(l.sticker.name)} sticker: ${esc(l.sticker.how)}">${l.icon}<small>🔒</small></button>`).join('')}</div>
+        <p class="muted small">🔒 icons unlock when you earn stickers.</p>
         <div class="row">
           <div class="field"><span>Badge colour 1</span><div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${team.badge.colour1 === c ? 'is-active' : ''}" style="background:${c}" data-badge="colour1" data-colour="${c}"></button>`).join('')}</div></div>
         </div>
@@ -329,16 +371,26 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
 
 // ---------- Match setup ----------
 
-function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
+const MODE_INFO: Record<SetupMode, { title: string; go: string; blurb: string }> = {
+  match: { title: 'Match Setup', go: '⚽ Kick Off!', blurb: '' },
+  tournament: { title: 'Tournament', go: '🏆 Start the cup!', blurb: 'Four teams, two semi-finals and a final. Win both of your games to lift the trophy. Draws go to penalties!' },
+  shootout: { title: 'Penalty Shoot-out', go: '🥅 Start the shoot-out!', blurb: 'Best of five penalties each, then sudden death. Hold shoot to power up and aim with the stick. In goal, move to dive!' },
+  training: { title: 'Shooting Training', go: '🎯 Start training!', blurb: 'Just you, a keeper and a bag of balls. Score as many as you can before the time runs out. Rocket shots count double!' },
+};
+
+function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: SetupMode = 'match'): void {
   const teams = getTeams();
   const settings = getSettings();
   let home = (homeId && getTeam(homeId)) || teams[0];
   let opponentId: string | 'cpu' = 'cpu';
   let cpu = generateOpponent(home.ageGroup, home.kit);
   let difficulty: Difficulty = settings.difficulty;
-  let halfSeconds = settings.halfLengthSeconds;
+  let halfSeconds = mode === 'training' ? 90 : settings.halfLengthSeconds;
   let twoPlayer = false;
-  const hasKeyboard = window.matchMedia('(pointer: fine)').matches;
+  const hasKeyboard = window.matchMedia('(pointer: fine)').matches && mode !== 'training';
+  const info = MODE_INFO[mode];
+  const lengthLabel = mode === 'training' ? 'Time' : mode === 'shootout' ? '' : 'Half length';
+  const lengths = mode === 'training' ? [60, 90, 120, 180] : [60, 120, 180, 300];
 
   const render = () => {
     const away = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
@@ -346,8 +398,9 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
     const [homeK, awayK, swapped] = resolveKits(home, away);
     root.innerHTML = `
       <div class="screen setup">
-        ${topBar('Match Setup')}
-        <div class="vs">
+        ${topBar(info.title)}
+        ${info.blurb ? `<p class="mode-blurb">${esc(info.blurb)}</p>` : ''}
+        <div class="vs ${mode === 'training' || mode === 'tournament' ? 'vs-solo' : ''}">
           <div class="card vs-card">
             <span class="muted">Your team</span>
             <div class="row">${badgeSvg(home.badge, 64)}${kitChip(homeK.kit, 64)}</div>
@@ -355,7 +408,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
             <span class="chip chip-age">${home.ageGroup}</span>
             <select id="s-home">${teams.map((t) => `<option value="${t.id}" ${t.id === home.id ? 'selected' : ''}>${esc(t.name)} (${t.ageGroup})</option>`).join('')}</select>
           </div>
-          <div class="vs-mid">VS</div>
+          ${mode === 'training' ? '' : mode === 'tournament' ? `<div class="vs-mid">+</div><div class="card vs-card"><span class="muted">${twoPlayer ? 'Player 2 and two more teams' : 'Three computer teams'}</span><div class="row cup-marks">🛡️ 🛡️ 🛡️</div><h3>${twoPlayer ? `${esc(away.name)} + 2 surprise teams` : 'Surprise opponents'}</h3><span class="chip chip-age">${home.ageGroup}</span>${twoPlayer ? `<select id="s-away">${sameAge.map((t) => `<option value="${t.id}" ${t.id === opponentId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}</div>` : `<div class="vs-mid">VS</div>
           <div class="card vs-card">
             <span class="muted">${twoPlayer ? 'Player 2' : 'Opponent (computer)'}</span>
             <div class="row">${badgeSvg(away.badge, 64)}${kitChip(awayK.kit, 64)}</div>
@@ -366,7 +419,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
               ${sameAge.map((t) => `<option value="${t.id}" ${t.id === opponentId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
             </select>
             <button class="btn btn-ghost" id="s-reroll">🎲 New opponent</button>
-          </div>
+          </div>`}
         </div>
         <div class="card options">
           ${hasKeyboard ? `<div class="field"><span>Players</span>
@@ -376,12 +429,12 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
           <div class="field"><span>Computer difficulty</span>
             <div class="pills">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="pill ${d === difficulty ? 'is-active' : ''}" data-diff="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div>
           </div>
-          <div class="field"><span>Half length</span>
-            <div class="pills">${[60, 120, 180, 300].map((s) => `<button class="pill ${s === halfSeconds ? 'is-active' : ''}" data-len="${s}">${s / 60} min</button>`).join('')}</div>
-          </div>
+          ${lengthLabel ? `<div class="field"><span>${lengthLabel}</span>
+            <div class="pills">${lengths.map((s) => `<button class="pill ${s === halfSeconds ? 'is-active' : ''}" data-len="${s}">${s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`}</button>`).join('')}</div>
+          </div>` : ''}
         </div>
-        ${swapped ? `<p class="warn">👕 The kits clash, so ${esc(swapped)} will wear their away kit.</p>` : ''}
-        <button class="btn btn-primary btn-big btn-kickoff" id="s-go">⚽ Kick Off!</button>
+        ${swapped && mode !== 'training' && mode !== 'tournament' ? `<p class="warn">👕 The kits clash, so ${esc(swapped)} will wear their away kit.</p>` : ''}
+        <button class="btn btn-primary btn-big btn-kickoff" id="s-go">${info.go}</button>
       </div>`;
     wire(root, () => router.go({ name: 'menu' }));
     root.querySelector<HTMLSelectElement>('#s-home')!.addEventListener('change', (e) => {
@@ -390,16 +443,27 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
       opponentId = 'cpu';
       render();
     });
-    root.querySelector<HTMLSelectElement>('#s-away')!.addEventListener('change', (e) => { opponentId = (e.target as HTMLSelectElement).value; render(); });
-    root.querySelector('#s-reroll')!.addEventListener('click', () => { cpu = generateOpponent(home.ageGroup, home.kit); opponentId = 'cpu'; render(); });
+    root.querySelector<HTMLSelectElement>('#s-away')?.addEventListener('change', (e) => { opponentId = (e.target as HTMLSelectElement).value; render(); });
+    root.querySelector('#s-reroll')?.addEventListener('click', () => { cpu = generateOpponent(home.ageGroup, home.kit); opponentId = 'cpu'; render(); });
     root.querySelectorAll<HTMLElement>('[data-diff]').forEach((b) => b.addEventListener('click', () => { difficulty = b.dataset.diff as Difficulty; render(); }));
-    root.querySelectorAll<HTMLElement>('[data-players]').forEach((b) => b.addEventListener('click', () => { twoPlayer = b.dataset.players === '2'; render(); }));
+    root.querySelectorAll<HTMLElement>('[data-players]').forEach((b) => b.addEventListener('click', () => {
+      twoPlayer = b.dataset.players === '2';
+      // A two-player cup needs a second saved team of the same age; pick the first one.
+      if (twoPlayer && mode === 'tournament' && opponentId === 'cpu') opponentId = sameAge[0]?.id ?? 'cpu';
+      if (twoPlayer && mode === 'tournament' && opponentId === 'cpu') { twoPlayer = false; alert('Make a second team of the same age group first, then you can both play in the cup.'); }
+      render();
+    }));
     root.querySelectorAll<HTMLElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { halfSeconds = Number(b.dataset.len); render(); }));
     root.querySelector('#s-go')!.addEventListener('click', () => {
-      updateSettings({ difficulty, halfLengthSeconds: halfSeconds });
+      if (mode !== 'training') updateSettings({ difficulty, halfLengthSeconds: halfSeconds });
       const awayTeam = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
+      if (mode === 'tournament') {
+        const state = createTournament(home, difficulty, halfSeconds, twoPlayer, twoPlayer ? awayTeam : undefined);
+        router.go({ name: 'tournament', state });
+        return;
+      }
       const [h, a] = resolveKits(home, awayTeam);
-      router.startMatch(h, a, difficulty, halfSeconds, twoPlayer);
+      router.startMatch({ home: h, away: a, difficulty, halfSeconds, twoPlayer, mode: mode === 'training' ? 'training' : mode === 'shootout' ? 'shootout' : 'match' });
     });
   };
   render();
@@ -415,34 +479,147 @@ export function resolveKits(home: Team, away: Team): [Team, Team, string | null]
 
 // ---------- Results ----------
 
-function renderResults(root: HTMLElement, router: Router, r: MatchResult): void {
+function pensRow(res: boolean[], total: number): string {
+  return `<span class="pens-row">${Array.from({ length: Math.max(total, res.length) }, (_, i) => res[i] === undefined ? '<i class="pen pen-todo"></i>' : res[i] ? '<i class="pen pen-goal">⚽</i>' : '<i class="pen pen-miss">✕</i>').join('')}</span>`;
+}
+
+function stickerBanner(stickers: Sticker[]): string {
+  if (!stickers.length) return '';
+  return `<div class="new-stickers">${stickers.map((s) => `<div class="sticker sticker-new"><span class="sticker-emoji">${s.emoji}</span><strong>${esc(s.name)}</strong><small>New sticker!</small></div>`).join('')}</div>`;
+}
+
+function renderResults(root: HTMLElement, router: Router, r: MatchResult, stickers: Sticker[], tournament?: TournamentState): void {
   const [h, a] = r.score;
-  const headline = h === a ? "It's a draw!" : h > a ? `${r.home.name} win!` : `${r.away.name} win!`;
-  const motm = pickPlayerOfTheMatch(r);
+  if (tournament) applyResult(tournament, r);
+  let headline = h === a ? "It's a draw!" : h > a ? `${r.home.name} win!` : `${r.away.name} win!`;
+  if (r.mode === 'training') headline = r.trainingPoints >= 10 ? 'Sharp shooting!' : r.trainingPoints >= 5 ? 'Nice work!' : 'Keep practising!';
+  if (r.mode === 'shootout') headline = h > a ? `${r.home.name} win the shoot-out!` : `${r.away.name} win the shoot-out!`;
+  if (tournament && h === a && r.mode === 'match') headline = 'All square! Penalties decide it.';
+  const motm = r.mode === 'match' ? pickPlayerOfTheMatch(r) : null;
+  const best = getProgress().trainingBest;
+  const soLen = r.shootout ? Math.max(5, r.shootout[0].length, r.shootout[1].length) : 0;
   root.innerHTML = `
     <div class="screen results">
-      ${topBar('Full Time')}
+      ${topBar(r.mode === 'training' ? 'Training over' : r.mode === 'shootout' ? 'Shoot-out over' : 'Full Time')}
       <div class="card results-card">
         <h2>${esc(headline)}</h2>
-        <div class="result-line">
-          <div class="result-team">${badgeSvg(r.home.badge, 64)}<span>${esc(r.home.name)}</span></div>
-          <div class="score-big">${h} – ${a}</div>
-          <div class="result-team">${badgeSvg(r.away.badge, 64)}<span>${esc(r.away.name)}</span></div>
-        </div>
-        <ul class="goals-list">
+        ${r.mode === 'training' ? `
+          <div class="training-score"><span class="score-big">${r.trainingPoints}</span><span class="muted">points</span></div>
+          <p class="muted">${r.goals.length} goals scored · best ever ${best} points</p>` : `
+          <div class="result-line">
+            <div class="result-team">${badgeSvg(r.home.badge, 64)}<span>${esc(r.home.name)}</span></div>
+            <div class="score-big">${h} – ${a}</div>
+            <div class="result-team">${badgeSvg(r.away.badge, 64)}<span>${esc(r.away.name)}</span></div>
+          </div>`}
+        ${r.shootout ? `<div class="pens">${pensRow(r.shootout[0], soLen)}${pensRow(r.shootout[1], soLen)}</div>` : ''}
+        ${r.mode === 'match' ? `<ul class="goals-list">
           ${r.goals.length === 0 ? '<li class="muted">No goals this time. The keepers were on fire!</li>' : ''}
           ${r.goals.map((g) => `<li>${g.side === 0 ? '⚽ ' : ''}<strong>${esc(g.scorer.name)}</strong> #${g.scorer.number}${g.ownGoal ? ' (og)' : ''} <span class="muted">${g.minute}'</span>${g.side === 1 ? ' ⚽' : ''}</li>`).join('')}
-        </ul>
+        </ul>` : ''}
         ${motm ? `<div class="motm">🏆 Player of the match: <strong>${esc(motm.name)}</strong> #${motm.number}</div>` : ''}
+        ${stickerBanner(stickers)}
         <div class="row">
-          <button class="btn btn-primary btn-big" id="r-again">Play again</button>
+          ${tournament ? `<button class="btn btn-primary btn-big" id="r-cup">${tournament.needsShootout ? '🥅 Penalty shoot-out!' : '🏆 Back to the cup'}</button>` : `<button class="btn btn-primary btn-big" id="r-again">Play again</button>`}
           <button class="btn btn-ghost btn-big" id="r-menu">Main menu</button>
         </div>
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
-  root.querySelector('#r-again')!.addEventListener('click', () => router.go({ name: 'setup', homeId: r.home.id }));
+  root.querySelector('#r-again')?.addEventListener('click', () => router.go({ name: 'setup', homeId: r.home.id, mode: r.mode }));
+  root.querySelector('#r-cup')?.addEventListener('click', () => {
+    if (tournament!.needsShootout) {
+      const f = currentFixture(tournament!)!;
+      router.startMatch({ home: f.home, away: f.away, difficulty: tournament!.difficulty, halfSeconds: 60, twoPlayer: tournament!.twoPlayer, mode: 'shootout', tournament });
+    } else router.go({ name: 'tournament', state: tournament! });
+  });
   root.querySelector('#r-menu')!.addEventListener('click', () => router.go({ name: 'menu' }));
+}
+
+// ---------- Tournament ----------
+
+function fixtureCard(f: Fixture, label: string, humanId: string): string {
+  const side = (t: Team, score: number | null, pens: number | null, won: boolean) => `
+    <div class="fx-team ${won ? 'is-winner' : ''} ${t.id === humanId ? 'is-you' : ''}">
+      ${badgeSvg(t.badge, 40)}<span class="fx-name">${esc(t.name)}</span>
+      <span class="fx-score">${score === null ? '' : score}${pens !== null ? `<small>(${pens})</small>` : ''}</span>
+    </div>`;
+  return `<div class="card fixture">
+    <span class="fx-label">${label}</span>
+    ${side(f.home, f.score?.[0] ?? null, f.pens?.[0] ?? null, f.winnerId === f.home.id)}
+    ${side(f.away, f.score?.[1] ?? null, f.pens?.[1] ?? null, f.winnerId === f.away.id)}
+  </div>`;
+}
+
+function renderTournament(root: HTMLElement, router: Router, s: TournamentState): void {
+  const you = teamById(s, s.humanTeamId)!;
+  const champion = s.stage === 'done' ? teamById(s, s.final?.winnerId ?? null) : null;
+  const youWon = champion?.id === s.humanTeamId;
+  const stillIn = humanStillIn(s);
+  const stickers = youWon && !s.trophyRecorded ? recordTrophy() : [];
+  if (youWon) s.trophyRecorded = true;
+  const next = currentFixture(s);
+  const nextLabel = s.stage === 'semi' ? '⚽ Play your semi-final' : '⚽ Play the final!';
+  root.innerHTML = `
+    <div class="screen tournament ${youWon ? 'is-champion' : ''}">
+      ${topBar(`${esc(you.ageGroup)} Cup`)}
+      ${s.stage === 'done' ? `<div class="card trophy-card">
+          <div class="trophy">${youWon ? '🏆' : '🥈'}</div>
+          <h2>${youWon ? `${esc(you.name)} are the champions!` : stillIn ? 'So close! Runners-up this time.' : `${esc(champion?.name ?? 'Someone')} lifted the cup.`}</h2>
+          <p class="muted">${youWon ? 'What a team. The trophy goes in the cabinet!' : 'Shake hands, heads up, and go again next time.'}</p>
+          ${stickerBanner(stickers)}
+        </div>` : ''}
+      <div class="bracket">
+        <div class="bracket-col">
+          ${fixtureCard(s.semis[0], 'Semi-final 1', s.humanTeamId)}
+          ${fixtureCard(s.semis[1], 'Semi-final 2', s.humanTeamId)}
+        </div>
+        <div class="bracket-col bracket-final">
+          ${s.final ? fixtureCard(s.final, 'Final', s.humanTeamId) : '<div class="card fixture fixture-empty"><span class="fx-label">Final</span><p class="muted">Winners of the semi-finals</p></div>'}
+        </div>
+      </div>
+      <div class="row">
+        ${next && s.stage !== 'done' ? `<button class="btn btn-primary btn-big" id="c-play">${nextLabel}</button>` : '<button class="btn btn-primary btn-big" id="c-new">🏆 New tournament</button>'}
+        <button class="btn btn-ghost btn-big" id="c-menu">Main menu</button>
+      </div>
+    </div>`;
+  wire(root, () => router.go({ name: 'menu' }));
+  root.querySelector('#c-play')?.addEventListener('click', () => {
+    const f = currentFixture(s)!;
+    const [h, a] = resolveKits(f.home, f.away);
+    router.startMatch({ home: h, away: a, difficulty: s.difficulty, halfSeconds: s.halfSeconds, twoPlayer: s.twoPlayer && getTeam(f.away.id) !== undefined, mode: 'match', tournament: s });
+  });
+  root.querySelector('#c-new')?.addEventListener('click', () => router.go({ name: 'setup', homeId: s.humanTeamId, mode: 'tournament' }));
+  root.querySelector('#c-menu')?.addEventListener('click', () => router.go({ name: 'menu' }));
+}
+
+// ---------- Sticker album ----------
+
+function renderAlbum(root: HTMLElement, router: Router): void {
+  const p = getProgress();
+  root.innerHTML = `
+    <div class="screen album">
+      ${topBar('Sticker Album')}
+      <div class="card stats-card">
+        <div class="stat"><strong>${p.played}</strong><span>matches</span></div>
+        <div class="stat"><strong>${p.won}</strong><span>wins</span></div>
+        <div class="stat"><strong>${p.goalsFor}</strong><span>goals</span></div>
+        <div class="stat"><strong>${p.trophies}</strong><span>trophies</span></div>
+        <div class="stat"><strong>${p.trainingBest}</strong><span>training best</span></div>
+      </div>
+      <p class="muted album-count">${p.stickers.length} of ${STICKERS.length} stickers collected</p>
+      <div class="sticker-grid">
+        ${STICKERS.map((s) => {
+          const got = p.stickers.includes(s.id);
+          return `<div class="sticker ${got ? 'is-got' : 'is-missing'}">
+            <span class="sticker-emoji">${got ? s.emoji : '❔'}</span>
+            <strong>${esc(s.name)}</strong>
+            <small>${esc(s.how)}</small>
+            ${s.unlocks ? `<span class="sticker-unlock">${got ? 'Unlocked badge' : 'Unlocks badge'} ${s.unlocks}</span>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  wire(root, () => router.go({ name: 'menu' }));
 }
 
 function pickPlayerOfTheMatch(r: MatchResult) {

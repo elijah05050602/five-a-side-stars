@@ -7,12 +7,21 @@ import { MatchSim, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
 
+export type SimMode = NonNullable<SimConfig['mode']>;
+
 export interface MatchResult {
+  mode: SimMode;
   score: [number, number];
   goals: MatchSim['goals'];
   home: SimConfig['home'];
   away: SimConfig['away'];
   stats: { touches: [number, number]; distance: [number, number] };
+  /** Penalty-by-penalty record in a shoot-out (true = scored). */
+  shootout: [boolean[], boolean[]] | null;
+  trainingPoints: number;
+  twoPlayer: boolean;
+  /** Set by the tournament flow when a drawn match was won on penalties. */
+  shootoutWon?: boolean;
 }
 
 /**
@@ -108,7 +117,17 @@ export class MatchScene {
     const touches: [number, number] = [0, 0];
     const distance: [number, number] = [0, 0];
     for (const p of this.sim.players) distance[p.side] += p.distanceRun;
-    return { score: [...this.sim.score] as [number, number], goals: this.sim.goals, home: this.sim.config.home, away: this.sim.config.away, stats: { touches, distance } };
+    return {
+      mode: this.sim.mode,
+      score: [...this.sim.score] as [number, number],
+      goals: this.sim.goals,
+      home: this.sim.config.home,
+      away: this.sim.config.away,
+      stats: { touches, distance },
+      shootout: this.sim.shootout ? [[...this.sim.shootout.results[0]], [...this.sim.shootout.results[1]]] : null,
+      trainingPoints: this.sim.trainingPoints,
+      twoPlayer: this.sim.config.humanSide2 != null,
+    };
   }
 
   /** Camera sits above and "south" of the focus point, looking down at a tilt. */

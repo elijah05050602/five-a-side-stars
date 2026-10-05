@@ -1,4 +1,5 @@
 import { awayKitFor, makeBadge, starterTeams } from './defaults';
+import type { Progress } from './progress';
 import type { Team } from './types';
 
 const KEY = 'five-a-side-stars:v1';
@@ -6,6 +7,7 @@ const KEY = 'five-a-side-stars:v1';
 interface SaveFile {
   teams: Team[];
   settings: { sound: boolean; halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard' };
+  progress?: Progress;
 }
 
 let cache: SaveFile | null = null;
