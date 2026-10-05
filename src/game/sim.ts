@@ -43,6 +43,8 @@ export interface SimPlayer {
   stamina: number;
   /** 0..1 shot power being charged while the shoot button is held. */
   charge: number;
+  /** Which way the keeper has committed to for a penalty (0 = not yet). */
+  penaltyGuess: number;
 }
 
 export interface SimBall {
@@ -61,6 +63,8 @@ export interface SimBall {
   flightId: number;
   /** flightId the keeper has already tried (and failed) to save. */
   keeperTried: number;
+  /** True while the ball is in flight from a penalty kick (keepers find these harder). */
+  penaltyShot: boolean;
 }
 
 export type Phase = 'kickoff' | 'play' | 'setpiece' | 'goal' | 'halftime' | 'fulltime' | 'paused';
@@ -77,7 +81,7 @@ export interface SetPiece {
 export interface GoalEvent { side: Side; scorer: Player; minute: number; ownGoal: boolean }
 
 export interface SimEvent {
-  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'shot' | 'foul' | 'whistle';
+  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'shot' | 'foul' | 'whistle' | 'miss';
   kind?: 'freekick' | 'penalty';
   side?: Side;
   player?: Player;
@@ -92,9 +96,22 @@ export interface SimConfig {
   humanSide: Side | null;
   /** Second player on the same keyboard, if any. */
   humanSide2?: Side | null;
+  /** match (default), a penalty shoot-out, or target practice against a lone keeper. */
+  mode?: 'match' | 'shootout' | 'training';
 }
 
-const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootHeld: false, pass: false, sprint: false, switchPlayer: false, pause: false };
+export interface Shootout {
+  /** Side taking the current penalty. */
+  taking: Side;
+  /** Penalties taken so far by each side, true = scored. */
+  results: [boolean[], boolean[]];
+  /** Set once the current kick has been resolved, until the next penalty is set up. */
+  resolved: boolean;
+  timer: number;
+  kicked: boolean;
+}
+
+export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootHeld: false, pass: false, sprint: false, switchPlayer: false, pause: false };
 
 const DIFF = {
   easy: { speed: 0.85, think: 0.55, accuracy: 0.6, tackle: 0.6, humanTackle: 1.3, shootRange: 0.3 },
@@ -126,6 +143,10 @@ export class MatchSim {
   private switchHolds: [number, number] = [0, 0];
   setPiece: SetPiece | null = null;
   fouls: [number, number] = [0, 0];
+  shootout: Shootout | null = null;
+  /** Training: points scored (a normal goal is 1, a rocket is 2). */
+  trainingPoints = 0;
+  get mode(): 'match' | 'shootout' | 'training' { return this.config.mode ?? 'match'; }
   private lastPhase: Phase = 'kickoff';
   private pressureTimer = 0;
 
@@ -137,22 +158,85 @@ export class MatchSim {
     this.goalWidth = this.stats.goalWidth;
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
-    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1 };
+    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false };
     const diff = DIFF[config.difficulty];
     ([0, 1] as Side[]).forEach((side) => {
       const team = this.teams[side];
       const isCpu = !this.isHuman(side);
       startingFive(team).forEach((info) => {
+        if (config.mode === 'training' && side === 1 && info.position !== 'GK') return;
         const p: SimPlayer = {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, diveDir: 1, distanceRun: 0, isKeeper: info.position === 'GK',
-          speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1), tackleTimer: 0, holdTime: 0, stamina: 1, charge: 0,
+          speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1), tackleTimer: 0, holdTime: 0, stamina: 1, charge: 0, penaltyGuess: 0,
         };
         this.players.push(p);
       });
     });
-    this.setupKickoff(0);
+    if (config.mode === 'shootout') {
+      this.shootout = { taking: 0, results: [[], []], resolved: false, timer: 0, kicked: false };
+      this.setupPenalty(0);
+    } else {
+      this.setupKickoff(config.mode === 'training' && config.humanSide !== null ? config.humanSide : 0);
+    }
+  }
+
+  /** Shoot-out: everyone to the centre, the next taker on the spot, the keeper on the line. */
+  private setupPenalty(side: Side): void {
+    const so = this.shootout!;
+    so.taking = side;
+    so.resolved = false;
+    so.kicked = false;
+    so.timer = 0;
+    const dir = side === 0 ? 1 : -1;
+    const goal = v(this.goalX(side), 0);
+    const spot = v(goal.x - dir * (this.width * 0.26 + 0.6), 0);
+    const takers = this.teamOf(side).filter((p) => !p.isKeeper);
+    const taker = takers[so.results[side].length % takers.length];
+    const keeper = this.teamOf((1 - side) as Side).find((p) => p.isKeeper) ?? this.teamOf((1 - side) as Side)[0];
+    this.players.forEach((p, i) => {
+      p.pos = v(-dir * 2 + (i % 5) * 0.8 * -dir, -3 + (i % 3) * 3);
+      p.vel = v(); p.kickCooldown = 0; p.charge = 0; p.diveAnim = 0; p.kickAnim = 0; p.penaltyGuess = 0;
+    });
+    taker.pos = v(spot.x - dir * 0.5, 0);
+    taker.facing = side === 0 ? 0 : Math.PI;
+    keeper.pos = v(this.ownGoalX((1 - side) as Side) + (-dir) * 0.4, 0);
+    const b = this.ball;
+    b.owner = taker; b.pos = v(spot.x, spot.z); b.vel = v(); b.vy = 0; b.y = 0; b.lastKick = null;
+    this.setPiece = { kind: 'penalty', side, taker, spot, timer: 0 };
+    this.phase = 'setpiece';
+    this.controlledBy = [null, null];
+    if (this.isHuman(side)) this.controlledBy[side] = taker;
+    if (this.isHuman((1 - side) as Side)) this.controlledBy[(1 - side) as Side] = keeper;
+    this.events.push({ type: 'whistle' });
+  }
+
+  private shootoutScore(): [number, number] {
+    const so = this.shootout!;
+    return [so.results[0].filter(Boolean).length, so.results[1].filter(Boolean).length];
+  }
+
+  /** True when the shoot-out is decided (best of five, then sudden death). */
+  private shootoutDecided(): boolean {
+    const so = this.shootout!;
+    const [a, b] = this.shootoutScore();
+    const [ta, tb] = [so.results[0].length, so.results[1].length];
+    if (ta < 5 || tb < 5) {
+      const leftA = Math.max(0, 5 - ta), leftB = Math.max(0, 5 - tb);
+      return a + leftA < b || b + leftB < a; // cannot be caught
+    }
+    return ta === tb && a !== b;
+  }
+
+  private resolveShootoutKick(scored: boolean): void {
+    const so = this.shootout!;
+    if (so.resolved) return;
+    so.resolved = true;
+    so.timer = 0;
+    so.results[so.taking].push(scored);
+    this.score = this.shootoutScore();
+    if (!scored) this.events.push({ type: 'miss', side: so.taking });
   }
 
   isHuman(side: Side): boolean { return this.config.humanSide === side || this.config.humanSide2 === side; }
@@ -218,13 +302,17 @@ export class MatchSim {
     if (this.phase === 'paused' || this.phase === 'fulltime') return;
     if (this.phase === 'goal') {
       this.phaseTimer += dt;
-      // Celebrating players mill about
-      if (this.phaseTimer > 3.2) {
-        const conceded = (1 - this.goals[this.goals.length - 1].side) as Side;
-        this.setupKickoff(conceded);
+      if (this.phaseTimer > (this.mode === 'training' ? 1.6 : 3.2)) {
+        if (this.shootout) this.advanceShootout();
+        else if (this.mode === 'training') this.setupKickoff(this.config.humanSide ?? 0);
+        else {
+          const conceded = (1 - this.goals[this.goals.length - 1].side) as Side;
+          this.setupKickoff(conceded);
+        }
       }
       return;
     }
+    if (this.shootout) { this.stepShootout(dt, input, input2); return; }
     if (this.phase === 'halftime') {
       this.phaseTimer += dt;
       if (this.phaseTimer > 3.5) { this.half = 2; this.setupKickoff(1); }
@@ -244,7 +332,8 @@ export class MatchSim {
       if (sp.timer > 8) this.pass(sp.taker, null); // taker dawdled: the referee hurries them up
     }
     const halfEnd = this.config.halfSeconds * this.half;
-    if (this.clock >= halfEnd && this.ballIsCalm()) {
+    if (this.mode === 'training' && this.clock >= this.config.halfSeconds) { this.phase = 'fulltime'; this.events.push({ type: 'fulltime' }); return; }
+    if (this.mode !== 'training' && this.clock >= halfEnd && this.ballIsCalm()) {
       if (this.half === 1) { this.phase = 'halftime'; this.phaseTimer = 0; this.events.push({ type: 'halftime' }); }
       else { this.phase = 'fulltime'; this.events.push({ type: 'fulltime' }); }
       return;
@@ -268,6 +357,66 @@ export class MatchSim {
     this.integrateBall(dt);
     this.resolvePossession(dt);
     this.checkGoal();
+  }
+
+  /** One penalty: set piece, kick, then wait for a goal, a save or the ball to die. */
+  private stepShootout(dt: number, input: InputState, input2?: InputState): void {
+    const so = this.shootout!;
+    so.timer += dt;
+    const inputs: [InputState | null, InputState | null] = [null, null];
+    if (this.config.humanSide !== null) inputs[this.config.humanSide] = input;
+    if (this.config.humanSide2 != null) inputs[this.config.humanSide2] = input2 ?? IDLE_INPUT;
+    if (this.phase === 'setpiece' && this.setPiece) {
+      this.setPiece.timer += dt;
+      if (this.ball.owner !== this.setPiece.taker && this.setPiece.timer < 8) { this.ball.owner = this.setPiece.taker; this.ball.pos = v(this.setPiece.spot.x, this.setPiece.spot.z); this.ball.vel = v(); }
+      if (this.setPiece.timer > 8) this.shoot(this.setPiece.taker, null, 1);
+    }
+    if (this.phase === 'play' && !so.kicked) { so.kicked = true; so.timer = 0; }
+    const defending = (1 - so.taking) as Side;
+    for (const p of this.players) {
+      p.kickCooldown = Math.max(0, p.kickCooldown - dt);
+      p.kickAnim = Math.max(0, p.kickAnim - dt * 4);
+      p.diveAnim = Math.max(0, p.diveAnim - dt * 1.4);
+      const inp = inputs[p.side];
+      const keeper = p.isKeeper && p.side === defending;
+      const taker = this.setPiece?.taker === p || (so.kicked && this.ball.lastKick === p);
+      if (!keeper && !taker) { this.steer(p, v(), 30); continue; }
+      if (inp && this.controlledBy[p.side] === p) {
+        if (keeper) this.driveHumanKeeper(p, inp);
+        else this.driveHuman(p, inp, dt);
+      } else if (keeper) this.driveKeeper(p, dt);
+      else this.driveAI(p, dt);
+    }
+    this.integratePlayers(dt);
+    this.integrateBall(dt);
+    this.resolvePossession(dt);
+    this.checkGoal();
+    if (this.phase === 'goal') return; // checkGoal recorded it
+    if (so.kicked && !so.resolved) {
+      const b = this.ball;
+      const dir = so.taking === 0 ? 1 : -1;
+      const dead = (b.owner && b.owner.isKeeper) || (len(b.vel) < 0.8 && b.y < 0.05) || b.vel.x * dir < -1 || so.timer > 4.5;
+      if (dead) { this.resolveShootoutKick(false); this.phase = 'goal'; this.phaseTimer = 1.6; }
+    }
+  }
+
+  /** The human keeper slides along the goal line and dives with the stick. */
+  private driveHumanKeeper(p: SimPlayer, input: InputState): void {
+    const own = this.ownGoalX(p.side);
+    const dir = p.side === 0 ? 1 : -1;
+    const z = input.moveZ;
+    this.steer(p, v(0, z * this.stats.speed * 1.4), 30);
+    p.pos.x = own + dir * 0.4;
+    p.pos.z = clamp(p.pos.z, -this.goalWidth / 2 - 0.3, this.goalWidth / 2 + 0.3);
+    p.facing = dir > 0 ? 0 : Math.PI;
+    if (Math.abs(z) > 0.6 && p.diveAnim <= 0 && this.ball.owner !== p && len(this.ball.vel) > 3) { p.diveAnim = 1; p.diveDir = Math.sign(z); }
+  }
+
+  private advanceShootout(): void {
+    const so = this.shootout!;
+    if (!so.resolved) this.resolveShootoutKick(this.goals.length > 0 && this.goals[this.goals.length - 1].side === so.taking);
+    if (this.shootoutDecided()) { this.phase = 'fulltime'; this.events.push({ type: 'fulltime' }); return; }
+    this.setupPenalty((1 - so.taking) as Side);
   }
 
   private ballIsCalm(): boolean {
@@ -495,7 +644,16 @@ export class MatchSim {
     let targetZ = clamp(b.pos.z * 0.6, -this.goalWidth / 2 + 0.3, this.goalWidth / 2 - 0.3);
     let targetX = own + dir * 0.7;
     const t = toGoal ? Math.abs((p.pos.x - b.pos.x) / (b.vel.x || 1e-6)) : 99;
-    if (toGoal && t < 1.4 && towardsUs) {
+    if (b.penaltyShot && toGoal) {
+      // Penalty: commit to a side at the kick and dive that way (usually the right one).
+      const predZ = b.pos.z + b.vel.z * t;
+      if (p.penaltyGuess === 0) {
+        const right = Math.random() < (this.isHuman((1 - p.side) as Side) ? 0.5 : 0.55);
+        p.penaltyGuess = (Math.sign(predZ) || 1) * (right ? 1 : -1);
+      }
+      targetZ = p.penaltyGuess * this.goalWidth * 0.4;
+      if (p.diveAnim <= 0 && t < 0.7) { p.diveAnim = 1; p.diveDir = p.penaltyGuess; }
+    } else if (toGoal && t < 1.4 && towardsUs) {
       // Predict where the ball crosses the keeper's line and go there.
       const predZ = b.pos.z + b.vel.z * t;
       targetZ = clamp(predZ, -this.goalWidth / 2 - 0.4, this.goalWidth / 2 + 0.4);
@@ -764,7 +922,8 @@ export class MatchSim {
         if (closing && bd > easy * 0.6) return; // still getting closer: wait for the nearest point
         b.keeperTried = b.flightId;
         const speedFactor = clamp(1.5 - (0.7 * ballSpeed) / this.stats.power, 0.4, 1);
-        const pSave = bd < easy ? 0.97 * Math.max(speedFactor, 0.75) : clamp(1 - (bd - easy) / (reach - easy), 0, 1) * speedFactor;
+        let pSave = bd < easy ? 0.97 * Math.max(speedFactor, 0.75) : clamp(1 - (bd - easy) / (reach - easy), 0, 1) * speedFactor;
+        if (b.penaltyShot) pSave *= bd < easy ? 0.6 : 0.45; // even a keeper who guessed right can be beaten
         if (Math.random() > pSave) return; // beaten
         this.events.push({ type: 'save', side: best.side, player: best.info });
         const dir = best.side === 0 ? 1 : -1; // away from our own goal
@@ -810,6 +969,7 @@ export class MatchSim {
     b.lastTouch = p;
     b.lastKick = p;
     b.flightId++;
+    b.penaltyShot = false;
     p.kickCooldown = 0.35;
     p.kickAnim = 1;
     p.facing = Math.atan2(n.z, n.x);
@@ -851,7 +1011,13 @@ export class MatchSim {
     const acc = isCpu ? DIFF[this.config.difficulty].accuracy : 1;
     // Aim at a corner, with a wobble that shrinks with control.
     const spread = (1 - this.stats.control) * 0.9 + (isCpu ? (1 - acc) * 0.8 : 0.15);
-    const targetZ = clamp(rand(-this.goalWidth / 2, this.goalWidth / 2) * 0.75 + rand(-spread, spread), -this.goalWidth * 0.6, this.goalWidth * 0.6);
+    const penalty = this.setPiece?.kind === 'penalty' && this.setPiece.taker === p;
+    let targetZ = clamp(rand(-this.goalWidth / 2, this.goalWidth / 2) * 0.75 + rand(-spread, spread), -this.goalWidth * 0.6, this.goalWidth * 0.6);
+    if (penalty) {
+      // Penalties go for a corner; the wobble can still send one wide.
+      const corner = (Math.random() < 0.5 ? -1 : 1) * (this.goalWidth / 2) * rand(0.55, 0.95);
+      targetZ = corner + rand(-spread, spread) * 0.6;
+    }
     let dir = v(goal.x - p.pos.x, targetZ - p.pos.z);
     if (aim) {
       // The human's stick biases the shot direction.
@@ -863,6 +1029,7 @@ export class MatchSim {
     const power = this.stats.power * clamp(0.75 + d / this.length, 0.8, 1.15) * powerMul * (p.info.special === 'power' ? 1.18 : 1);
     const loft = power * rand(0.06, 0.2) * (powerMul > 1 ? 1.3 : 1);
     this.kick(p, dir, power, loft);
+    this.ball.penaltyShot = penalty;
     this.events.push({ type: 'shot', side: p.side, player: p.info });
   }
 
@@ -895,8 +1062,16 @@ export class MatchSim {
       const touch = b.lastKick ?? b.lastTouch ?? this.teamOf(scoringSide)[0];
       const ownGoal = touch.side !== scoringSide;
       const scorer = touch.info;
-      this.score[scoringSide]++;
       this.goals.push({ side: scoringSide, scorer, minute: this.minute, ownGoal });
+      if (this.shootout) {
+        this.resolveShootoutKick(scoringSide === this.shootout.taking);
+      } else if (this.mode === 'training') {
+        const rocket = len(b.vel) > this.stats.power * 0.95;
+        this.trainingPoints += rocket ? 2 : 1;
+        this.score[0] = this.trainingPoints;
+      } else {
+        this.score[scoringSide]++;
+      }
       this.phase = 'goal';
       this.phaseTimer = 0;
       b.owner = null;
