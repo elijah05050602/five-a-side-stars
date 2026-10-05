@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { IDLE_INPUT, MatchSim, RUNOFF_END } from '../game/sim';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { IDLE_INPUT, MatchSim, RUNOFF_END, skillMuls } from '../game/sim';
 import { AGE_STATS } from '../data/ageGroups';
 import { AGE_GROUPS } from '../data/types';
 import { cpuMatch, runUntil, team } from './helpers';
@@ -179,5 +179,59 @@ describe('training', () => {
     runUntil(sim, (s) => s.phase === 'fulltime');
     expect(sim.phase).toBe('fulltime');
     expect(sim.score[0]).toBe(sim.trainingPoints);
+  });
+});
+
+describe('dribbling', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** A human dribbler on their own: everyone else is sent far away and frozen. */
+  function soloRun(control: number, sprint = false, seconds = 3) {
+    const sim = cpuMatch({ humanSide: 0, halfSeconds: 120 });
+    sim.phase = 'play';
+    const p = sim.ball.owner!;
+    p.info.skills = { ...p.info.skills, control };
+    p.mul = { ...p.mul, touchDist: skillMulsFor(sim, p) };
+    for (const o of sim.players) if (o !== p) { o.pos = { x: o.side === 0 ? -15 : 15, z: 9 }; o.speedMul = 0; }
+    let maxGap = 0, touches = 0, owned = true;
+    for (let i = 0; i < seconds * 60; i++) {
+      sim.step(1 / 60, { ...IDLE_INPUT, moveX: 1, sprint });
+      touches += sim.events.filter((e) => e.type === 'touch').length;
+      sim.events.length = 0;
+      owned &&= sim.ball.owner === p;
+      maxGap = Math.max(maxGap, Math.hypot(sim.ball.pos.x - p.pos.x, sim.ball.pos.z - p.pos.z));
+    }
+    return { maxGap, touches, owned };
+  }
+  const skillMulsFor = (sim: MatchSim, p: MatchSim['players'][number]) => skillMuls(p.info, sim.teams[0].ageGroup).touchDist;
+
+  it('knocks the ball ahead and runs on to it instead of gluing it to the boots', () => {
+    const run = soloRun(3);
+    expect(run.owned).toBe(true);
+    expect(run.touches).toBeGreaterThanOrEqual(3);
+    expect(run.maxGap).toBeGreaterThan(0.8);
+    expect(run.maxGap).toBeLessThan(2);
+  });
+
+  it('pushes it further at a sprint and keeps it closer with better Dribbling', () => {
+    const jog = soloRun(3).maxGap;
+    expect(soloRun(3, true).maxGap).toBeGreaterThan(jog);
+    expect(soloRun(4).maxGap).toBeLessThan(soloRun(1).maxGap);
+  });
+
+  it('a defender can nick the ball while it is away from the dribbler\'s feet', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.01);
+    const sim = cpuMatch({ humanSide: null, halfSeconds: 120 });
+    sim.phase = 'play';
+    const o = sim.ball.owner!;
+    o.pos = { x: 0, z: 0 };
+    o.vel = { x: 3, z: 0 };
+    sim.ball.pos = { x: 1.6, z: 0 };
+    sim.ball.vel = { x: 3, z: 0 };
+    const thief = sim.players.find((p) => p.side !== o.side && !p.isKeeper)!;
+    thief.pos = { x: 1.9, z: 0.2 };
+    sim.step(1 / 60, IDLE_INPUT);
+    expect(sim.ball.owner).toBe(thief);
+    expect(thief.match.tackles).toBe(1);
   });
 });

@@ -136,6 +136,12 @@ export class Sfx {
         this.lastKick = t;
         this.thump(t, 0.5);
         break;
+      case 'touch':
+        // A soft tap for each dribbling touch.
+        if (t - this.lastKick < 0.12) return;
+        this.lastKick = t;
+        this.thump(t, 0.16);
+        break;
       case 'shot':
         this.thump(t, 1);
         // A shot gets the crowd up on its feet.

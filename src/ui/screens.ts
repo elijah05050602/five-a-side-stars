@@ -1,8 +1,8 @@
 import { AGE_STATS } from '../data/ageGroups';
 import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode } from '../data/defaults';
 import { deleteTeam, getCareer, getLeague, getSettings, getTeam, getTeams, resetAll, saveTeam, setCareer, setLeague, updateSettings } from '../data/storage';
-import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, SKILL_KEYS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type Difficulty, type HairStyle, type Kit, type Position, type SkillKey, type Special, type Team } from '../data/types';
-import { STAR_BUDGET, STAR_CAP, fitSkills, randomSkills, skillLabels, starsLeft, starsText, totalStars } from '../data/skills';
+import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type Difficulty, type HairStyle, type Kit, type Position, type SkillKey, type Special, type Team } from '../data/types';
+import { STAR_BUDGET, STAR_CAP, fitSkills, randomSkills, skillKeys, skillLabel, starsLeft, starsText, totalStars } from '../data/skills';
 import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, advanceCareer, applyCareerMatch, careerAge, careerSeasonOutcome, careerSeasonOver, createCareer, playerOfTheMatch, seasonName, statRows, type GrowthEvent } from '../game/career';
 import { kitsClash } from '../game/kitTexture';
 import type { MatchResult, SimMode } from '../game/MatchScene';
@@ -262,8 +262,8 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     if (starters.length !== 5) { alert(`Pick exactly 5 starters (you have ${starters.length}). The rest are subs.`); step = 2; render(); return false; }
     if (!starters.some((p) => p.position === 'GK')) { alert('One of your starters must be the keeper.'); step = 2; render(); return false; }
     if (!team.career) {
-      const greedy = team.players.find((p) => starsLeft(p.skills, team.ageGroup) < 0);
-      if (greedy) { alert(`${greedy.name} has ${-starsLeft(greedy.skills, team.ageGroup)} too many stars for the ${AGE_STATS[team.ageGroup].label}. Take some off.`); step = 2; render(); return false; }
+      const greedy = team.players.find((p) => starsLeft(p.skills, team.ageGroup, p.position) < 0);
+      if (greedy) { alert(`${greedy.name} has ${-starsLeft(greedy.skills, team.ageGroup, greedy.position)} too many stars for the ${AGE_STATS[team.ageGroup].label}. Take some off.`); step = 2; render(); return false; }
     }
     const nums = new Set<number>();
     for (const p of team.players) {
@@ -368,7 +368,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
             <span class="pc-number">${pl.number}</span>
             <span class="pc-name">${esc(pl.name)}</span>
             <span class="chip chip-pos chip-${pl.position.toLowerCase()}">${pl.position === 'GK' ? 'Keeper' : pl.position === 'DEF' ? 'Defender' : 'Attacker'}</span>
-            <span class="pc-stars">★ ${totalStars(pl.skills)}</span>
+            <span class="pc-stars">★ ${totalStars(pl.skills, pl.position)}</span>
             ${pl.starter ? '' : '<span class="chip chip-sub">Sub</span>'}
           </button>`).join('')}
         ${team.players.length < 8 ? '<button class="player-card player-card-add" id="p-add"><span class="plus">+</span><span>Add player</span></button>' : ''}
@@ -413,7 +413,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     form.querySelectorAll<HTMLElement>('[data-special]').forEach((b) => b.addEventListener('click', () => { p.special = b.dataset.special as Special; renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-star-up]').forEach((b) => b.addEventListener('click', () => {
       const k = b.dataset.starUp as SkillKey;
-      if (p.skills[k] < STAR_CAP[team.ageGroup] && starsLeft(p.skills, team.ageGroup) > 0) p.skills[k]++;
+      if (p.skills[k] < STAR_CAP[team.ageGroup] && starsLeft(p.skills, team.ageGroup, p.position) > 0) p.skills[k]++;
       renderSquad(form);
     }));
     form.querySelectorAll<HTMLElement>('[data-star-down]').forEach((b) => b.addEventListener('click', () => {
@@ -454,6 +454,8 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
         other.position = 'GK';
       }
       p.position = pos;
+      // A new position rates different things: keep everyone inside the budget for theirs.
+      for (const x of team.players) x.skills = fitSkills(x, team.ageGroup, !team.career);
       render();
     }));
     form.querySelectorAll<HTMLElement>('[data-skin]').forEach((b) => b.addEventListener('click', () => { p.skin = b.dataset.skin!; preview?.setLook(p.skin, p.hair); renderSquad(form); }));
@@ -467,23 +469,25 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
 /** Star ratings for one player: spend the age group's budget, or just read them on a career team. */
 function skillsField(p: Team['players'][number], team: Team): string {
   const cap = STAR_CAP[team.ageGroup];
-  const left = starsLeft(p.skills, team.ageGroup);
-  const labels = skillLabels(p.position);
-  const rows = SKILL_KEYS.map((k) => `
+  const left = starsLeft(p.skills, team.ageGroup, p.position);
+  const rows = skillKeys(p.position).map((k) => {
+    const label = skillLabel(p.position, k);
+    return `
     <div class="skill-row">
-      <span class="skill-name" title="${esc(labels[k].blurb)}">${labels[k].emoji} ${labels[k].label}</span>
+      <span class="skill-name" title="${esc(label.blurb)}">${label.emoji} ${label.label}</span>
       <span class="stars" aria-label="${p.skills[k]} of ${cap} stars">${starsText(p.skills[k], cap)}</span>
       ${team.career ? `<span class="muted small xp">${Math.round(((p.xp?.[k] ?? 0) * 100))}% to next</span>` : `
       <span class="row skill-btns">
-        <button class="btn btn-ghost btn-icon" data-star-down="${k}" ${p.skills[k] <= 1 ? 'disabled' : ''} aria-label="Fewer ${labels[k].label} stars">−</button>
-        <button class="btn btn-blue btn-icon" data-star-up="${k}" ${p.skills[k] >= cap || left <= 0 ? 'disabled' : ''} aria-label="More ${labels[k].label} stars">+</button>
+        <button class="btn btn-ghost btn-icon" data-star-down="${k}" ${p.skills[k] <= 1 ? 'disabled' : ''} aria-label="Fewer ${label.label} stars">−</button>
+        <button class="btn btn-blue btn-icon" data-star-up="${k}" ${p.skills[k] >= cap || left <= 0 ? 'disabled' : ''} aria-label="More ${label.label} stars">+</button>
       </span>`}
-    </div>`).join('');
+    </div>`;
+  }).join('');
   const note = team.career
     ? 'Career players earn stars by playing: goals, passes, tackles and saves all count.'
     : left > 0 ? `${left} star${left === 1 ? '' : 's'} left to spend.` : left === 0 ? 'All stars spent!' : `${-left} too many stars for this age group.`;
   return `
-    <div class="field skills-field"><span>Stars <small class="muted">(${AGE_STATS[team.ageGroup].label}: up to ${cap} per skill, ${STAR_BUDGET[team.ageGroup]} in total)</small></span>
+    <div class="field skills-field"><span>Stars <small class="muted">(${AGE_STATS[team.ageGroup].label}: up to ${cap} per stat, ${STAR_BUDGET[team.ageGroup]} in total)</small></span>
       <div class="skills">${rows}</div>
       <div class="row space-between"><p class="muted small ${left < 0 ? 'is-over' : ''}">${note}</p>${team.career ? '' : '<button class="btn btn-ghost" id="p-spread">🎲 Spread stars</button>'}</div>
     </div>`;
@@ -818,10 +822,9 @@ function renderCareer(root: HTMLElement, router: Router): void {
   const totals = { played: Math.max(0, ...sum.map((x) => x.played)), goals: sum.reduce((n, x) => n + x.goals, 0) };
   let scope: 'season' | 'career' = 'season';
   const cards = () => statRows(c, you, scope).map(({ player: p, stats: st }) => {
-    const labels = skillLabels(p.position);
     return `<div class="card player-stat-card ${p.starter ? '' : 'is-sub'}">
       <div class="psc-top">${kitChip(p.position === 'GK' ? you.keeperKit : you.kit, 36)}<div><strong>${esc(p.name)}</strong> <span class="muted">#${p.number}</span><br/><span class="chip chip-pos chip-${p.position.toLowerCase()}">${p.position === 'GK' ? 'Keeper' : p.position === 'DEF' ? 'Defender' : 'Attacker'}</span></div></div>
-      <div class="psc-skills">${SKILL_KEYS.map((k) => `<span title="${esc(labels[k].label)}">${labels[k].emoji} <span class="stars">${starsText(p.skills[k], STAR_CAP[age])}</span></span>`).join('')}</div>
+      <div class="psc-skills">${skillKeys(p.position).map((k) => { const l = skillLabel(p.position, k); return `<span title="${esc(l.label)}">${l.emoji} <span class="stars">${starsText(p.skills[k], STAR_CAP[age])}</span></span>`; }).join('')}</div>
       <div class="psc-stats">
         <span><strong>${st.played}</strong> played</span>
         ${p.position === 'GK' ? `<span><strong>${st.saves}</strong> saves</span><span><strong>${st.cleanSheets}</strong> clean sheets</span>` : `<span><strong>${st.goals}</strong> goals</span><span><strong>${st.assists}</strong> assists</span>`}

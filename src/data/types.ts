@@ -47,13 +47,20 @@ export interface Kit {
 }
 
 /**
- * Four skills, each 1 to 5 stars. Outfield players read them as Speed,
- * Shooting, Passing and Defending; keepers read the same four slots as
- * Speed, Handling, Kicking and Diving (see SKILL_LABELS in skills.ts).
+ * Seven star ratings per player, 1 to 5 each. Outfield players and keepers
+ * rate different things, sharing Speed, Passing (Kicking, for keepers) and
+ * Strength. Every player stores all eleven, so a position change has numbers
+ * ready; only the seven for their position count (see skillKeys in skills.ts).
  */
-export type SkillKey = 'speed' | 'shooting' | 'passing' | 'defending';
-export const SKILL_KEYS: SkillKey[] = ['speed', 'shooting', 'passing', 'defending'];
+export type OutfieldSkill = 'speed' | 'control' | 'passing' | 'shooting' | 'tackling' | 'stamina' | 'strength';
+export type KeeperSkill = 'speed' | 'handling' | 'diving' | 'reflexes' | 'positioning' | 'passing' | 'strength';
+export type SkillKey = OutfieldSkill | KeeperSkill;
+export const OUTFIELD_SKILLS: OutfieldSkill[] = ['speed', 'control', 'passing', 'shooting', 'tackling', 'stamina', 'strength'];
+export const KEEPER_SKILLS: KeeperSkill[] = ['speed', 'handling', 'diving', 'reflexes', 'positioning', 'passing', 'strength'];
+export const SKILL_KEYS: SkillKey[] = ['speed', 'control', 'passing', 'shooting', 'tackling', 'stamina', 'strength', 'handling', 'diving', 'reflexes', 'positioning'];
 export type Skills = Record<SkillKey, number>;
+/** The four ratings saved before the seven-stat update (keepers read them as Speed, Handling, Kicking, Diving). */
+export interface LegacySkills { speed: number; shooting: number; passing: number; defending: number }
 
 export interface Player {
   id: string;

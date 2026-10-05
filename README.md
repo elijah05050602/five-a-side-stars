@@ -24,6 +24,8 @@ npm test         # run the automated checks (saves, league, cup, match engine)
 - **League**: a saved career through five tiers, from the Acorn League (Tier 5) up to the Star Premier League (Tier 1). Five matches a season, top two go up, bottom goes down, and the computer teams get stronger every tier.
 - **Penalties**: a best-of-five shoot-out, then sudden death. You take and save.
 - **Training**: just you and a keeper; score as many as you can before time runs out (rocket shots count double).
+- **Player stats**: seven star ratings per player. Outfielders have Speed, Dribbling, Passing, Shooting, Tackling, Stamina and Strength; keepers have Speed, Handling, Diving, Reflexes, Positioning, Kicking and Strength. The age group caps the stars and sets the budget to share out.
+- **Dribbling**: the ball is not stuck to your boots. Each touch knocks it a little ahead (further when sprinting, closer with good Dribbling), so a defender can nip in between touches.
 - **Sticker album**: finish matches, win cups and hit milestones to collect stickers; some unlock extra badge icons.
 - **Team sheet**: from the squad step of the team builder, download a printable PNG team sheet.
 - **Weather and time of day**: pick sunny, cloudy, rain, snow, sunset or a night game under floodlights on the setup screen, or let the game surprise you.
