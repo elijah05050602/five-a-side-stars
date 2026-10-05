@@ -205,12 +205,14 @@ describe('dribbling', () => {
   }
   const skillMulsFor = (sim: MatchSim, p: MatchSim['players'][number]) => skillMuls(p.info, sim.teams[0].ageGroup).touchDist;
 
-  it('knocks the ball ahead and runs on to it instead of gluing it to the boots', () => {
-    const run = soloRun(3);
-    expect(run.owned).toBe(true);
-    expect(run.touches).toBeGreaterThanOrEqual(3);
-    expect(run.maxGap).toBeGreaterThan(0.8);
-    expect(run.maxGap).toBeLessThan(2);
+  it('pops the ball just off the feet each touch but never loses it', () => {
+    for (const control of [1, 3, 5]) {
+      const run = soloRun(control, true, 2);
+      expect(run.owned).toBe(true);
+      expect(run.touches).toBeGreaterThanOrEqual(5);
+      expect(run.maxGap).toBeGreaterThan(0.6);
+      expect(run.maxGap).toBeLessThan(1.3);
+    }
   });
 
   it('pushes it further at a sprint and keeps it closer with better Dribbling', () => {

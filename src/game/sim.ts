@@ -93,6 +93,8 @@ export interface SimPlayer {
   holdTime: number;
   /** Seconds before a dribbler can take their next touch. */
   touchTimer: number;
+  /** How far the current dribbling touch pops the ball off the feet, in metres. */
+  touchPop: number;
   /** A pass or trick pressed while the ball was out of reach, played as soon as it is back. */
   queued: 'pass' | 'lob' | 'trick' | null;
   /** Which way the player is trying to run (the stick, or the AI's target); dribbling touches go this way. */
@@ -211,6 +213,8 @@ export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootH
 /** Grass between the lines and the boards, so the ball can go out for throw-ins, corners and goal kicks. */
 export const RUNOFF_SIDE = 1.2;
 export const RUNOFF_END = 1.6;
+/** Seconds between dribbling touches. */
+const DRIBBLE_STRIDE = 0.38;
 
 const DIFF = {
   easy: { speed: 0.85, think: 0.55, accuracy: 0.6, tackle: 0.6, humanTackle: 1.3, shootRange: 0.34 },
@@ -313,7 +317,7 @@ export class MatchSim {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), role: info.position, slot: v(info.position === 'GK' ? 0.03 : 0.33, 0), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, distanceRun: 0, isKeeper: info.position === 'GK',
-          speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, penaltyGuess: 0,
+          speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
           mul, match: freshMatchStats(),
         };
@@ -1067,24 +1071,17 @@ export class MatchSim {
   }
 
   /**
-   * One dribbling touch: knock the ball ahead so the dribbler runs on to it.
-   * It travels further at a sprint and stays closer with good Dribbling, and
-   * little ones are a bit wilder with it. The gap is what a defender can nick.
+   * One dribbling touch: the ball pops a little way off the boot and comes back
+   * to the feet over the next stride, so it is always under control but never
+   * glued on. It pops further at a sprint and stays closer with good Dribbling,
+   * and little ones are a bit wilder with it. A defender can nick it at the pop.
    */
-  private dribbleTouch(o: SimPlayer, dir: V2, speed: number): void {
-    const b = this.ball;
+  private dribbleTouch(o: SimPlayer, speed: number): void {
     const base = this.stats.speed * o.speedMul;
-    const sprintF = clamp(1 + (speed / base - 0.88) * 2.5, 0.55, 1.6);
-    // A stretch to steer a ball that is already out in front is a gentler nudge.
-    const already = Math.max(0, dist(o.pos, b.pos) - this.touchRange(o));
-    const gap = Math.max(0.1, (0.45 + 0.55 * this.stats.scale) * (1.4 - 0.5 * this.stats.control) * sprintF * o.mul.touchDist - already);
-    const decel = 3.2 + 0.06 * speed;
-    const kickSpeed = speed + Math.sqrt(2 * decel * gap);
-    const wobble = (1 - this.stats.control) * 0.3 * o.mul.touchDist;
-    const a = Math.atan2(dir.z, dir.x) + rand(-wobble, wobble);
-    b.vel = v(Math.cos(a) * kickSpeed, Math.sin(a) * kickSpeed);
-    b.lastTouch = o;
-    o.touchTimer = 0.2;
+    const sprintF = clamp(1 + (speed / base - 0.88) * 2.5, 0.6, 1.5);
+    o.touchPop = (0.12 + 0.3 * this.stats.scale) * (1.35 - 0.5 * this.stats.control) * sprintF * o.mul.touchDist * rand(0.85, 1.15);
+    o.touchTimer = DRIBBLE_STRIDE;
+    this.ball.lastTouch = o;
     o.kickAnim = Math.max(o.kickAnim, 0.3);
     this.events.push({ type: 'touch', side: o.side, player: o.info });
   }
@@ -1181,24 +1178,19 @@ export class MatchSim {
         b.spin += len(b.vel) * dt / b.radius;
         return;
       }
-      // Dribbling: the ball rolls free between touches.
-      const want = o.runDir;
-      const d = dist(o.pos, b.pos);
-      const along = b.vel.x * want.x + b.vel.z * want.z;
-      const ballSpeed = len(b.vel);
-      const offLine = ballSpeed > 0.3 && along < ballSpeed * 0.85; // rolling a different way from the run
-      // A touch when the run catches the ball up, or a longer stretch to steer it round a turn.
-      const stretch = this.touchRange(o) + 0.35 * this.stats.scale + 0.15;
-      // A ball that drifted off to one side is reached for as the run draws level with it.
-      const aheadOf = (b.pos.x - o.pos.x) * want.x + (b.pos.z - o.pos.z) * want.z;
-      const catchUp = (d < this.touchRange(o) || (d < stretch && aheadOf < this.touchRange(o) * 0.6)) && along < speed * 1.05;
-      const turn = offLine && d < stretch;
-      if (o.touchTimer <= 0 && b.y < 0.3 && (catchUp || turn)) {
-        this.dribbleTouch(o, want, speed);
-      } else if (d > 1.6 + 1.6 * this.stats.scale) {
-        // Knocked too far, or the dribbler ran off without it: it is anyone's ball.
-        b.owner = null;
-      }
+      // Dribbling: each touch pops the ball just ahead, and it comes back to the feet over the stride.
+      if (o.touchTimer <= 0 && b.y < 0.3) this.dribbleTouch(o, speed);
+      const phase = 1 - o.touchTimer / DRIBBLE_STRIDE; // 0 at the touch, 1 back at the feet
+      const pop = o.touchPop * Math.sin(Math.PI * clamp(phase, 0, 1));
+      const target = v(feet.x + Math.cos(o.facing) * pop, feet.z + Math.sin(o.facing) * pop);
+      // Carried along at the dribbler's pace plus a soft spring rather than glue, so it trails a little on turns.
+      b.vel = v(o.vel.x + (target.x - b.pos.x) * 12, o.vel.z + (target.z - b.pos.z) * 12);
+      b.pos.x += b.vel.x * dt;
+      b.pos.z += b.vel.z * dt;
+      b.y = Math.max(0, b.y - 6 * dt);
+      b.vy = 0;
+      b.spin += len(b.vel) * dt / b.radius;
+      return;
     }
     // Free ball: gravity, bounce, rolling friction and air drag.
     b.vy -= 9.81 * dt;
