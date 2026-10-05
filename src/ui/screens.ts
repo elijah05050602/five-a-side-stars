@@ -731,7 +731,8 @@ function renderLeague(root: HTMLElement, router: Router): void {
   wire(root, () => router.go({ name: 'menu' }));
   wireLogoControls(root, (key) => ls.teams.find((t) => t.id === key)?.badge, () => { setLeague(ls); renderLeague(root, router); });
   root.querySelector('#l-play')?.addEventListener('click', () => {
-    const [h, a] = resolveKits(next!.home, next!.away);
+    // The human always controls the home side of the sim, so put your team there; the table flips the score when you were away.
+    const [h, a] = resolveKits(next!.youAreHome ? next!.home : next!.away, next!.youAreHome ? next!.away : next!.home);
     router.startMatch({ home: h, away: a, difficulty: 'normal', halfSeconds: ls.halfSeconds, mode: 'match', league: true, cpuLevel: info.level });
   });
   root.querySelector('#l-next')?.addEventListener('click', () => { setLeague(nextSeason(ls, you)); renderLeague(root, router); });
@@ -834,7 +835,8 @@ function renderCareer(root: HTMLElement, router: Router): void {
     root.querySelector('#k-cards')!.innerHTML = cards();
   }));
   root.querySelector('#k-play')?.addEventListener('click', () => {
-    const [h, a] = resolveKits(next!.home, next!.away);
+    // The human always controls the home side of the sim, so put your team there; the table flips the score when you were away.
+    const [h, a] = resolveKits(next!.youAreHome ? next!.home : next!.away, next!.youAreHome ? next!.away : next!.home);
     router.startMatch({ home: h, away: a, difficulty: 'normal', halfSeconds: c.halfSeconds, mode: 'match', career: true, cpuLevel: tier.level });
   });
   root.querySelector('#k-next')?.addEventListener('click', () => {
