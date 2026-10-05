@@ -235,3 +235,49 @@ describe('dribbling', () => {
     expect(thief.match.tackles).toBe(1);
   });
 });
+
+describe('passing and lobs', () => {
+  /** Side 0's attacker on the ball with one team-mate up the pitch and a defender standing in the lane. Only the team-mate can move. */
+  function lane() {
+    const sim = cpuMatch({ humanSide: null, halfSeconds: 120 });
+    sim.phase = 'play';
+    const p = sim.ball.owner!;
+    p.pos = { x: -4, z: 0 }; p.vel = { x: 0, z: 0 };
+    sim.ball.pos = { x: -3.6, z: 0 };
+    const mate = sim.players.find((q) => q.side === 0 && q !== p && !q.isKeeper)!;
+    const defender = sim.players.find((q) => q.side === 1 && !q.isKeeper)!;
+    for (const o of sim.players) if (o !== p) { o.pos = { x: o.side === 0 ? -14 : 14, z: o.side === 0 ? -8 : 8 }; o.speedMul = 0; }
+    mate.pos = { x: 6, z: 0 };
+    mate.speedMul = 1;
+    defender.pos = { x: 1, z: 0 };
+    return { sim, p, mate, defender };
+  }
+
+  it('a lob sails over a defender in the lane and drops to the team-mate', () => {
+    const { sim, p, mate, defender } = lane();
+    sim.lob(p, { x: 1, z: 0 });
+    let overHead = false;
+    runUntil(sim, (s) => {
+      if (Math.abs(s.ball.pos.x - defender.pos.x) < 0.3) overHead = s.ball.y > 0.6 * s.stats.scale + 0.2;
+      return s.ball.owner !== null;
+    }, 60 * 4);
+    expect(overHead).toBe(true);
+    expect(sim.ball.owner).toBe(mate);
+  });
+
+  it('a ground pass along the same lane is cut out by the defender', () => {
+    const { sim, p, defender } = lane();
+    sim.pass(p, { x: 1, z: 0 });
+    runUntil(sim, (s) => s.ball.owner !== null, 60 * 4);
+    expect(sim.ball.owner).toBe(defender);
+  });
+
+  it('passes are struck firmly enough to reach a team-mate still rolling', () => {
+    const { sim, p, mate, defender } = lane();
+    defender.pos = { x: 1, z: 6 };
+    sim.pass(p, { x: 1, z: 0 });
+    expect(Math.hypot(sim.ball.vel.x, sim.ball.vel.z)).toBeGreaterThan(sim.stats.power * 0.6);
+    runUntil(sim, (s) => s.ball.owner !== null || Math.abs(s.ball.pos.x - mate.pos.x) < 0.5, 60 * 4);
+    expect(Math.hypot(sim.ball.vel.x, sim.ball.vel.z) > 3 || sim.ball.owner === mate).toBe(true);
+  });
+});

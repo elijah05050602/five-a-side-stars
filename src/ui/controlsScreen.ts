@@ -14,7 +14,7 @@ type Capture = { kind: 'key'; profile: KeyProfile; action: Action; slot: number 
 const PROFILE_LABELS: Record<KeyProfile, string> = { solo: '1 player', p1: '2 players: Player 1', p2: '2 players: Player 2' };
 /** Short lower-case name for notes, e.g. "shoot". */
 const short = (a: Action) => ACTION_LABELS[a].replace(/ \(.*\)$/, '').toLowerCase();
-const ACTION_ICONS: Record<Action, string> = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️', shoot: '🥅', pass: '👟', sprint: '⚡', switch: '🔄', trick: '✨', pause: '⏸️' };
+const ACTION_ICONS: Record<Action, string> = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️', shoot: '🥅', pass: '👟', lob: '🌈', sprint: '⚡', switch: '🔄', trick: '✨', pause: '⏸️' };
 
 let tab: Tab = window.matchMedia('(pointer: coarse)').matches ? 'touch' : 'keyboard';
 let profile: KeyProfile = 'solo';
@@ -70,7 +70,7 @@ export function renderControls(root: HTMLElement, router: Router, wire: (root: H
       <div class="touch-controls tc-preview ${c.touch.leftHanded ? 'is-lefty' : ''}" style="--tc-size:${c.touch.size};--tc-opacity:${c.touch.opacity}">
         <div class="joystick"><div class="joy-knob"></div></div>
         <div class="action-buttons">
-          <span class="abtn abtn-trick">Trick</span><span class="abtn abtn-switch">Switch</span><span class="abtn abtn-sprint">Sprint</span><span class="abtn abtn-pass">Pass</span><span class="abtn abtn-shoot">Shoot</span>
+          <span class="abtn abtn-lob">Lob</span><span class="abtn abtn-trick">Trick</span><span class="abtn abtn-switch">Switch</span><span class="abtn abtn-sprint">Sprint</span><span class="abtn abtn-pass">Pass</span><span class="abtn abtn-shoot">Shoot</span>
         </div>
       </div>
     </div>`;

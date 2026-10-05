@@ -5,6 +5,7 @@ export interface InputState {
   shoot: boolean; // pressed this frame
   shootHeld: boolean; // still held (hold to power up a shot)
   pass: boolean; // pressed this frame
+  lob: boolean; // pressed this frame: lofted pass or cross
   sprint: boolean;
   switchPlayer: boolean; // pressed this frame
   pause: boolean; // pressed this frame
@@ -102,7 +103,7 @@ export class Input {
   }
 
   /** Attach a touch button that maps to an action name. */
-  attachButton(el: HTMLElement, action: 'shoot' | 'pass' | 'sprint' | 'switch' | 'trick'): void {
+  attachButton(el: HTMLElement, action: 'shoot' | 'pass' | 'lob' | 'sprint' | 'switch' | 'trick'): void {
     const down = (e: PointerEvent) => {
       e.preventDefault();
       el.setPointerCapture(e.pointerId);
@@ -181,6 +182,7 @@ export class Input {
       shoot: hit(m.shoot) || padPress('shoot') || this.touchPressed.has('shoot'),
       shootHeld: held(m.shoot) || padHeld('shoot') || this.touchHeld.has('shoot'),
       pass: hit(m.pass) || padPress('pass') || this.touchPressed.has('pass'),
+      lob: hit(m.lob) || padPress('lob') || this.touchPressed.has('lob'),
       sprint: held(m.sprint) || padHeld('sprint') || this.touchHeld.has('sprint'),
       switchPlayer: hit(m.switch) || padPress('switch') || this.touchPressed.has('switch'),
       pause: hit(m.pause) || padPress('pause'),

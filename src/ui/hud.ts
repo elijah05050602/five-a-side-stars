@@ -12,6 +12,7 @@ export interface HudRefs {
   btnSprint: HTMLElement;
   btnSwitch: HTMLElement;
   btnTrick: HTMLElement;
+  btnLob: HTMLElement;
   /** `lines[i]` is the commentator's line for `events[i]`, or null. */
   update(sim: MatchSim, events: SimEvent[], lines?: (string | null)[]): void;
   /** Show a commentary line in the ticker. */
@@ -79,6 +80,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       <div class="touch-controls ${getControls().touch.leftHanded ? 'is-lefty' : ''}" style="--tc-size:${getControls().touch.size};--tc-opacity:${getControls().touch.opacity}">
         <div class="joystick" id="joy"><div class="joy-knob" id="joy-knob"></div></div>
         <div class="action-buttons">
+          <button class="abtn abtn-lob" id="btn-lob">Lob</button>
           <button class="abtn abtn-trick" id="btn-trick">Trick</button>
           <button class="abtn abtn-switch" id="btn-switch">Switch</button>
           <button class="abtn abtn-sprint" id="btn-sprint">Sprint</button>
@@ -207,6 +209,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     btnSprint: q('btn-sprint'),
     btnSwitch: q('btn-switch'),
     btnTrick: q('btn-trick'),
+    btnLob: q('btn-lob'),
     say,
     setReplay(on) { replayFrame.hidden = !on; },
     update(s, events, lines) {
