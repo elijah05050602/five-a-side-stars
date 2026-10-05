@@ -47,7 +47,7 @@ export async function renderTeamSheet(team: Team): Promise<Blob> {
   ctx.font = font(84);
   ctx.fillText(team.name, 300, 150, 560);
   ctx.font = font(40, 600);
-  ctx.fillText(`${team.ageGroup} · Five-a-Side Stars team sheet`, 300, 215, 560);
+  ctx.fillText(`${team.ageGroup} · Goal Rush! team sheet`, 300, 215, 560);
   ctx.shadowBlur = 0;
 
   // Title row
@@ -92,7 +92,7 @@ export async function renderTeamSheet(team: Team): Promise<Blob> {
   ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2;
   for (let ly = y + 110; ly < y + boxH - 20; ly += 60) { ctx.beginPath(); ctx.moveTo(110, ly); ctx.lineTo(W - 110, ly); ctx.stroke(); }
   ctx.fillStyle = '#94a3b8'; ctx.font = font(26, 600); ctx.textAlign = 'center';
-  ctx.fillText('Made with Five-a-Side Stars ⚽', W / 2, H - 50);
+  ctx.fillText('Made with Goal Rush! ⚽', W / 2, H - 50);
   ctx.textAlign = 'left';
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('png'))), 'image/png'));
 }
