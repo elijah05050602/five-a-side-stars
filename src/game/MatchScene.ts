@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BallModel } from './BallModel';
 import { Input, P1_KEYS, P2_KEYS, SOLO_KEYS } from './input';
 import { buildPitch } from './Pitch';
+import { Crowd } from './Crowd';
 import { PlayerModel } from './PlayerModel';
 import { MatchSim, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
@@ -41,6 +42,7 @@ export class MatchScene {
   private readonly input2: Input | null;
   private readonly hud: HudRefs;
   private readonly sfx = new Sfx();
+  private readonly crowd: Crowd;
   private raf = 0;
   private last = 0;
   private acc = 0;
@@ -79,6 +81,11 @@ export class MatchScene {
     this.scene.add(sun, new THREE.HemisphereLight(0xdff3ff, 0x3b7f4e, 1.25));
 
     this.scene.add(buildPitch({ length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth }));
+
+    this.crowd = new Crowd(this.sim, { touch });
+    this.scene.add(this.crowd.group);
+    // Dev builds only: lets a test script poke the crowd (window.__crowd.onEvent({ type: 'goal', side: 0 })).
+    if (import.meta.env.DEV) (window as unknown as { __crowd: Crowd }).__crowd = this.crowd;
 
     for (const p of this.sim.players) {
       const team = this.sim.teams[p.side];
@@ -161,7 +168,7 @@ export class MatchScene {
       this.acc -= step;
       steps++;
     }
-    for (const ev of this.sim.events) this.sfx.play(ev.type);
+    for (const ev of this.sim.events) { this.sfx.play(ev.type); this.crowd.onEvent(ev); }
     this.hud.update(this.sim, this.sim.events);
     this.sim.events.length = 0;
 
@@ -180,6 +187,7 @@ export class MatchScene {
       const isP2 = p === this.sim.controlled2;
       m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? 0xffd23f : isP2 ? 0x00e5ff : 0xffffff);
     }
+    this.crowd.update(dt);
     const b = this.sim.ball;
     this.ball.update(b.pos.x, b.y, b.pos.z, b.radius, b.vel.x, b.vel.z, dt);
 
@@ -210,6 +218,7 @@ export class MatchScene {
     this.input2?.dispose();
     this.hud.destroy();
     this.models.forEach((m) => m.dispose());
+    this.crowd.dispose();
     this.renderer.dispose();
     this.renderer.clear();
   }

@@ -3,8 +3,6 @@ import { addOutline, toonMaterial } from './toon';
 
 export interface PitchDims { length: number; width: number; goalWidth: number; goalHeight: number; goalDepth: number }
 
-const KIT_PALETTE = ['#e63946', '#3da5f4', '#ffd23f', '#2eb872', '#ff6fb5', '#ff7a00', '#6a4c93', '#ffffff', '#1b2a41'];
-
 /** Mown stripes with a sprinkle of lighter and darker blades, so the grass is not a flat colour. */
 function grassTexture(stripes: number, light: string, dark: string, speckle = true): THREE.CanvasTexture {
   const c = document.createElement('canvas');
@@ -151,7 +149,7 @@ export function buildPitch(d: PitchDims): THREE.Group {
     g.add(buildGoal(sx, d));
   }
 
-  // A small stand full of fans along the far side, benches and cones on the near side.
+  // A small stand along the far side (the fans are in Crowd.ts), benches and cones on the near side.
   g.add(buildStand(L, W));
   for (const sx of [-1, 1]) g.add(buildBench(sx * L * 0.18, W / 2 + 2.2));
   const coneMat = toonMaterial({ color: 0xff7a00 });
@@ -202,57 +200,37 @@ function buildFlag(x: number, z: number): THREE.Group {
   return g;
 }
 
-/** Three stepped rows of seats with a crowd of round fans in bright colours. */
+export interface StandLayout { len: number; z0: number; rows: number; rowDepth: number; rowRise: number; baseHeight: number }
+
+/** Where the stand's seat rows are; the crowd (Crowd.ts) sits its fans on these. Row r tops out at baseHeight + r * rowRise, at z0 - r * rowDepth. */
+export function standLayout(L: number, W: number): StandLayout {
+  return { len: L * 0.8, z0: -W / 2 - 3.2, rows: 3, rowDepth: 1.2, rowRise: 0.6, baseHeight: 0.6 };
+}
+
+/** Three stepped rows of seats under a roof. The fans themselves are added by Crowd. */
 function buildStand(L: number, W: number): THREE.Group {
   const g = new THREE.Group();
-  const len = L * 0.8;
-  const z0 = -W / 2 - 3.2;
+  const { len, z0, rows, rowDepth, rowRise, baseHeight } = standLayout(L, W);
   const stepMat = toonMaterial({ color: 0xb8c4d6 });
-  const rows = 3;
   for (let r = 0; r < rows; r++) {
-    const step = new THREE.Mesh(new THREE.BoxGeometry(len, 0.6 + r * 0.6, 1.2), stepMat);
-    step.position.set(0, (0.6 + r * 0.6) / 2, z0 - r * 1.2);
+    const h = baseHeight + r * rowRise;
+    const step = new THREE.Mesh(new THREE.BoxGeometry(len, h, rowDepth), stepMat);
+    step.position.set(0, h / 2, z0 - r * rowDepth);
     step.receiveShadow = true;
     step.castShadow = true;
     g.add(step);
   }
   // Roof on two posts
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(len + 0.6, 0.12, rows * 1.2 + 0.8), toonMaterial({ color: 0x3da5f4 }));
-  roof.position.set(0, 3.2, z0 - (rows - 1) * 0.6);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(len + 0.6, 0.12, rows * rowDepth + 0.8), toonMaterial({ color: 0x3da5f4 }));
+  roof.position.set(0, 3.2, z0 - (rows - 1) * rowDepth / 2);
   roof.castShadow = true;
   g.add(roof);
   const postMat = toonMaterial({ color: 0x1b2a41 });
   for (const sx of [-1, 1]) {
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.2, 6), postMat);
-    post.position.set(sx * (len / 2 + 0.2), 1.6, z0 - rows * 1.2 + 0.4);
+    post.position.set(sx * (len / 2 + 0.2), 1.6, z0 - rows * rowDepth + 0.4);
     g.add(post);
   }
-  // The crowd: little heads on little bodies, as instanced spheres.
-  const perRow = Math.floor(len / 0.55);
-  const n = perRow * rows;
-  const bodies = new THREE.InstancedMesh(new THREE.SphereGeometry(0.24, 8, 6), toonMaterial({ color: 0xffffff }), n);
-  const heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.15, 8, 6), toonMaterial({ color: 0xffffff }), n);
-  const m = new THREE.Matrix4();
-  const colour = new THREE.Color();
-  const skins = ['#f6d7c3', '#eab98f', '#d49a6a', '#a86b3c', '#7a4a26', '#4a2d17'];
-  let k = 0;
-  for (let r = 0; r < rows; r++) {
-    for (let i = 0; i < perRow; i++) {
-      if (Math.random() < 0.12) { bodies.setMatrixAt(k, new THREE.Matrix4().makeScale(0, 0, 0)); heads.setMatrixAt(k, new THREE.Matrix4().makeScale(0, 0, 0)); k++; continue; }
-      const x = -len / 2 + 0.3 + i * 0.55 + (Math.random() - 0.5) * 0.15;
-      const y = 0.6 + r * 0.6;
-      const z = z0 - r * 1.2 + (Math.random() - 0.5) * 0.2;
-      m.makeTranslation(x, y + 0.2, z);
-      bodies.setMatrixAt(k, m);
-      bodies.setColorAt(k, colour.set(KIT_PALETTE[Math.floor(Math.random() * KIT_PALETTE.length)]));
-      m.makeTranslation(x, y + 0.5, z);
-      heads.setMatrixAt(k, m);
-      heads.setColorAt(k, colour.set(skins[Math.floor(Math.random() * skins.length)]));
-      k++;
-    }
-  }
-  bodies.castShadow = heads.castShadow = true;
-  g.add(bodies, heads);
   return g;
 }
 
