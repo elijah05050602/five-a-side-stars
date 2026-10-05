@@ -144,6 +144,8 @@ export interface SimBall {
   wasPass: boolean;
   /** Team-mate the current pass or lob is meant for, who runs to meet it. */
   receiver: SimPlayer | null;
+  /** The current flight is a lob or cross, which checks up when it lands. */
+  lofted: boolean;
   /** Team-mate whose completed pass set up the current possession; credited with an assist on a goal. */
   assist: SimPlayer | null;
 }
@@ -300,7 +302,7 @@ export class MatchSim {
     this.goalWidth = this.stats.goalWidth;
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
-    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, assist: null };
+    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null };
     this.diff = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.difficulty];
     const diff = this.diff;
     ([0, 1] as Side[]).forEach((side) => {
@@ -1198,8 +1200,8 @@ export class MatchSim {
     if (b.y <= 0) {
       b.y = 0;
       if (b.vy < -0.5) {
-        // A dropping ball checks up as it lands, so a lob sits up for the receiver.
-        if (b.vy < -2.5) { b.vel.x *= 0.7; b.vel.z *= 0.7; }
+        // A dropping lob checks up as it lands, so it sits up for the receiver.
+        if (b.lofted && b.vy < -2.5) { b.vel.x *= 0.7; b.vel.z *= 0.7; b.lofted = false; }
         b.vy = -b.vy * 0.55;
       } else b.vy = 0;
     }
@@ -1318,9 +1320,12 @@ export class MatchSim {
       const d = dist(p.pos, b.pos);
       const kr = this.stats.keeperReach * (p.info.special === 'keeper' ? 1.25 : 1) * p.mul.reach;
       const reach = p.isKeeper ? (p.diveAnim > 0 ? kr : kr * 0.55) : controlR;
-      const maxHeight = p.isKeeper ? this.goalHeight : 0.6 * this.stats.scale + 0.2;
+      // The intended receiver of a lob can chest or head it down; everyone else needs it at their feet.
+      const meantFor = b.wasPass && b.receiver === p;
+      const maxHeight = p.isKeeper ? this.goalHeight : (meantFor && b.lofted ? 1.3 : 0.6) * this.stats.scale + 0.2;
       // In a 50/50 the stronger kid gets there first.
-      const eff = p.isKeeper ? d : d / Math.sqrt(p.mul.strength);
+      // The player a pass is meant for is already attacking the ball, so wins a close call.
+      const eff = (p.isKeeper ? d : d / Math.sqrt(p.mul.strength)) * (meantFor ? 0.6 : 1);
       if (d < reach && b.y < maxHeight && eff < bd) { bd = eff; best = p; }
     }
     if (best) {
@@ -1405,6 +1410,7 @@ export class MatchSim {
     b.penaltyShot = false;
     b.wasPass = false;
     b.receiver = null;
+    b.lofted = false;
     p.kickCooldown = 0.35;
     p.kickAnim = 1;
     p.facing = Math.atan2(n.z, n.x);
@@ -1622,22 +1628,18 @@ export class MatchSim {
     const speed = clamp(1.8 + d * 0.55, 3, this.stats.power * 0.55 * (long ? p.mul.strength : 1));
     this.kick(p, v(Math.cos(a), Math.sin(a)), speed, 1.2);
     p.kickAnim = 0; // thrown, not kicked
+    this.ball.wasPass = mate !== null;
+    this.ball.receiver = mate;
     this.ball.y = Math.max(this.ball.y, this.throwHeight());
+    // Released over the line, so the ball does not count as out again before it has moved.
+    this.ball.pos.z = clamp(this.ball.pos.z, -this.width / 2, this.width / 2);
   }
 
-  /** Corner cross into the box: to the best-placed team-mate, or where the stick points. */
+  /** Corner: a lofted cross into the box, like the Lob button from out wide. A charged corner is whipped in a little longer. */
   private cross(p: SimPlayer, aim: V2 | null, powerMul: number): void {
-    const dir = p.side === 0 ? 1 : -1;
-    let target = v(this.goalX(p.side) - dir * (this.width * 0.26 + 0.6), 0);
-    const runner = this.nearest(this.teamOf(p.side).filter((m) => m !== p && !m.isKeeper), target);
-    if (runner) target = v(runner.pos.x + runner.vel.x * 0.4, runner.pos.z + runner.vel.z * 0.4);
-    let to = v(target.x - p.pos.x, target.z - p.pos.z);
-    const d = len(to);
-    if (aim) { const a = norm(aim); to = v(a.x * d, a.z * d); }
-    const wobble = (1 - this.stats.control) * 0.25;
-    const ang = Math.atan2(to.z, to.x) + rand(-wobble, wobble);
-    const speed = clamp(2.5 + d * 0.62, 5, this.stats.power * 0.8) * powerMul;
-    this.kick(p, v(Math.cos(ang), Math.sin(ang)), speed, 1.4);
+    this.lob(p, aim);
+    const b = this.ball;
+    b.vel = v(b.vel.x * powerMul, b.vel.z * powerMul);
   }
 
   /** Goal kick booted upfield (where the stick points, or straight ahead). */
@@ -1808,14 +1810,16 @@ export class MatchSim {
     }
     const d = Math.max(2, len(to));
     const t = this.lobFlightTime(d);
-    // Land a little short so it bounces on to the receiver. In the air it only loses about 0.4 m/s each second plus drag.
-    const carry = d * 0.9;
-    const speed = Math.min((carry + 0.2 * t * t) / (t - 0.03 * t * t), this.stats.power * 0.85);
+    // A pass lands a little short so it bounces on to the receiver; a cross drops just beyond them, to be met
+    // at chest or head height over the marker. In the air it only loses about 0.4 m/s each second plus drag.
+    const carry = crossing && mate ? d + 0.4 * this.stats.scale + 0.3 : d * 0.9;
+    const speed = Math.min((carry + 0.2 * t * t) / (t - 0.03 * t * t), this.stats.power * 1.1);
     const wobble = (1 - this.stats.control) * 0.3 * p.mul.passWobble;
     const a = Math.atan2(to.z, to.x) + rand(-wobble, wobble);
     this.kick(p, v(Math.cos(a), Math.sin(a)), speed, (9.81 * t) / 2);
     this.ball.wasPass = true;
     this.ball.receiver = mate;
+    this.ball.lofted = true;
   }
 
   /** For a cross: the team-mate best placed to attack the ball around the penalty spot (and roughly where the stick points). */

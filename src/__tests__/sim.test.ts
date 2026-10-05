@@ -275,7 +275,7 @@ describe('passing and lobs', () => {
     const back = sim.players.find((q) => q.side === 0 && q !== p && q !== mate && !q.isKeeper)!;
     back.pos = { x: -5, z: 0 }; // an open team-mate behind would be the lofted-pass pick
     mate.pos = { x: L - (sim.width * 0.26 + 0.6), z: 0.5 };
-    defender.pos = { x: L - 4, z: W - 4 };
+    defender.pos = { x: L - 1, z: W - 5 }; // marking the near post, out of the cross's path
     sim.lob(p, null);
     expect(sim.ball.receiver).toBe(mate);
     runUntil(sim, (s) => s.ball.owner !== null, 60 * 4);
@@ -296,5 +296,30 @@ describe('passing and lobs', () => {
     expect(Math.hypot(sim.ball.vel.x, sim.ball.vel.z)).toBeGreaterThan(sim.stats.power * 0.6);
     runUntil(sim, (s) => s.ball.owner !== null || Math.abs(s.ball.pos.x - mate.pos.x) < 0.5, 60 * 4);
     expect(Math.hypot(sim.ball.vel.x, sim.ball.vel.z) > 3 || sim.ball.owner === mate).toBe(true);
+  });
+});
+
+describe('throw-ins', () => {
+  it('a throw-in the taker runs out of time on is thrown in, not given to the other side', () => {
+    const sim = cpuMatch({ humanSide: 0, halfSeconds: 120 });
+    sim.phase = 'play';
+    const b = sim.ball;
+    b.owner = null;
+    b.lastTouch = sim.players.find((p) => p.side === 1 && !p.isKeeper)!;
+    b.pos = { x: 3, z: sim.width / 2 + 0.5 };
+    b.vel = { x: 0, z: 1 };
+    sim.step(1 / 60, IDLE_INPUT);
+    expect(sim.phase).toBe('setpiece');
+    // Nobody presses anything, so the referee has the taker throw it after a few seconds.
+    const restarts: number[] = [];
+    let played = 0;
+    for (let i = 0; i < 60 * 15 && played < 30; i++) {
+      sim.step(1 / 60, IDLE_INPUT);
+      for (const e of sim.events) if (e.type === 'restart') restarts.push(e.side);
+      sim.events.length = 0;
+      if (sim.phase === 'play') played++;
+    }
+    expect(played).toBe(30);
+    expect(restarts).toEqual([0]); // just the one throw, to the right side
   });
 });
