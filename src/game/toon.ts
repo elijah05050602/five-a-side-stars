@@ -34,3 +34,26 @@ export function addOutline(mesh: THREE.Mesh, thickness = 0.03): void {
   o.receiveShadow = false;
   mesh.add(o);
 }
+
+/**
+ * Outline for a skinned mesh: the same mesh drawn again inside-out, with every
+ * vertex pushed out along its (skinned) normal in the vertex shader, so the
+ * line follows the animation and stays an even thickness.
+ */
+export function addSkinnedOutline(mesh: THREE.SkinnedMesh, thickness = 0.03): THREE.SkinnedMesh {
+  // A toon material with only emissive colour: constant dark, and its vertex shader skins normals.
+  const mat = new THREE.MeshToonMaterial({ color: 0x000000, emissive: 0x12203a, side: THREE.BackSide });
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uOutline = { value: thickness };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uOutline;')
+      .replace('#include <skinning_vertex>', '#include <skinning_vertex>\ntransformed += normalize(objectNormal) * uOutline;');
+  };
+  const o = new THREE.SkinnedMesh(mesh.geometry, mat);
+  o.bind(mesh.skeleton, mesh.bindMatrix);
+  o.castShadow = false;
+  o.receiveShadow = false;
+  o.frustumCulled = false;
+  mesh.add(o);
+  return o;
+}

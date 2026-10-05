@@ -4,6 +4,7 @@ import { recordResult } from './data/progress';
 import { loadSave } from './data/storage';
 import { applyMotionSetting } from './ui/motion';
 import { music } from './game/music';
+import { loadPlayerAsset } from './game/playerAsset';
 import { renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -12,6 +13,8 @@ let match: MatchScene | null = null;
 
 loadSave();
 applyMotionSetting();
+// Fetch the kid model now so the first match and the team builder start with it ready.
+loadPlayerAsset().catch(() => { /* PlayerModel falls back to the procedural kid */ });
 // Music can only start after a tap or key press.
 const startMusic = () => { music.start(); window.removeEventListener('pointerdown', startMusic); window.removeEventListener('keydown', startMusic); };
 window.addEventListener('pointerdown', startMusic);

@@ -56,3 +56,10 @@ U5 to U10 are the age groups of the teams **in the game**, not of the player at
 the keyboard. The age group changes player size, speed, shot power, ball
 control, keeper reach, pitch size and match length. See
 `src/data/ageGroups.ts`.
+
+## Credits
+
+The kids on the pitch are built from the
+[KayKit Character Pack: Adventurers](https://kaylousberg.itch.io/kaykit-adventurers)
+by Kay Lousberg (CC0, public domain). The game repaints the model with each
+team's kit; see `public/models/LICENSE.md` and `tools/build-player-model.mjs`.

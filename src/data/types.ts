@@ -6,7 +6,8 @@ export type KitPattern = 'plain' | 'stripes' | 'hoops' | 'halves' | 'sash' | 'ch
 export const KIT_PATTERNS: KitPattern[] = ['plain', 'stripes', 'hoops', 'halves', 'sash', 'chevron'];
 
 export type HairStyle = 'short' | 'spiky' | 'long' | 'curly' | 'bald';
-export const HAIR_STYLES: HairStyle[] = ['short', 'spiky', 'long', 'curly', 'bald'];
+/** 'curly' is kept in the type for old saves; it shows as the short fringe style. */
+export const HAIR_STYLES: HairStyle[] = ['short', 'spiky', 'long', 'bald'];
 
 /** One small perk per player, kept gentle so nobody is useless. */
 export type Special = 'none' | 'speedy' | 'power' | 'keeper';

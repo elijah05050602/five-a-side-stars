@@ -168,9 +168,12 @@ export class MatchScene {
     // Sync models
     const scale = this.sim.stats.scale;
     const wobble = getSettings().reduceMotion ? 0 : Math.max(0, 0.75 - this.sim.stats.control) * 2;
+    const lastGoal = this.sim.goals[this.sim.goals.length - 1];
+    const cheering = this.sim.phase === 'goal' && lastGoal ? lastGoal.side : -1;
     for (const p of this.sim.players) {
       const m = this.models.get(p)!;
       m.group.position.set(p.pos.x, 0, p.pos.z);
+      m.setCheer(p.side === cheering);
       m.setFacing(p.facing);
       m.animate(Math.hypot(p.vel.x, p.vel.z), p.kickAnim, p.diveAnim, p.diveDir, dt, scale, wobble);
       const isP1 = p === this.sim.controlled;
