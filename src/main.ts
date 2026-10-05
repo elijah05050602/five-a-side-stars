@@ -44,9 +44,12 @@ const router: Router = {
       (result) => {
         match = null;
         const stickers = recordResult(result);
-        router.go({ name: 'results', result, stickers, tournament: o.tournament, league: o.league });
+        router.go({ name: 'results', result, stickers, tournament: o.tournament, league: o.league, career: o.career });
       },
-      () => { match = null; router.go(o.tournament ? { name: 'tournament', state: o.tournament } : o.league ? { name: 'league' } : { name: 'menu' }); });
+      () => { match = null; router.go(o.tournament ? { name: 'tournament', state: o.tournament } : o.league ? { name: 'league' } : o.career ? { name: 'career' } : { name: 'menu' }); },
+      { weather: o.weather });
+    // `?debug` exposes the running match so screenshot scripts can poke at it.
+    if (location.search.includes('debug')) (window as unknown as { __match?: MatchScene }).__match = match;
   },
   startTutorial() {
     // A short guided kick-about with your first team. Finishing or skipping both count as done.

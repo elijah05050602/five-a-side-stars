@@ -14,6 +14,7 @@ npm install
 npm run dev      # dev server with hot reload
 npm run build    # type-check and build to dist/
 npm run preview  # serve the built game
+npm test         # run the automated checks (saves, league, cup, match engine)
 ```
 
 ## Ways to play
@@ -25,6 +26,16 @@ npm run preview  # serve the built game
 - **Training**: just you and a keeper; score as many as you can before time runs out (rocket shots count double).
 - **Sticker album**: finish matches, win cups and hit milestones to collect stickers; some unlock extra badge icons.
 - **Team sheet**: from the squad step of the team builder, download a printable PNG team sheet.
+- **Weather and time of day**: pick sunny, cloudy, rain, snow, sunset or a night game under floodlights on the setup screen, or let the game surprise you.
+- **Commentary and replays**: a commentator who knows the score, calls shots wide, over or off the bar, and an instant slow-motion replay of every goal (off when reduce motion is on).
+
+## Sound
+
+Every sound is made in code with the Web Audio API, so there are no audio
+files: a crowd that murmurs, holds its breath when the ball nears a goal and
+roars at a goal, the referee's pea whistle, ball thumps, applause, rain and
+wind, and a looping menu tune with drums and a bass line. See `src/game/sfx.ts`,
+`src/game/music.ts` and `src/game/audio.ts`.
 
 ## Parents and privacy
 
