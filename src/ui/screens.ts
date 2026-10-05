@@ -4,6 +4,7 @@ import { deleteTeam, getLeague, getSettings, getTeam, getTeams, resetAll, saveTe
 import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, SPECIALS, type AgeGroup, type BadgeShape, type Build, type Difficulty, type HairStyle, type Kit, type Position, type Special, type Team } from '../data/types';
 import { kitsClash } from '../game/kitTexture';
 import type { MatchResult, SimMode } from '../game/MatchScene';
+import { WEATHER_CHOICES, type WeatherChoice } from '../game/Weather';
 import { STICKERS, getProgress, lockedIcons, recordSeason, recordTrophy, unlockedIcons, type Sticker } from '../data/progress';
 import { TIERS, applyLeagueResult, computeTable, createLeague, nextFixture, nextSeason, seasonOutcome, seasonOver, tierInfo, yourPosition } from '../game/league';
 import { applyResult, createTournament, currentFixture, humanStillIn, teamById, type Fixture, type TournamentState } from '../game/tournament';
@@ -28,6 +29,8 @@ export interface StartOptions {
   /** League match: the result feeds the saved league table. */
   league?: boolean;
   cpuLevel?: number;
+  /** Weather and time of day for the match; 'random' or missing picks for you. */
+  weather?: WeatherChoice;
 }
 
 export interface Router {
@@ -411,6 +414,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
   let difficulty: Difficulty = settings.difficulty;
   let halfSeconds = mode === 'training' ? 90 : settings.halfLengthSeconds;
   let twoPlayer = false;
+  let weather: WeatherChoice = 'random';
   const hasKeyboard = window.matchMedia('(pointer: fine)').matches && mode !== 'training' && mode !== 'league';
   const info = MODE_INFO[mode];
   const lengthLabel = mode === 'training' ? 'Time' : mode === 'shootout' ? '' : 'Half length';
@@ -456,6 +460,9 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
           ${lengthLabel ? `<div class="field"><span>${lengthLabel}</span>
             <div class="pills">${lengths.map((s) => `<button class="pill ${s === halfSeconds ? 'is-active' : ''}" data-len="${s}">${s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`}</button>`).join('')}</div>
           </div>` : ''}
+          ${mode === 'tournament' || mode === 'league' ? '' : `<div class="field"><span>Weather</span>
+            <div class="pills">${WEATHER_CHOICES.map((w) => `<button class="pill ${w.id === weather ? 'is-active' : ''}" data-weather="${w.id}">${w.label}</button>`).join('')}</div>
+          </div>`}
         </div>
         ${swapped && mode !== 'training' && mode !== 'tournament' && mode !== 'league' ? `<p class="warn">👕 The kits clash, so ${esc(swapped)} will wear their away kit.</p>` : ''}
         <button class="btn btn-primary btn-big btn-kickoff" id="s-go">${info.go}</button>
@@ -479,6 +486,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
       render();
     }));
     root.querySelectorAll<HTMLElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { halfSeconds = Number(b.dataset.len); render(); }));
+    root.querySelectorAll<HTMLElement>('[data-weather]').forEach((b) => b.addEventListener('click', () => { weather = b.dataset.weather as WeatherChoice; render(); }));
     root.querySelector('#s-go')!.addEventListener('click', () => {
       if (mode !== 'training') updateSettings({ difficulty, halfLengthSeconds: halfSeconds });
       const awayTeam = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
@@ -494,7 +502,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
         return;
       }
       const [h, a] = resolveKits(home, awayTeam);
-      router.startMatch({ home: h, away: a, difficulty, halfSeconds, twoPlayer, mode: mode === 'training' ? 'training' : mode === 'shootout' ? 'shootout' : 'match' });
+      router.startMatch({ home: h, away: a, difficulty, halfSeconds, twoPlayer, weather, mode: mode === 'training' ? 'training' : mode === 'shootout' ? 'shootout' : 'match' });
     });
   };
   render();

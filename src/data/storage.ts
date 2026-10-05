@@ -50,6 +50,12 @@ function migrateTeam(t: Team): Team {
   return team;
 }
 
+/** Drop the in-memory copy and read the save again (a fresh page load, or another tab changed it). */
+export function reloadSave(): SaveFile {
+  cache = null;
+  return loadSave();
+}
+
 export function persist(): void {
   if (!cache) return;
   try {
