@@ -845,7 +845,7 @@ function renderCareer(root: HTMLElement, router: Router): void {
     const adv = advanceCareer(c, you);
     saveTeam(you);
     setCareer(c);
-    recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished });
+    recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0 });
     renderCareer(root, router);
   });
   root.querySelector('#k-edit')?.addEventListener('click', () => router.go({ name: 'builder', teamId: you.id }));
