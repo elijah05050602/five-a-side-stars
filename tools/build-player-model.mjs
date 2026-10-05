@@ -75,7 +75,7 @@ const headMap = (extra) => (key, [, y, z]) => {
 // the tunic surface, so it is painted as shirt (same mapping) rather than cut.
 const shirtUV = (x, y, z) => ({ t: 'shirt', u: 0.5 + Math.atan2(x, z) / (2 * Math.PI), v: 0.19 + (1.15 - y) * 0.6, wrap: true });
 const bodyMap = (key, [x, y, z]) => ({
-  '0,1': y < 0.5 ? 'drop' : shirtUV(x, y, z), '1,1': 'drop', '5,0': 'shorts', '7,1': 'drop', '3,0': 'drop',
+  '0,1': y < 0.5 ? 'drop' : y > 1.12 ? 'cut' : shirtUV(x, y, z), '1,1': 'drop', '5,0': 'shorts', '7,1': 'drop', '3,0': 'drop',
   '6,0': Math.abs(x) < 0.14 && y > 0.74 && y < 0.9 && z > 0.24 ? shirtUV(x, y, z) : 'drop',
 })[key];
 // Arms: the sleeve and shoulder band keep their u but are squeezed into the plain middle of the
@@ -160,16 +160,42 @@ function capHoles(mesh, name) {
   for (const [k, n] of edges) if (n === 1) { const [a, b] = k.split('_').map(Number); (adj.get(a) || adj.set(a, []).get(a)).push(b); (adj.get(b) || adj.set(b, []).get(b)).push(a); }
   const centre = [0, 0, 0];
   for (const o of owners) for (let c = 0; c < 3; c++) centre[c] += o.pos[c] / owners.length;
+
+  // New vertices are appended to a primitive's (un-shared) attribute arrays.
+  const ext = prims.map(() => null);
+  const arraysFor = (pi) => {
+    if (!ext[pi]) {
+      const prim = prims[pi];
+      for (const sem of prim.listSemantics()) prim.setAttribute(sem, prim.getAttribute(sem).clone());
+      ext[pi] = { arrays: Object.fromEntries(prim.listSemantics().map((sem) => [sem, Array.from(prim.getAttribute(sem).getArray())])), count: prim.getAttribute('POSITION').getCount() };
+    }
+    return ext[pi];
+  };
+  const addVertex = (pi, src, { pos, normal, uv }) => {
+    const e = arraysFor(pi); const prim = prims[pi];
+    for (const sem of prim.listSemantics()) {
+      const n = prim.getAttribute(sem).getElementSize();
+      const vals = sem === 'POSITION' && pos ? pos : sem === 'NORMAL' && normal ? normal : sem === 'TEXCOORD_0' && uv ? uv : e.arrays[sem].slice(src * n, src * n + n);
+      e.arrays[sem].push(...vals);
+    }
+    return e.count++;
+  };
+  const shirtAt = (p) => { const m = shirtUV(p[0], p[1], p[2]); return [(CELL.shirt[0] + clamp01(m.u)) / 8, (CELL.shirt[1] + clamp01(m.v)) / 4]; };
+  const collarUV = () => [(CELL.shirt[0] + 0.5) / 8, (CELL.shirt[1] + 0.1) / 4];
+
   const seen = new Set(); const added = prims.map(() => 0);
   for (const s of adj.keys()) {
     if (seen.has(s)) continue;
     const loop = []; let cur = s, prev = -1;
     while (cur !== undefined && !seen.has(cur)) { seen.add(cur); loop.push(cur); const nx = adj.get(cur).filter((n) => n !== prev); prev = cur; cur = nx[0]; }
     if (loop.length < 3) continue;
-    let pi = -1;
+    // Which primitive holds every vertex of the loop? The face patch is preferred, so eye sockets
+    // are painted by the face texture.
     const order = [...prims.keys()].sort((a, b) => (prims[b].getMaterial()?.getName() === 'face') - (prims[a].getMaterial()?.getName() === 'face'));
+    let pi = -1;
     for (const p of order) if (loop.every((w) => owners[w].by.has(p))) { pi = p; break; }
     if (pi < 0) { console.warn(name, 'hole spans primitives, left open:', loop.length, 'vertices'); continue; }
+    const prim = prims[pi];
     const pts = loop.map((w) => owners[w].pos);
     const n = [0, 0, 0];
     for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; n[0] += (a[1] - b[1]) * (a[2] + b[2]); n[1] += (a[2] - b[2]) * (a[0] + b[0]); n[2] += (a[0] - b[0]) * (a[1] + b[1]); }
@@ -177,69 +203,83 @@ function capHoles(mesh, name) {
     const lc = [0, 0, 0];
     for (const p of pts) for (let c = 0; c < 3; c++) lc[c] += p[c] / pts.length;
     // Face the cap outward: along the rim's own normals when they agree, else away from the mesh.
-    const prim = prims[pi];
     const NA = prim.getAttribute('NORMAL')?.getArray();
     const rimN = [0, 0, 0];
     if (NA) for (const w of loop) { const i = owners[w].by.get(pi); for (let c = 0; c < 3; c++) rimN[c] += NA[3 * i + c]; }
     const away = [lc[0] - centre[0], lc[1] - centre[1], lc[2] - centre[2]];
     const ref = Math.hypot(...rimN) > loop.length * 0.3 ? rimN : away;
     const flip = dot3(nn, ref) < 0;
-    const u = unit(cross3(nn, Math.abs(nn[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), v = cross3(nn, u);
-    const tris = earClip(pts.map((p) => [dot3(p, u), dot3(p, v)]));
-    // Some caps get their own vertices with chosen UVs and a flat normal:
-    //  - the body's tall opening is the neck (where the scarf was): closed up as shirt, with the
-    //    same height-to-v mapping as the tunic so the painter's collar band runs round the top;
-    //  - a head's eye sockets map onto the eye drawn in the face texture, so the painted eye
-    //    (with its expressions and gaze) fills the socket exactly;
-    //  - a head's other face holes (brow slots, nose, ear notches) continue the flat face mapping.
+    const emit = (tri) => { if (flip) tri.reverse(); I[pi].push(...tri); added[pi]++; };
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
     const isHead = name.startsWith('Head_'), isFacePrim = prim.getMaterial()?.getName() === 'face';
-    let uvFor = null;
-    let centre3 = null; // for the neck: a fan to a point on the neck axis instead of a flat lid
-    if (name === 'Rogue_Body' && y1 - y0 > 0.2) {
-      uvFor = (p) => { const m = shirtUV(p[0], p[1], p[2]); return [(CELL.shirt[0] + clamp01(m.u)) / 8, (CELL.shirt[1] + clamp01(m.v)) / 4]; };
-      centre3 = [0, (y0 + y1) / 2 - 0.05, 0.04];
+    if (process.env.CAPLOG) console.log(name, 'cap', loop.length, 'verts in', prim.getMaterial()?.getName(), 'x', x0.toFixed(2), x1.toFixed(2), 'y', y0.toFixed(2), y1.toFixed(2), 'n', nn.map((c) => c.toFixed(2)).join(','), 'flip', flip);
+
+    if (name === 'Rogue_Body' && lc[1] > 0.85) {
+      // ---- The neck. The opening is the tunic's top ring plus a V down the chest where the scarf
+      // hung. The V is filled with a convex chest patch; the ring gets a short collar band that
+      // leans in towards the neck and a lid on top, so the shirt reads as a round crew neck.
+      const srcOf = (k) => owners[loop[k]].by.get(pi);
+      const COLLAR_Y = 1.05;
+      const isV = (k) => pts[k][1] < COLLAR_Y && pts[k][2] > 0;
+      let a = loop.findIndex((_, k) => isV(k) && !isV((k + loop.length - 1) % loop.length));
+      const run = [];
+      if (a >= 0) for (let k = a; isV(k); k = (k + 1) % loop.length) run.push(k);
+      const nL = loop.length;
+      const before = a >= 0 ? (a + nL - 1) % nL : -1, after = a >= 0 ? (run[run.length - 1] + 1) % nL : -1;
+      // Chest patch: corner, V run, corner, fanned to a point pushed out to the chest surface.
+      if (run.length) {
+        const vIdx = [before, ...run, after];
+        const vPts = vIdx.map((k) => pts[k]);
+        const zFront = Math.max(...vPts.map((p) => p[2]));
+        const cv = [vPts.reduce((t, p) => t + p[0], 0) / vPts.length, vPts.reduce((t, p) => t + p[1], 0) / vPts.length, zFront * 0.97];
+        const cIdx = addVertex(pi, srcOf(run[0]), { pos: cv, normal: [0, 0.25, 0.97], uv: shirtAt(cv) });
+        const copies = vIdx.map((k) => addVertex(pi, srcOf(k), { normal: unit([pts[k][0] * 0.6, 0.2, 1]), uv: shirtAt(pts[k]) }));
+        for (let i = 0; i < copies.length - 1; i++) emit([copies[i], copies[i + 1], cIdx]);
+        emit([copies[copies.length - 1], copies[0], cIdx]); // across the neckline chord
+      }
+      // Collar: the ring (collar-height vertices in loop order, closed across the V's corners).
+      const ring = [];
+      if (run.length) { for (let k = after; k !== before; k = (k + 1) % nL) ring.push(k); ring.push(before); }
+      else for (let k = 0; k < nL; k++) ring.push(k);
+      const rPts = ring.map((k) => pts[k]);
+      const cx = rPts.reduce((t, p) => t + p[0], 0) / rPts.length, cz = rPts.reduce((t, p) => t + p[2], 0) / rPts.length;
+      const yTop = Math.max(...rPts.map((p) => p[1]));
+      const outer = ring.map((k) => addVertex(pi, srcOf(k), { normal: unit([pts[k][0] - cx, 0.6, pts[k][2] - cz]), uv: collarUV() }));
+      const inner = ring.map((k) => { const p = pts[k]; const q = [cx + (p[0] - cx) * 0.62, yTop + 0.07, cz + (p[2] - cz) * 0.62]; return addVertex(pi, srcOf(k), { pos: q, normal: unit([p[0] - cx, 1.1, p[2] - cz]), uv: collarUV() }); });
+      const top = addVertex(pi, srcOf(ring[0]), { pos: [cx, yTop + 0.08, cz], normal: [0, 1, 0], uv: collarUV() });
+      for (let i = 0; i < ring.length; i++) {
+        const j = (i + 1) % ring.length;
+        emit([outer[i], outer[j], inner[j]]);
+        emit([outer[i], inner[j], inner[i]]);
+        emit([inner[i], inner[j], top]);
+      }
+      continue;
     }
-    else if (isHead && isFacePrim && x1 - x0 < 0.35 && (y0 + y1) / 2 < 1.7 && Math.abs(lc[0]) > 0.1 && Math.abs(lc[0]) < 0.33) {
+
+    const u = unit(cross3(nn, Math.abs(nn[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), v = cross3(nn, u);
+    const tris = earClip(pts.map((p) => [dot3(p, u), dot3(p, v)]));
+    // Face holes get their own vertices with chosen UVs and a flat normal: eye sockets map onto the
+    // eye drawn in the face texture, so the painted eye (with its expressions and gaze) fills the
+    // socket exactly; other holes (brow slots, nose, ear notches) continue the flat face mapping.
+    let uvFor = null;
+    if (isHead && isFacePrim && x1 - x0 < 0.35 && (y0 + y1) / 2 < 1.7 && Math.abs(lc[0]) > 0.1 && Math.abs(lc[0]) < 0.33) {
       // Face texture eye centres: u = 0.5 -/+ 0.28 (the kid's right eye is at +x), v = 0.49.
       const cu = lc[0] > 0 ? 0.5 - 0.28 : 0.5 + 0.28;
       uvFor = (p) => [cu + ((p[0] - x0) / (x1 - x0) - 0.5) * 0.2, 0.49 + ((y1 - p[1]) / (y1 - y0) - 0.5) * 0.22];
-    } else if (isHead && isFacePrim) uvFor = (p) => [(p[0] + 0.36) / 0.72, (1.92 - p[1]) / 0.62]; // brow slots, nose, ears: continue the face
+    } else if (isHead && isFacePrim) uvFor = (p) => [(p[0] + 0.36) / 0.72, (1.92 - p[1]) / 0.62];
     let vertexOf = (k) => owners[loop[k]].by.get(pi);
-    if (centre3) { tris.length = 0; const n = pts.length; for (let i = 0; i < n; i++) tris.push([i, (i + 1) % n, n]); }
     if (uvFor) {
       const nrm = flip ? nn.map((c) => -c) : nn;
-      // Attributes may be shared with a sibling primitive, so give this one its own copies first.
-      for (const sem of prim.listSemantics()) prim.setAttribute(sem, prim.getAttribute(sem).clone());
-      const arrays = Object.fromEntries(prim.listSemantics().map((sem) => [sem, Array.from(prim.getAttribute(sem).getArray())]));
       const copies = new Map();
-      let next = prim.getAttribute('POSITION').getCount();
-      vertexOf = (k) => {
-        if (copies.has(k)) return copies.get(k);
-        const isCentre = k === loop.length;
-        const src = owners[loop[isCentre ? 0 : k]].by.get(pi);
-        const pos = isCentre ? centre3 : owners[loop[k]].pos;
-        for (const sem of prim.listSemantics()) {
-          const n = prim.getAttribute(sem).getElementSize();
-          const vals = sem === 'TEXCOORD_0' ? uvFor(pos) : sem === 'NORMAL' ? (isCentre ? [0, 0.4, 0.92] : nrm) : sem === 'POSITION' ? pos : arrays[sem].slice(src * n, src * n + n);
-          arrays[sem].push(...vals);
-        }
-        copies.set(k, next);
-        return next++;
-      };
-      for (const t of tris) for (const k of t) vertexOf(k);
-      for (const sem of prim.listSemantics()) { const a = prim.getAttribute(sem); a.setArray(new (a.getArray().constructor)(arrays[sem])); }
+      vertexOf = (k) => { if (!copies.has(k)) copies.set(k, addVertex(pi, owners[loop[k]].by.get(pi), { normal: nrm, uv: uvFor(owners[loop[k]].pos) })); return copies.get(k); };
     }
-    if (process.env.CAPLOG) console.log(name, 'cap', loop.length, 'verts in', prim.getMaterial()?.getName(), 'x', x0.toFixed(2), x1.toFixed(2), 'y', y0.toFixed(2), y1.toFixed(2), 'n', nn.map((c) => c.toFixed(2)).join(','), 'flip', flip, uvFor ? 'own-uv' : '');
-    for (const t of tris) {
-      const tri = t.map(vertexOf);
-      if (flip) tri.reverse();
-      I[pi].push(...tri);
-    }
-    added[pi] += tris.length;
+    for (const t of tris) emit(t.map(vertexOf));
   }
-  prims.forEach((prim, pi) => { if (added[pi]) prim.getIndices().setArray(new Uint16Array(I[pi])); });
+  prims.forEach((prim, pi) => {
+    if (ext[pi]) for (const sem of prim.listSemantics()) { const a = prim.getAttribute(sem); a.setArray(new (a.getArray().constructor)(ext[pi].arrays[sem])); }
+    if (added[pi]) prim.getIndices().setArray(new Uint16Array(I[pi]));
+  });
   if (added.some((n) => n)) console.log(name, 'capped', added.reduce((a, b) => a + b, 0), 'triangles over', seen.size, 'boundary vertices');
 }
 
@@ -278,7 +318,9 @@ if (REMAP) {
       for (let t = 0; t < idx.length; t += 3) {
         let tri = [idx[t], idx[t + 1], idx[t + 2]];
         const ks = tri.map((i) => kind[i]);
-        if (ks.includes('drop')) continue;
+        // 'drop' removes a triangle when its corners mostly agree; 'cut' removes it on any corner,
+        // which leaves a clean edge along a mesh row (used for the tunic's rolled top).
+        if (ks.includes('drop') || ks.includes('cut')) continue;
         if (ks.every((k) => k === 'face')) { face.push(...tri); continue; }
         if (new Set(ks).size > 1) {
           // Majority wins; with three different kinds, the lowest corner decides (hem over shirt).
@@ -299,7 +341,7 @@ if (REMAP) {
       const uvOut = new Float32Array(vcount * 2);
       const faceUV = new Float32Array(vcount * 2);
       for (let i = 0; i < vcount; i++) {
-        const t = kind[i] === 'face' ? 'skin' : kind[i] === 'drop' ? 'skin' : kind[i];
+        const t = kind[i] === 'face' || kind[i] === 'drop' || kind[i] === 'cut' ? 'skin' : kind[i];
         const cell = CELL[t]; if (!cell) throw new Error('no cell for ' + t);
         uvOut[i * 2] = (cell[0] + newUV[i * 2]) / 8; uvOut[i * 2 + 1] = (cell[1] + newUV[i * 2 + 1]) / 4;
         // Planar UVs over the face box so a 2D face texture lands eyes-at-eye-height.
