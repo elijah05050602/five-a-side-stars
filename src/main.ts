@@ -43,9 +43,9 @@ const router: Router = {
       (result) => {
         match = null;
         const stickers = recordResult(result);
-        router.go({ name: 'results', result, stickers, tournament: o.tournament, league: o.league });
+        router.go({ name: 'results', result, stickers, tournament: o.tournament, league: o.league, career: o.career });
       },
-      () => { match = null; router.go(o.tournament ? { name: 'tournament', state: o.tournament } : o.league ? { name: 'league' } : { name: 'menu' }); });
+      () => { match = null; router.go(o.tournament ? { name: 'tournament', state: o.tournament } : o.league ? { name: 'league' } : o.career ? { name: 'career' } : { name: 'menu' }); });
   },
 };
 

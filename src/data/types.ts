@@ -42,6 +42,15 @@ export interface Kit {
   socks: string;
 }
 
+/**
+ * Four skills, each 1 to 5 stars. Outfield players read them as Speed,
+ * Shooting, Passing and Defending; keepers read the same four slots as
+ * Speed, Handling, Kicking and Diving (see SKILL_LABELS in skills.ts).
+ */
+export type SkillKey = 'speed' | 'shooting' | 'passing' | 'defending';
+export const SKILL_KEYS: SkillKey[] = ['speed', 'shooting', 'passing', 'defending'];
+export type Skills = Record<SkillKey, number>;
+
 export interface Player {
   id: string;
   name: string;
@@ -55,6 +64,10 @@ export interface Player {
   special: Special;
   /** In the starting five (the rest are subs). */
   starter: boolean;
+  /** Star ratings, 1 to 5 each. The age group caps how high they can go. */
+  skills: Skills;
+  /** Career mode: progress (0..1) towards the next star in each skill. */
+  xp?: Skills;
 }
 
 export interface Team {
@@ -68,6 +81,8 @@ export interface Team {
   keeperKit: Kit;
   players: Player[]; // 5 to 8 players; 5 starters including exactly one GK
   createdAt: number;
+  /** A career-mode team: its players grow by playing, so stars cannot be spent by hand. */
+  career?: boolean;
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';

@@ -46,6 +46,14 @@ export const STICKERS: Sticker[] = [
   { id: 'ten-matches', emoji: '🔟', name: 'Regular', how: 'Finish ten matches.', unlocks: '🌈' },
   { id: 'promoted', emoji: '⬆️', name: 'Going Up!', how: 'Win promotion in League mode.', unlocks: '🏅' },
   { id: 'league-champ', emoji: '👑', name: 'League Legends', how: 'Win the Star Premier League (Tier 1).', unlocks: '🏟️' },
+  { id: 'career-start', emoji: '🌱', name: 'Little Stars', how: 'Start a career with an Under 5s team.' },
+  { id: 'star-up', emoji: '⭐', name: 'Rising Star', how: 'A career player earns a new star.', unlocks: '🌟' },
+  { id: 'mini-champ', emoji: '🎖️', name: 'Mini Champs', how: 'Win a career mini season.' },
+  { id: 'moved-up', emoji: '🎒', name: 'Big School', how: 'Move your career team up an age group.', unlocks: '🎒' },
+  { id: 'golden-boot', emoji: '👟', name: 'Golden Boot', how: 'One career player scores 8 goals in a mini season.', unlocks: '👟' },
+  { id: 'motm-3', emoji: '🎤', name: 'Star of the Show', how: 'One career player is Player of the Match three times.' },
+  { id: 'five-star', emoji: '💫', name: 'Superstar', how: 'A career player reaches five stars in a skill.', unlocks: '💫' },
+  { id: 'career-done', emoji: '🎓', name: 'All Grown Up', how: 'Finish the Under 10s year of a career.', unlocks: '🎓' },
 ];
 
 export function getProgress(): Progress {
@@ -126,6 +134,33 @@ export function recordSeason(rec: SeasonRecord): Sticker[] {
   const out: Sticker[] = [];
   if (rec.outcome === 'promoted') award(p, 'promoted', out);
   if (rec.outcome === 'champion') award(p, 'league-champ', out);
+  persist();
+  return out;
+}
+
+/** Career milestones; each flag is a sticker that may be new. */
+export interface CareerMilestones {
+  started?: boolean;
+  starUp?: boolean;
+  fiveStar?: boolean;
+  goldenBoot?: boolean;
+  motm3?: boolean;
+  champion?: boolean;
+  movedUp?: boolean;
+  finished?: boolean;
+}
+
+export function recordCareer(m: CareerMilestones): Sticker[] {
+  const p = getProgress();
+  const out: Sticker[] = [];
+  if (m.started) award(p, 'career-start', out);
+  if (m.starUp) award(p, 'star-up', out);
+  if (m.fiveStar) award(p, 'five-star', out);
+  if (m.goldenBoot) award(p, 'golden-boot', out);
+  if (m.motm3) award(p, 'motm-3', out);
+  if (m.champion) award(p, 'mini-champ', out);
+  if (m.movedUp) award(p, 'moved-up', out);
+  if (m.finished) award(p, 'career-done', out);
   persist();
   return out;
 }

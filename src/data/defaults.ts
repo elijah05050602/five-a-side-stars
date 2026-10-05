@@ -1,4 +1,5 @@
 import { BADGE_ICONS, type AgeGroup, type Badge, type Kit, type Player, type Position, type Team } from './types';
+import { randomSkills } from './skills';
 
 export const SKIN_TONES = ['#f6d7c3', '#eab98f', '#d49a6a', '#a86b3c', '#7a4a26', '#4a2d17'];
 export const HAIR_COLOURS = ['#2b1b0e', '#5a3a1a', '#a0522d', '#d9a441', '#f2e2a0', '#1b1b1b', '#c0392b'];
@@ -36,12 +37,12 @@ export function shortCode(name: string): string {
   return code.toUpperCase().padEnd(3, 'X');
 }
 
-export function makePlayer(position: Position, number: number, name = randomPlayerName(), starter = true): Player {
+export function makePlayer(position: Position, number: number, name = randomPlayerName(), starter = true, ageGroup: AgeGroup = 'U8'): Player {
   return {
     id: uid(), name, number, position, skin: pick(SKIN_TONES), hair: pick(HAIR_COLOURS),
     hairStyle: pick(['short', 'short', 'spiky', 'spiky', 'long', 'long', 'curly', 'afro', 'buns', 'bald'] as Player['hairStyle'][]),
     build: pick(['regular', 'regular', 'small', 'tall', 'sturdy'] as Player['build'][]), boots: pick(BOOT_COLOURS),
-    special: 'none', starter,
+    special: 'none', starter, skills: randomSkills(position, ageGroup),
   };
 }
 
@@ -60,7 +61,7 @@ export function startingFive(team: Team): Player[] {
   return five;
 }
 
-export function defaultSquad(): Player[] {
+export function defaultSquad(ageGroup: AgeGroup = 'U8'): Player[] {
   const used = new Set<string>();
   const nextName = () => {
     let n = randomPlayerName();
@@ -70,11 +71,11 @@ export function defaultSquad(): Player[] {
     return n;
   };
   return [
-    makePlayer('GK', 1, nextName()),
-    makePlayer('DEF', 4, nextName()),
-    makePlayer('DEF', 5, nextName()),
-    makePlayer('ATT', 7, nextName()),
-    makePlayer('ATT', 9, nextName()),
+    makePlayer('GK', 1, nextName(), true, ageGroup),
+    makePlayer('DEF', 4, nextName(), true, ageGroup),
+    makePlayer('DEF', 5, nextName(), true, ageGroup),
+    makePlayer('ATT', 7, nextName(), true, ageGroup),
+    makePlayer('ATT', 9, nextName(), true, ageGroup),
   ];
 }
 
@@ -93,7 +94,7 @@ export function makeTeam(partial: Partial<Team> & { name: string; ageGroup: AgeG
     kit: partial.kit ?? makeKit('#e63946', '#ffffff', '#1b2a41', '#e63946', 'plain'),
     awayKit: partial.awayKit ?? awayKitFor(partial.kit ?? makeKit('#e63946', '#ffffff', '#1b2a41', '#e63946', 'plain')),
     keeperKit: partial.keeperKit ?? makeKit('#ffd23f', '#111111', '#111111', '#ffd23f', 'plain'),
-    players: partial.players ?? defaultSquad(),
+    players: partial.players ?? defaultSquad(partial.ageGroup),
     createdAt: partial.createdAt ?? Date.now(),
   };
 }
