@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BallModel } from './BallModel';
-import { Input, P1_KEYS, P2_KEYS, SOLO_KEYS } from './input';
+import { Input } from './input';
+import { getControls } from '../data/controls';
 import { buildPitch } from './Pitch';
 import { toonMaterial } from './toon';
 import { PlayerModel, type AnimState } from './PlayerModel';
@@ -59,8 +60,10 @@ export class MatchScene {
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, config: SimConfig, private readonly onFinish: (r: MatchResult) => void, private readonly onQuit: () => void) {
     this.sim = new MatchSim(config);
     const twoPlayer = config.humanSide2 != null;
-    this.input = new Input(twoPlayer ? P1_KEYS : SOLO_KEYS);
-    this.input2 = twoPlayer ? new Input(P2_KEYS) : null;
+    // Two players: the first gamepad joins player 1 and the second joins player 2.
+    const controls = getControls();
+    this.input = new Input(twoPlayer ? controls.keys.p1 : controls.keys.solo, twoPlayer ? 0 : 'any', controls.pad);
+    this.input2 = twoPlayer ? new Input(controls.keys.p2, 1, controls.pad) : null;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     // Tablets and phones get a lower pixel ratio and a smaller shadow map so the game stays smooth.
     const touch = window.matchMedia('(pointer: coarse)').matches;

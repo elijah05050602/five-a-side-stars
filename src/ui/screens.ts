@@ -17,6 +17,8 @@ import { music } from '../game/music';
 import { applyMotionSetting } from './motion';
 import pkg from '../../package.json';
 import { dock, pageHead, shellBar, wireShell, type ShellTab } from './shell';
+import { controlsSentence } from '../data/controls';
+import { renderControls } from './controlsScreen';
 
 export interface StartOptions {
   home: Team;
@@ -49,7 +51,8 @@ export type Screen =
   | { name: 'tournament'; state: TournamentState }
   | { name: 'league' }
   | { name: 'album' }
-  | { name: 'parents' };
+  | { name: 'parents' }
+  | { name: 'controls' };
 
 let cleanup: (() => void) | null = null;
 
@@ -70,6 +73,7 @@ export function renderScreen(root: HTMLElement, screen: Screen, router: Router):
     case 'league': return renderLeague(root, router);
     case 'album': return renderAlbum(root, router);
     case 'parents': return renderParents(root, router);
+    case 'controls': cleanup = renderControls(root, router, wire); return;
   }
 }
 
@@ -124,7 +128,7 @@ function renderMenu(root: HTMLElement, router: Router): void {
           </div>
         </div>
       </div>
-      ${hasKeyboard ? dock() : '<footer class="dock dock-touch"><button class="dock-chip dock-link" id="m-howto">🎓 How to play</button><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></footer>'}
+      ${hasKeyboard ? dock() : '<footer class="dock dock-touch"><button class="dock-chip dock-link" id="m-howto">🎓 How to play</button><button class="dock-chip dock-link" data-nav="controls">🎮 Controls</button><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></footer>'}
       <p class="version">Goal Rush! v${pkg.version} · works offline once loaded · no accounts, no adverts</p>
     </div>`;
   wireShell(root, router);
@@ -481,7 +485,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
         <div class="card options">
           ${hasKeyboard ? `<div class="field"><span>Players</span>
             <div class="pills"><button class="pill ${!twoPlayer ? 'is-active' : ''}" data-players="1">1 player</button><button class="pill ${twoPlayer ? 'is-active' : ''}" data-players="2">2 players, one keyboard</button></div>
-            ${twoPlayer ? '<p class="muted">Player 1: WASD, Space, Z, left Shift. Player 2: arrows, Enter, /, right Shift.</p>' : ''}
+            ${twoPlayer ? `<p class="muted">Player 1: ${esc(controlsSentence('p1'))}.<br/>Player 2: ${esc(controlsSentence('p2'))}.<br/>Plug in two controllers and each player gets one. <button class="link-btn" data-nav="controls">Change controls</button></p>` : ''}
           </div>` : ''}
           ${mode === 'league' ? `<div class="field"><span>Tiers</span><ol class="tier-list">${TIERS.map((t) => `<li><strong>Tier ${t.tier}</strong> ${esc(t.name)}</li>`).join('')}</ol></div>` : `<div class="field"><span>Computer difficulty</span>
             <div class="pills">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="pill ${d === difficulty ? 'is-active' : ''}" data-diff="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div>
