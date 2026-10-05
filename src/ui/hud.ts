@@ -1,5 +1,5 @@
 import type { MatchSim, SimEvent } from '../game/sim';
-import { kitChip } from './kitPreview';
+import { badgeSvg } from './kitPreview';
 
 export interface HudRefs {
   joystickZone: HTMLElement;
@@ -26,9 +26,9 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   root.innerHTML = `
     <div class="hud">
       <div class="scoreboard">
-        <div class="sb-team sb-home">${kitChip(home.kit)}<span class="sb-name">${esc(home.short)}</span></div>
+        <div class="sb-team sb-home">${badgeSvg(home.badge, 30)}<span class="sb-name">${esc(home.short)}</span></div>
         <div class="sb-score"><span id="sb-h">0</span><span class="sb-dash">–</span><span id="sb-a">0</span></div>
-        <div class="sb-team sb-away"><span class="sb-name">${esc(away.short)}</span>${kitChip(away.kit)}</div>
+        <div class="sb-team sb-away"><span class="sb-name">${esc(away.short)}</span>${badgeSvg(away.badge, 30)}</div>
         <div class="sb-clock"><span id="sb-clock">00:00</span><span class="sb-half" id="sb-half">1st half</span></div>
       </div>
       <button class="hud-pause" id="hud-pause" aria-label="Pause">❚❚</button>

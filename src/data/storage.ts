@@ -1,4 +1,4 @@
-import { starterTeams } from './defaults';
+import { awayKitFor, makeBadge, starterTeams } from './defaults';
 import type { Team } from './types';
 
 const KEY = 'five-a-side-stars:v1';
@@ -21,7 +21,7 @@ export function loadSave(): SaveFile {
     if (raw) {
       const parsed = JSON.parse(raw) as SaveFile;
       if (Array.isArray(parsed.teams) && parsed.teams.length > 0) {
-        cache = { ...fresh(), ...parsed, settings: { ...fresh().settings, ...(parsed.settings ?? {}) } };
+        cache = { ...fresh(), ...parsed, teams: parsed.teams.map(migrateTeam), settings: { ...fresh().settings, ...(parsed.settings ?? {}) } };
         return cache;
       }
     }
@@ -31,6 +31,18 @@ export function loadSave(): SaveFile {
   cache = fresh();
   persist();
   return cache;
+}
+
+/** Fill in fields added since a team was saved, so old teams keep working. */
+function migrateTeam(t: Team): Team {
+  const team = { ...t };
+  if (!team.awayKit) team.awayKit = awayKitFor(team.kit);
+  if (!team.badge) team.badge = makeBadge(team.kit.shirt, team.kit.shirt2);
+  team.players = team.players.map((p, i) => {
+    const old = p as Partial<Team['players'][number]>;
+    return { ...p, hairStyle: old.hairStyle ?? 'short', boots: old.boots ?? '#222222', special: old.special ?? 'none', starter: old.starter ?? i < 5 };
+  });
+  return team;
 }
 
 export function persist(): void {

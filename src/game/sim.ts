@@ -1,5 +1,6 @@
 import { AGE_STATS, type AgeStats } from '../data/ageGroups';
 import type { Difficulty, Player, Team } from '../data/types';
+import { startingFive } from '../data/defaults';
 import type { InputState } from './input';
 
 /** Horizontal vector helpers (x along the pitch, z across it). */
@@ -136,12 +137,12 @@ export class MatchSim {
     ([0, 1] as Side[]).forEach((side) => {
       const team = this.teams[side];
       const isCpu = config.humanSide !== side;
-      team.players.slice(0, 5).forEach((info) => {
+      startingFive(team).forEach((info) => {
         const p: SimPlayer = {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, diveDir: 1, distanceRun: 0, isKeeper: info.position === 'GK',
-          speedMul: isCpu ? diff.speed : 1, tackleTimer: 0, holdTime: 0, stamina: 1, charge: 0,
+          speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1), tackleTimer: 0, holdTime: 0, stamina: 1, charge: 0,
         };
         this.players.push(p);
       });
@@ -311,7 +312,7 @@ export class MatchSim {
     p.stamina = clamp(p.stamina + (sprinting ? -_dt / 3 : _dt / 5), 0, 1);
     const sprint = sprinting ? 1.18 : 1;
     const dribble = this.ball.owner === p ? 0.88 : 1;
-    const max = this.stats.speed * sprint * dribble;
+    const max = this.stats.speed * sprint * dribble * p.speedMul;
     const target = l > 0.05 ? v(want.x * max, want.z * max) : v();
     this.steer(p, target, 22);
     if (l > 0.05) p.facing = Math.atan2(want.z, want.x);
@@ -734,7 +735,8 @@ export class MatchSim {
     for (const p of this.players) {
       if (p.kickCooldown > 0) continue;
       const d = dist(p.pos, b.pos);
-      const reach = p.isKeeper ? (p.diveAnim > 0 ? this.stats.keeperReach : this.stats.keeperReach * 0.55) : controlR;
+      const kr = this.stats.keeperReach * (p.info.special === 'keeper' ? 1.25 : 1);
+      const reach = p.isKeeper ? (p.diveAnim > 0 ? kr : kr * 0.55) : controlR;
       const maxHeight = p.isKeeper ? this.goalHeight : 0.6 * this.stats.scale + 0.2;
       if (d < reach && b.y < maxHeight && d < bd) { bd = d; best = p; }
     }
@@ -744,7 +746,7 @@ export class MatchSim {
         // One save attempt per shot, judged at the ball's closest approach. Comfortable
         // balls are caught; the rest is a dive whose odds fall with distance and shot speed.
         if (b.keeperTried === b.flightId) return;
-        const reach = this.stats.keeperReach;
+        const reach = this.stats.keeperReach * (best.info.special === 'keeper' ? 1.25 : 1);
         const easy = reach * 0.5;
         const rel = v(b.pos.x - best.pos.x, b.pos.z - best.pos.z);
         const closing = rel.x * b.vel.x + rel.z * b.vel.z < 0;
@@ -847,7 +849,7 @@ export class MatchSim {
       dir = norm(v(g.x * 0.55 + a.x * 0.45, g.z * 0.55 + a.z * 0.45));
     }
     const d = dist(p.pos, goal);
-    const power = this.stats.power * clamp(0.75 + d / this.length, 0.8, 1.15) * powerMul;
+    const power = this.stats.power * clamp(0.75 + d / this.length, 0.8, 1.15) * powerMul * (p.info.special === 'power' ? 1.18 : 1);
     const loft = power * rand(0.06, 0.2) * (powerMul > 1 ? 1.3 : 1);
     this.kick(p, dir, power, loft);
     this.events.push({ type: 'shot', side: p.side, player: p.info });

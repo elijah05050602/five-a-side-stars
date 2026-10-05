@@ -22,7 +22,11 @@ export class PlayerModel {
   private readonly socksMat: THREE.MeshStandardMaterial;
   private readonly skinMat: THREE.MeshStandardMaterial;
   private readonly hairMat: THREE.MeshStandardMaterial;
+  private readonly bootMat: THREE.MeshStandardMaterial;
   private readonly ring: THREE.Mesh;
+  private hairGroup = new THREE.Group();
+  private readonly headR = 0.19;
+  private readonly neckY: number;
   private walk = 0;
 
   constructor(player: Player, kit: Kit, scale: number) {
@@ -33,7 +37,8 @@ export class PlayerModel {
     this.socksMat = new THREE.MeshStandardMaterial({ color: kit.socks, roughness: 0.9 });
     this.skinMat = new THREE.MeshStandardMaterial({ color: player.skin, roughness: 0.7 });
     this.hairMat = new THREE.MeshStandardMaterial({ color: player.hair, roughness: 0.95 });
-    const bootMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 });
+    this.bootMat = new THREE.MeshStandardMaterial({ color: player.boots ?? '#222222', roughness: 0.6 });
+    const bootMat = this.bootMat;
 
     // Proportions in metres for scale = 1 (a 10-year-old, about 1.4 m tall, with a big head).
     const legH = 0.42, shortsH = 0.16, torsoH = 0.42, headR = 0.19;
@@ -78,11 +83,11 @@ export class PlayerModel {
     this.armR = mkArm(1);
 
     const neckY = hipY + shortsH + torsoH;
+    this.neckY = neckY;
     const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 16, 12), this.skinMat);
     head.position.y = neckY + headR * 0.95;
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(headR * 1.04, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), this.hairMat);
-    hair.position.y = neckY + headR * 1.0;
-    hair.rotation.z = -0.25; // fringe tilts forward
+    this.buildHair(player.hairStyle ?? 'short');
+    const hair = this.hairGroup;
     const eyeGeo = new THREE.SphereGeometry(0.025, 6, 6);
     const eyeMat = new THREE.MeshBasicMaterial({ color: 0x1b2a41 });
     const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
@@ -116,9 +121,54 @@ export class PlayerModel {
     this.socksMat.color.set(kit.socks);
   }
 
-  setLook(skin: string, hair: string): void {
+  setLook(skin: string, hair: string, hairStyle?: Player['hairStyle'], boots?: string): void {
     this.skinMat.color.set(skin);
     this.hairMat.color.set(hair);
+    if (boots) this.bootMat.color.set(boots);
+    if (hairStyle) this.buildHair(hairStyle);
+  }
+
+  /** Rebuilds the hair meshes for a style. Styles are deliberately chunky and readable from above. */
+  private buildHair(style: Player['hairStyle']): void {
+    const g = this.hairGroup;
+    while (g.children.length) {
+      const c = g.children.pop() as THREE.Mesh;
+      c.geometry.dispose();
+    }
+    const r = this.headR;
+    const top = this.neckY + r * 1.0;
+    const add = (geo: THREE.BufferGeometry, x: number, y: number, z: number, rz = 0) => {
+      const m = new THREE.Mesh(geo, this.hairMat);
+      m.position.set(x, y, z);
+      m.rotation.z = rz;
+      m.castShadow = true;
+      g.add(m);
+    };
+    switch (style) {
+      case 'bald':
+        break;
+      case 'spiky':
+        add(new THREE.SphereGeometry(r * 1.03, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.42), 0, top, 0);
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI - Math.PI / 2;
+          add(new THREE.ConeGeometry(r * 0.22, r * 0.7, 6), Math.cos(a) * r * 0.45 - 0.02, top + r * 1.05, Math.sin(a) * r * 0.5, Math.cos(a) * 0.5);
+        }
+        break;
+      case 'long':
+        add(new THREE.SphereGeometry(r * 1.06, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), 0, top, 0, -0.2);
+        add(new THREE.CylinderGeometry(r * 0.95, r * 0.8, r * 1.3, 12, 1, true, 0, Math.PI), -r * 0.05, top - r * 0.5, 0);
+        break;
+      case 'curly':
+        add(new THREE.SphereGeometry(r * 1.18, 10, 7, 0, Math.PI * 2, 0, Math.PI * 0.55), 0, top + r * 0.1, 0);
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          add(new THREE.SphereGeometry(r * 0.32, 7, 5), Math.cos(a) * r * 0.9, top + r * 0.5 + (i % 2) * r * 0.2, Math.sin(a) * r * 0.9);
+        }
+        break;
+      default:
+        add(new THREE.SphereGeometry(r * 1.04, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), 0, top, 0, -0.25);
+        break;
+    }
   }
 
   setSelected(on: boolean, colour?: number): void {
@@ -171,6 +221,6 @@ export class PlayerModel {
         m.geometry.dispose();
       }
     });
-    [this.shirtMat, this.sleeveMat, this.shortsMat, this.socksMat, this.skinMat, this.hairMat].forEach((m) => m.dispose());
+    [this.shirtMat, this.sleeveMat, this.shortsMat, this.socksMat, this.skinMat, this.hairMat, this.bootMat].forEach((m) => m.dispose());
   }
 }

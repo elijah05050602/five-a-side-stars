@@ -2,8 +2,31 @@ export type AgeGroup = 'U5' | 'U6' | 'U7' | 'U8' | 'U9' | 'U10';
 export const AGE_GROUPS: AgeGroup[] = ['U5', 'U6', 'U7', 'U8', 'U9', 'U10'];
 
 export type Position = 'GK' | 'DEF' | 'ATT';
-export type KitPattern = 'plain' | 'stripes' | 'hoops' | 'halves' | 'sash';
-export const KIT_PATTERNS: KitPattern[] = ['plain', 'stripes', 'hoops', 'halves', 'sash'];
+export type KitPattern = 'plain' | 'stripes' | 'hoops' | 'halves' | 'sash' | 'chevron';
+export const KIT_PATTERNS: KitPattern[] = ['plain', 'stripes', 'hoops', 'halves', 'sash', 'chevron'];
+
+export type HairStyle = 'short' | 'spiky' | 'long' | 'curly' | 'bald';
+export const HAIR_STYLES: HairStyle[] = ['short', 'spiky', 'long', 'curly', 'bald'];
+
+/** One small perk per player, kept gentle so nobody is useless. */
+export type Special = 'none' | 'speedy' | 'power' | 'keeper';
+export const SPECIALS: { id: Special; label: string; blurb: string }[] = [
+  { id: 'none', label: 'All-rounder', blurb: 'Solid at everything.' },
+  { id: 'speedy', label: 'Speedy', blurb: 'Runs a bit faster.' },
+  { id: 'power', label: 'Power shot', blurb: 'Harder shots.' },
+  { id: 'keeper', label: 'Super keeper', blurb: 'Longer reach in goal.' },
+];
+
+export type BadgeShape = 'shield' | 'circle' | 'diamond' | 'hex';
+export const BADGE_SHAPES: BadgeShape[] = ['shield', 'circle', 'diamond', 'hex'];
+export const BADGE_ICONS = ['🦁', '⭐', '🚀', '⚽', '⚡', '🦊', '🌊', '👑', '🐯', '🦅', '🐼', '🔥'];
+
+export interface Badge {
+  shape: BadgeShape;
+  icon: string;
+  colour1: string;
+  colour2: string;
+}
 
 export interface Kit {
   pattern: KitPattern;
@@ -20,6 +43,11 @@ export interface Player {
   position: Position;
   skin: string;
   hair: string;
+  hairStyle: HairStyle;
+  boots: string;
+  special: Special;
+  /** In the starting five (the rest are subs). */
+  starter: boolean;
 }
 
 export interface Team {
@@ -27,9 +55,11 @@ export interface Team {
   name: string;
   short: string; // 3-letter code shown on the scoreboard
   ageGroup: AgeGroup;
-  kit: Kit;
+  badge: Badge;
+  kit: Kit; // home kit
+  awayKit: Kit;
   keeperKit: Kit;
-  players: Player[]; // exactly 5 for Phase 1: 1 GK, 2 DEF, 2 ATT
+  players: Player[]; // 5 to 8 players; 5 starters including exactly one GK
   createdAt: number;
 }
 

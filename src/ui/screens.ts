@@ -1,11 +1,11 @@
 import { AGE_STATS } from '../data/ageGroups';
-import { HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode } from '../data/defaults';
+import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode, startingFive } from '../data/defaults';
 import { deleteTeam, getSettings, getTeam, getTeams, resetAll, saveTeam, updateSettings } from '../data/storage';
-import { AGE_GROUPS, KIT_PATTERNS, type AgeGroup, type Difficulty, type Kit, type Position, type Team } from '../data/types';
+import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, HAIR_STYLES, KIT_PATTERNS, SPECIALS, type AgeGroup, type BadgeShape, type Difficulty, type HairStyle, type Kit, type Position, type Special, type Team } from '../data/types';
 import { kitsClash } from '../game/kitTexture';
 import type { MatchResult } from '../game/MatchScene';
 import { esc } from './hud';
-import { kitChip } from './kitPreview';
+import { badgeSvg, kitChip } from './kitPreview';
 import { KitPreview3D } from './preview3d';
 
 export interface Router {
@@ -74,9 +74,9 @@ function renderTeams(root: HTMLElement, router: Router): void {
       <div class="team-grid">
         ${teams.map((t) => `
           <div class="card team-card" data-id="${t.id}">
-            <div class="team-card-top">${kitChip(t.kit, 56)}<span class="chip chip-age">${t.ageGroup}</span></div>
+            <div class="team-card-top">${badgeSvg(t.badge, 56)}${kitChip(t.kit, 48)}<span class="chip chip-age">${t.ageGroup}</span></div>
             <h3>${esc(t.name)}</h3>
-            <p class="muted">${t.players.map((p) => esc(p.name)).join(', ')}</p>
+            <p class="muted">${t.players.length} players: ${t.players.map((p) => esc(p.name)).join(', ')}</p>
             <div class="row">
               <button class="btn btn-primary" data-play="${t.id}">Play</button>
               <button class="btn btn-blue" data-edit="${t.id}">Edit</button>
@@ -97,7 +97,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
   const existing = teamId ? getTeam(teamId) : undefined;
   const team: Team = existing ? structuredClone(existing) : makeTeam({ name: randomTeamName(), ageGroup: 'U8' });
   let step: 0 | 1 | 2 = 0;
-  let kitTab: 'kit' | 'keeperKit' = 'kit';
+  let kitTab: 'kit' | 'awayKit' | 'keeperKit' = 'kit';
   let selectedPlayer = 0;
   let preview: KitPreview3D | null = null;
 
@@ -116,6 +116,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
           <div class="builder-preview card">
             <canvas id="preview" class="preview-canvas"></canvas>
             <div class="preview-caption">
+              <div id="preview-badge">${badgeSvg(team.badge, 64)}</div>
               <strong>${esc(team.name)}</strong>
               <span class="chip chip-age">${team.ageGroup}</span>
               <p class="muted">${esc(stats.blurb)}</p>
@@ -142,13 +143,16 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     else if (step === 1) renderKits(form);
     else renderSquad(form);
     const canvas = root.querySelector<HTMLCanvasElement>('#preview')!;
-    const shownPlayer = step === 2 ? team.players[selectedPlayer] : team.players.find((p) => p.position !== 'GK')!;
+    const shownPlayer = step === 2 ? team.players[Math.min(selectedPlayer, team.players.length - 1)] : team.players.find((p) => p.position !== 'GK')!;
     const shownKit = step === 1 ? team[kitTab] : shownPlayer.position === 'GK' ? team.keeperKit : team.kit;
     preview = new KitPreview3D(canvas, shownPlayer, shownKit, stats.scale);
   };
 
   const validate = (): boolean => {
     team.name = team.name.trim() || randomTeamName();
+    const starters = team.players.filter((p) => p.starter);
+    if (starters.length !== 5) { alert(`Pick exactly 5 starters (you have ${starters.length}). The rest are subs.`); step = 2; render(); return false; }
+    if (!starters.some((p) => p.position === 'GK')) { alert('One of your starters must be the keeper.'); step = 2; render(); return false; }
     const nums = new Set<number>();
     for (const p of team.players) {
       p.name = p.name.trim() || randomPlayerName();
@@ -166,7 +170,23 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
       <div class="field"><span>Age group</span>
         <div class="pills">${AGE_GROUPS.map((a) => `<button class="pill ${a === team.ageGroup ? 'is-active' : ''}" data-age="${a}">${a}</button>`).join('')}</div>
         <p class="muted" id="f-age-blurb">${esc(AGE_STATS[team.ageGroup].label)}: ${esc(AGE_STATS[team.ageGroup].blurb)}</p>
+      </div>
+      <div class="field"><span>Club badge</span>
+        <div class="badge-row">
+          <div class="pills">${BADGE_SHAPES.map((sh) => `<button class="pill pill-badge ${team.badge.shape === sh ? 'is-active' : ''}" data-shape="${sh}">${badgeSvg({ ...team.badge, shape: sh }, 36)}</button>`).join('')}</div>
+        </div>
+        <div class="icon-grid">${BADGE_ICONS.map((ic) => `<button class="icon-tile ${team.badge.icon === ic ? 'is-active' : ''}" data-icon="${ic}">${ic}</button>`).join('')}</div>
+        <div class="row">
+          <div class="field"><span>Badge colour 1</span><div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${team.badge.colour1 === c ? 'is-active' : ''}" style="background:${c}" data-badge="colour1" data-colour="${c}"></button>`).join('')}</div></div>
+        </div>
+        <div class="row">
+          <div class="field"><span>Badge colour 2</span><div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${team.badge.colour2 === c ? 'is-active' : ''}" style="background:${c}" data-badge="colour2" data-colour="${c}"></button>`).join('')}</div></div>
+        </div>
       </div>`;
+    const refreshBadge = () => { renderClub(form); const el = root.querySelector('#preview-badge'); if (el) el.innerHTML = badgeSvg(team.badge, 64); const n = form.querySelector<HTMLInputElement>('#f-name'); if (n) n.focus({ preventScroll: true }); };
+    form.querySelectorAll<HTMLElement>('[data-shape]').forEach((b) => b.addEventListener('click', () => { team.badge.shape = b.dataset.shape as BadgeShape; refreshBadge(); }));
+    form.querySelectorAll<HTMLElement>('[data-icon]').forEach((b) => b.addEventListener('click', () => { team.badge.icon = b.dataset.icon!; refreshBadge(); }));
+    form.querySelectorAll<HTMLElement>('[data-badge]').forEach((b) => b.addEventListener('click', () => { team.badge[b.dataset.badge as 'colour1' | 'colour2'] = b.dataset.colour!; refreshBadge(); }));
     const name = form.querySelector<HTMLInputElement>('#f-name')!;
     name.addEventListener('input', () => { team.name = name.value; updateCaption(); });
     form.querySelector('#f-dice')!.addEventListener('click', () => { team.name = randomTeamName(); name.value = team.name; updateCaption(); });
@@ -184,11 +204,13 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
       <div class="field"><span>${label}</span>
         <div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${kit[key] === c ? 'is-active' : ''}" style="background:${c}" data-key="${key}" data-colour="${c}" aria-label="${c}"></button>`).join('')}</div>
       </div>`;
-    const clash = kitsClash(team.kit, team.keeperKit);
+    const clashGk = kitsClash(team.kit, team.keeperKit);
+    const clashAway = kitsClash(team.kit, team.awayKit);
     form.innerHTML = `
       <div class="tabs">
-        <button class="tab ${kitTab === 'kit' ? 'is-active' : ''}" data-tab="kit">Outfield kit</button>
-        <button class="tab ${kitTab === 'keeperKit' ? 'is-active' : ''}" data-tab="keeperKit">Goalkeeper kit</button>
+        <button class="tab ${kitTab === 'kit' ? 'is-active' : ''}" data-tab="kit">Home kit</button>
+        <button class="tab ${kitTab === 'awayKit' ? 'is-active' : ''}" data-tab="awayKit">Away kit</button>
+        <button class="tab ${kitTab === 'keeperKit' ? 'is-active' : ''}" data-tab="keeperKit">Keeper kit</button>
       </div>
       <div class="field"><span>Pattern</span>
         <div class="patterns">${KIT_PATTERNS.map((p) => `<button class="pattern-tile ${kit.pattern === p ? 'is-active' : ''}" data-pattern="${p}">${kitChip({ ...kit, pattern: p }, 44)}<small>${p}</small></button>`).join('')}</div>
@@ -197,8 +219,9 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
       ${swatches('shirt2', 'Second colour')}
       ${swatches('shorts', 'Shorts')}
       ${swatches('socks', 'Socks')}
-      ${clash ? '<p class="warn">⚠️ The goalkeeper kit looks a lot like the outfield kit. Pick a different shirt colour so the keeper stands out.</p>' : ''}`;
-    form.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => { kitTab = b.dataset.tab as 'kit' | 'keeperKit'; render(); }));
+      ${clashGk ? '<p class="warn">⚠️ The keeper kit looks a lot like the home kit. Pick a different shirt colour so the keeper stands out.</p>' : ''}
+      ${clashAway ? '<p class="warn">⚠️ The away kit looks a lot like the home kit. The away kit is used when two teams clash, so make it different.</p>' : ''}`;
+    form.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => { kitTab = b.dataset.tab as 'kit' | 'awayKit' | 'keeperKit'; render(); }));
     form.querySelectorAll<HTMLElement>('[data-pattern]').forEach((b) => b.addEventListener('click', () => { kit.pattern = b.dataset.pattern as Kit['pattern']; refreshKit(form); }));
     form.querySelectorAll<HTMLElement>('[data-colour]').forEach((b) => b.addEventListener('click', () => { (kit as unknown as Record<string, string>)[b.dataset.key!] = b.dataset.colour!; refreshKit(form); }));
   };
@@ -212,19 +235,28 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
   };
 
   const renderSquad = (form: HTMLElement) => {
+    selectedPlayer = Math.min(selectedPlayer, team.players.length - 1);
     const p = team.players[selectedPlayer];
     const taken = new Set(team.players.filter((x) => x !== p).map((x) => x.number));
+    const starters = team.players.filter((x) => x.starter).length;
     form.innerHTML = `
-      <div class="squad-row">
+      <p class="muted">Squad of ${team.players.length} (5 to 8). Starters: ${starters} of 5. Tap a player to edit them.</p>
+      <div class="squad-row squad-row-${team.players.length > 5 ? 'wide' : 'five'}">
         ${team.players.map((pl, i) => `
-          <button class="player-card ${i === selectedPlayer ? 'is-active' : ''}" data-player="${i}">
+          <button class="player-card ${i === selectedPlayer ? 'is-active' : ''} ${pl.starter ? '' : 'is-sub'}" data-player="${i}">
             ${kitChip(pl.position === 'GK' ? team.keeperKit : team.kit, 40)}
             <span class="pc-number">${pl.number}</span>
             <span class="pc-name">${esc(pl.name)}</span>
             <span class="chip chip-pos chip-${pl.position.toLowerCase()}">${pl.position === 'GK' ? 'Keeper' : pl.position === 'DEF' ? 'Defender' : 'Attacker'}</span>
+            ${pl.starter ? '' : '<span class="chip chip-sub">Sub</span>'}
           </button>`).join('')}
+        ${team.players.length < 8 ? '<button class="player-card player-card-add" id="p-add"><span class="plus">+</span><span>Add player</span></button>' : ''}
       </div>
       <div class="card player-edit">
+        <div class="row space-between">
+          <label class="toggle"><input type="checkbox" id="p-starter" ${p.starter ? 'checked' : ''}/> Starts the match</label>
+          ${team.players.length > 5 ? '<button class="btn btn-ghost" id="p-remove">Remove player</button>' : ''}
+        </div>
         <label class="field"><span>Name</span><div class="row"><input id="p-name" maxlength="14" value="${esc(p.name)}" /><button class="btn btn-blue btn-icon" id="p-dice" title="Random name">🎲</button></div></label>
         <div class="field"><span>Shirt number</span>
           <div class="row"><button class="btn btn-ghost btn-icon" id="p-num-down">−</button><input id="p-num" type="number" min="1" max="99" value="${p.number}" /><button class="btn btn-ghost btn-icon" id="p-num-up">+</button></div>
@@ -233,9 +265,30 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
         <div class="field"><span>Position</span>
           <div class="pills">${(['GK', 'DEF', 'ATT'] as Position[]).map((pos) => `<button class="pill ${p.position === pos ? 'is-active' : ''}" data-pos="${pos}">${pos === 'GK' ? 'Keeper' : pos === 'DEF' ? 'Defender' : 'Attacker'}</button>`).join('')}</div>
         </div>
+        <div class="field"><span>Special</span>
+          <div class="pills">${SPECIALS.map((sp) => `<button class="pill ${p.special === sp.id ? 'is-active' : ''}" data-special="${sp.id}" title="${esc(sp.blurb)}">${sp.label}</button>`).join('')}</div>
+        </div>
         <div class="field"><span>Skin</span><div class="swatches">${SKIN_TONES.map((c) => `<button class="swatch round ${p.skin === c ? 'is-active' : ''}" style="background:${c}" data-skin="${c}"></button>`).join('')}</div></div>
-        <div class="field"><span>Hair</span><div class="swatches">${HAIR_COLOURS.map((c) => `<button class="swatch round ${p.hair === c ? 'is-active' : ''}" style="background:${c}" data-hair="${c}"></button>`).join('')}</div></div>
+        <div class="field"><span>Hair style</span><div class="pills">${HAIR_STYLES.map((h) => `<button class="pill ${p.hairStyle === h ? 'is-active' : ''}" data-hairstyle="${h}">${h[0].toUpperCase() + h.slice(1)}</button>`).join('')}</div></div>
+        <div class="field"><span>Hair colour</span><div class="swatches">${HAIR_COLOURS.map((c) => `<button class="swatch round ${p.hair === c ? 'is-active' : ''}" style="background:${c}" data-hair="${c}"></button>`).join('')}</div></div>
+        <div class="field"><span>Boots</span><div class="swatches">${BOOT_COLOURS.map((c) => `<button class="swatch ${p.boots === c ? 'is-active' : ''}" style="background:${c}" data-boots="${c}"></button>`).join('')}</div></div>
       </div>`;
+    form.querySelector('#p-add')?.addEventListener('click', () => {
+      const used = new Set(team.players.map((x) => x.number));
+      let n = 2; while (used.has(n)) n++;
+      team.players.push(makePlayer(team.players.length % 2 ? 'DEF' : 'ATT', n, randomPlayerName(), false));
+      selectedPlayer = team.players.length - 1;
+      render();
+    });
+    form.querySelector('#p-remove')?.addEventListener('click', () => {
+      team.players.splice(selectedPlayer, 1);
+      selectedPlayer = Math.max(0, selectedPlayer - 1);
+      render();
+    });
+    form.querySelector<HTMLInputElement>('#p-starter')!.addEventListener('change', (e) => { p.starter = (e.target as HTMLInputElement).checked; renderSquad(form); });
+    form.querySelectorAll<HTMLElement>('[data-special]').forEach((b) => b.addEventListener('click', () => { p.special = b.dataset.special as Special; renderSquad(form); }));
+    form.querySelectorAll<HTMLElement>('[data-hairstyle]').forEach((b) => b.addEventListener('click', () => { p.hairStyle = b.dataset.hairstyle as HairStyle; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots); renderSquad(form); }));
+    form.querySelectorAll<HTMLElement>('[data-boots]').forEach((b) => b.addEventListener('click', () => { p.boots = b.dataset.boots!; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-player]').forEach((b) => b.addEventListener('click', () => { selectedPlayer = Number(b.dataset.player); render(); }));
     const nameEl = form.querySelector<HTMLInputElement>('#p-name')!;
     nameEl.addEventListener('input', () => { p.name = nameEl.value; form.querySelectorAll('.pc-name')[selectedPlayer].textContent = p.name; });
@@ -268,7 +321,6 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     }));
     form.querySelectorAll<HTMLElement>('[data-skin]').forEach((b) => b.addEventListener('click', () => { p.skin = b.dataset.skin!; preview?.setLook(p.skin, p.hair); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-hair]').forEach((b) => b.addEventListener('click', () => { p.hair = b.dataset.hair!; preview?.setLook(p.skin, p.hair); renderSquad(form); }));
-    void makePlayer;
   };
 
   render();
@@ -289,13 +341,14 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
   const render = () => {
     const away = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
     const sameAge = teams.filter((t) => t.id !== home.id && t.ageGroup === home.ageGroup);
+    const [homeK, awayK, swapped] = resolveKits(home, away);
     root.innerHTML = `
       <div class="screen setup">
         ${topBar('Match Setup')}
         <div class="vs">
           <div class="card vs-card">
             <span class="muted">Your team</span>
-            ${kitChip(home.kit, 72)}
+            <div class="row">${badgeSvg(home.badge, 64)}${kitChip(homeK.kit, 64)}</div>
             <h3>${esc(home.name)}</h3>
             <span class="chip chip-age">${home.ageGroup}</span>
             <select id="s-home">${teams.map((t) => `<option value="${t.id}" ${t.id === home.id ? 'selected' : ''}>${esc(t.name)} (${t.ageGroup})</option>`).join('')}</select>
@@ -303,7 +356,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
           <div class="vs-mid">VS</div>
           <div class="card vs-card">
             <span class="muted">Opponent (computer)</span>
-            ${kitChip(away.kit, 72)}
+            <div class="row">${badgeSvg(away.badge, 64)}${kitChip(awayK.kit, 64)}</div>
             <h3>${esc(away.name)}</h3>
             <span class="chip chip-age">${away.ageGroup}</span>
             <select id="s-away">
@@ -321,6 +374,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
             <div class="pills">${[60, 120, 180, 300].map((s) => `<button class="pill ${s === halfSeconds ? 'is-active' : ''}" data-len="${s}">${s / 60} min</button>`).join('')}</div>
           </div>
         </div>
+        ${swapped ? `<p class="warn">👕 The kits clash, so ${esc(swapped)} will wear their away kit.</p>` : ''}
         <button class="btn btn-primary btn-big btn-kickoff" id="s-go">⚽ Kick Off!</button>
       </div>`;
     wire(root, () => router.go({ name: 'menu' }));
@@ -337,10 +391,19 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
     root.querySelector('#s-go')!.addEventListener('click', () => {
       updateSettings({ difficulty, halfLengthSeconds: halfSeconds });
       const awayTeam = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
-      router.startMatch(home, awayTeam, difficulty, halfSeconds);
+      const [h, a] = resolveKits(home, awayTeam);
+      router.startMatch(h, a, difficulty, halfSeconds);
     });
   };
   render();
+}
+
+/** Automatic clash check: if the home kits look alike, the away side wears its away kit (or the home side does). */
+export function resolveKits(home: Team, away: Team): [Team, Team, string | null] {
+  if (!kitsClash(home.kit, away.kit)) return [home, away, null];
+  if (!kitsClash(home.kit, away.awayKit)) return [home, { ...away, kit: away.awayKit }, away.name];
+  if (!kitsClash(home.awayKit, away.kit)) return [{ ...home, kit: home.awayKit }, away, home.name];
+  return [home, { ...away, kit: away.awayKit }, away.name];
 }
 
 // ---------- Results ----------
@@ -355,9 +418,9 @@ function renderResults(root: HTMLElement, router: Router, r: MatchResult): void 
       <div class="card results-card">
         <h2>${esc(headline)}</h2>
         <div class="result-line">
-          <div class="result-team">${kitChip(r.home.kit, 56)}<span>${esc(r.home.name)}</span></div>
+          <div class="result-team">${badgeSvg(r.home.badge, 64)}<span>${esc(r.home.name)}</span></div>
           <div class="score-big">${h} – ${a}</div>
-          <div class="result-team">${kitChip(r.away.kit, 56)}<span>${esc(r.away.name)}</span></div>
+          <div class="result-team">${badgeSvg(r.away.badge, 64)}<span>${esc(r.away.name)}</span></div>
         </div>
         <ul class="goals-list">
           ${r.goals.length === 0 ? '<li class="muted">No goals this time. The keepers were on fire!</li>' : ''}
@@ -387,7 +450,7 @@ function pickPlayerOfTheMatch(r: MatchResult) {
   for (const e of counts.values()) if (!best || e.n > best.n) best = e;
   if (best) return best.p;
   // No goals: the home keeper kept a clean sheet.
-  return r.home.players.find((p) => p.position === 'GK') ?? null;
+  return startingFive(r.home).find((p) => p.position === 'GK') ?? null;
 }
 
 // ---------- Parents ----------

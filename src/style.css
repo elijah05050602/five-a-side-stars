@@ -204,3 +204,17 @@ input[type='number'] { max-width: 120px; text-align: center; }
   .hud-player { display: none; }
   .bar { width: 130px; }
 }
+
+/* Phase 3 additions */
+.badge { vertical-align: middle; }
+.pill-badge { padding: 4px 10px; min-height: 48px; }
+.icon-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.icon-tile { width: 48px; height: 48px; font-size: 26px; border-radius: 12px; border: 3px solid transparent; background: #eef3fa; cursor: pointer; }
+.icon-tile.is-active { border-color: var(--navy); background: var(--yellow); }
+.squad-row-wide { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+.player-card.is-sub { opacity: 0.75; }
+.player-card-add { border: 3px dashed var(--navy); background: rgba(255,255,255,0.7); justify-content: center; font-weight: 700; }
+.player-card-add .plus { font-size: 30px; line-height: 1; }
+.chip-sub { background: #e9ecef; font-size: 11px; padding: 1px 6px; }
+.space-between { justify-content: space-between; }
+.team-card-top .badge { margin-right: 4px; }

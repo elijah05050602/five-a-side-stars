@@ -55,6 +55,21 @@ export function kitTexture(kit: Kit, number: number): THREE.CanvasTexture {
       ctx.closePath();
       ctx.fill();
       break;
+    case 'chevron': {
+      // A bold V across the chest and back.
+      for (const off of [0, size]) {
+        ctx.beginPath();
+        ctx.moveTo(off + 0, size * 0.25);
+        ctx.lineTo(off + size * 0.5, size * 0.55);
+        ctx.lineTo(off + size, size * 0.25);
+        ctx.lineTo(off + size, size * 0.45);
+        ctx.lineTo(off + size * 0.5, size * 0.75);
+        ctx.lineTo(off + 0, size * 0.45);
+        ctx.closePath();
+        ctx.fill();
+      }
+      break;
+    }
     default:
       break;
   }
