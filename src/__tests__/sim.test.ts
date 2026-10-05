@@ -311,7 +311,7 @@ describe('throw-ins', () => {
     sim.step(1 / 60, IDLE_INPUT);
     expect(sim.phase).toBe('setpiece');
     // Nobody presses anything, so the referee has the taker throw it after a few seconds.
-    const restarts: number[] = [];
+    const restarts: (number | undefined)[] = [];
     let played = 0;
     for (let i = 0; i < 60 * 15 && played < 30; i++) {
       sim.step(1 / 60, IDLE_INPUT);
