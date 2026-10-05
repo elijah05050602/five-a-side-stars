@@ -774,9 +774,9 @@ export class MatchSim {
         const tight = pressure < 1.3 * this.stats.scale + 0.7;
         // Out wide near the box: lob a cross in to a team-mate making a run.
         if (!angleClear && dGoal < this.length * 0.45 && Math.random() < (tight ? 0.6 : 0.3)) {
-          const mate = this.bestPassTarget(p, null, true);
-          if (mate && dist(mate.pos, goal) < this.length * 0.35) {
-            this.lob(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z));
+          const spot = v(goal.x - Math.sign(goal.x) * (this.width * 0.26 + 0.6), 0);
+          if (Math.abs(p.pos.z) > this.width * 0.25 && this.crossTarget(p, spot, null)) {
+            this.lob(p, null);
             return;
           }
         }
@@ -1778,9 +1778,16 @@ export class MatchSim {
    * cut it out in the air, but it is slower to arrive and less exact than a pass.
    */
   lob(p: SimPlayer, aim: V2 | null): void {
-    const mate = this.bestPassTarget(p, aim, true);
+    const goal = v(this.goalX(p.side), 0);
+    // Out wide in the final third it is a cross into the box; anywhere else a lofted pass.
+    const crossing = Math.abs(p.pos.z) > this.width * 0.25 && Math.abs(p.pos.x - goal.x) < this.length * 0.4;
+    const spot = v(goal.x - Math.sign(goal.x) * (this.width * 0.26 + 0.6), 0);
+    let mate = crossing ? this.crossTarget(p, spot, aim) : null;
+    if (!crossing) mate = this.bestPassTarget(p, aim, true);
     let to: V2;
-    if (mate) {
+    if (crossing && !mate && !aim) {
+      to = v(spot.x - p.pos.x, spot.z - p.pos.z); // nobody there yet: put it on the penalty spot for a runner
+    } else if (mate) {
       // Aim where the receiver will be when it drops.
       const t0 = this.lobFlightTime(dist(p.pos, mate.pos));
       to = v(mate.pos.x + mate.vel.x * t0 * 0.8 - p.pos.x, mate.pos.z + mate.vel.z * t0 * 0.8 - p.pos.z);
@@ -1799,6 +1806,19 @@ export class MatchSim {
     this.kick(p, v(Math.cos(a), Math.sin(a)), speed, (9.81 * t) / 2);
     this.ball.wasPass = true;
     this.ball.receiver = mate;
+  }
+
+  /** For a cross: the team-mate best placed to attack the ball around the penalty spot (and roughly where the stick points). */
+  private crossTarget(p: SimPlayer, spot: V2, aim: V2 | null): SimPlayer | null {
+    let best: SimPlayer | null = null, bestD = this.width * 0.45;
+    for (const m of this.teamOf(p.side)) {
+      if (m === p || m.isKeeper) continue;
+      const lane = norm(v(m.pos.x - p.pos.x, m.pos.z - p.pos.z));
+      if (aim && lane.x * aim.x + lane.z * aim.z < 0.2) continue;
+      const d = dist(m.pos, spot);
+      if (d < bestD) { bestD = d; best = m; }
+    }
+    return best;
   }
 
   /** Seconds a lob spends in the air: longer balls go higher. */

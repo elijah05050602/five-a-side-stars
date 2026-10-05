@@ -265,6 +265,21 @@ describe('passing and lobs', () => {
     expect(sim.ball.owner).toBe(mate);
   });
 
+  it('from out wide near goal the same button crosses into the box', () => {
+    const { sim, p, mate, defender } = lane();
+    const W = sim.width / 2, L = sim.length / 2;
+    p.pos = { x: L - 4, z: W - 1 };
+    sim.ball.pos = { x: L - 3.7, z: W - 1 };
+    const back = sim.players.find((q) => q.side === 0 && q !== p && q !== mate && !q.isKeeper)!;
+    back.pos = { x: -5, z: 0 }; // an open team-mate behind would be the lofted-pass pick
+    mate.pos = { x: L - (sim.width * 0.26 + 0.6), z: 0.5 };
+    defender.pos = { x: L - 4, z: W - 4 };
+    sim.lob(p, null);
+    expect(sim.ball.receiver).toBe(mate);
+    runUntil(sim, (s) => s.ball.owner !== null, 60 * 4);
+    expect(sim.ball.owner).toBe(mate);
+  });
+
   it('a ground pass along the same lane is cut out by the defender', () => {
     const { sim, p, defender } = lane();
     sim.pass(p, { x: 1, z: 0 });
