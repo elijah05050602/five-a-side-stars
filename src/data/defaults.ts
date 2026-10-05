@@ -41,7 +41,7 @@ export function makePlayer(position: Position, number: number, name = randomPlay
   return {
     id: uid(), name, number, position, skin: pick(SKIN_TONES), hair: pick(HAIR_COLOURS),
     hairStyle: pick(['short', 'short', 'spiky', 'spiky', 'long', 'long', 'curly', 'afro', 'buns', 'bald'] as Player['hairStyle'][]),
-    build: pick(['regular', 'regular', 'small', 'tall', 'sturdy'] as Player['build'][]), boots: pick(BOOT_COLOURS),
+    build: pick(['regular', 'regular', 'small', 'tall', 'sturdy'] as Player['build'][]), boots: pick(BOOT_COLOURS), bootStyle: pick(['classic', 'classic', 'stripes', 'toecap', 'twotone'] as Player['bootStyle'][]),
     special: 'none', starter, skills: randomSkills(position, ageGroup),
   };
 }

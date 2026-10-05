@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Build, Kit, Player } from '../data/types';
+import type { BootStyle, Build, Kit, Player } from '../data/types';
 import { IDLE_STATE, PlayerModel } from '../game/PlayerModel';
 
 /** A small spinning 3D player used by the team builder's live kit preview. */
@@ -36,7 +36,7 @@ export class KitPreview3D {
   }
 
   setKit(kit: Kit, number: number): void { this.model.setKit(kit, number); }
-  setLook(skin: string, hair: string, hairStyle?: Player["hairStyle"], boots?: string): void { this.model.setLook(skin, hair, hairStyle, boots); }
+  setLook(skin: string, hair: string, hairStyle?: Player["hairStyle"], boots?: string, bootStyle?: BootStyle): void { this.model.setLook(skin, hair, hairStyle, boots, bootStyle); }
   setBuild(build: Build): void { this.model.setBuild(build); }
   setScale(scale: number): void { this.scale = scale; this.model.group.scale.setScalar(1); }
 

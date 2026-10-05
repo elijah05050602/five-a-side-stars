@@ -11,6 +11,9 @@ Changes made for Five-a-Side Stars (see `tools/build-player-model.mjs`):
 - weapons, capes, hats and the pack texture removed
 - UVs remapped to a simple colour grid so the game can paint kit colours
 - modelled eyes and eyebrows removed; the face is a flat-mapped patch the game paints
+- scarf, belt buckle, hip pouches and the ragged tunic hem cut away; the belt ring becomes the
+  shorts' waistband, and the legs are mapped as strips so shorts, socks and boots can be painted
+  at exact heights
 - only the animations the game uses are kept; geometry is quantised
 
 Thank you Kay for making these free for everyone.
