@@ -30,6 +30,7 @@ export function shellBar(active: ShellTab): string {
       </nav>
       <div class="shell-tools">
         <button class="shell-icon" data-sound aria-label="${s.sound || s.music ? 'Mute sound' : 'Turn sound on'}" title="Sound">${s.sound || s.music ? '🔊' : '🔇'}</button>
+        <button class="shell-icon" data-nav="controls" aria-label="Controls" title="Controls">🎮</button>
         <button class="shell-icon shell-icon-parents" data-nav="parents" aria-label="Parents zone" title="Parents zone">🛡️</button>
       </div>
     </header>`;
@@ -45,19 +46,20 @@ export function dock(): string {
   return `
     <footer class="dock">
       <div class="dock-keys"><kbd>SPACE</kbd> Kick off <span class="dock-dot">·</span> <kbd>ESC</kbd> Back</div>
-      <div class="dock-right"><span class="dock-chip dock-offline">● PLAYS OFFLINE</span><button class="dock-chip dock-link" id="m-howto">🎓 How to play</button><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></div>
+      <div class="dock-right"><span class="dock-chip dock-offline">● PLAYS OFFLINE</span><button class="dock-chip dock-link" id="m-howto">🎓 How to play</button><button class="dock-chip dock-link" data-nav="controls">🎮 Controls</button><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></div>
     </footer>`;
 }
 
 export function wireShell(root: HTMLElement, router: Router): void {
   root.querySelectorAll<HTMLElement>('[data-nav]').forEach((b) => b.addEventListener('click', () => {
-    switch (b.dataset.nav as ShellTab | 'parents') {
+    switch (b.dataset.nav as ShellTab | 'parents' | 'controls') {
       case 'lobby': return router.go({ name: 'menu' });
       case 'squad': return router.go({ name: 'teams' });
       case 'cup': return router.go({ name: 'setup', mode: 'tournament' });
       case 'league': return router.go(getLeague() ? { name: 'league' } : { name: 'setup', mode: 'league' });
       case 'album': return router.go({ name: 'album' });
       case 'parents': return router.go({ name: 'parents' });
+      case 'controls': return router.go({ name: 'controls' });
     }
   }));
   root.querySelector<HTMLElement>('[data-sound]')?.addEventListener('click', (e) => {

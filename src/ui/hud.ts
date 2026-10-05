@@ -1,6 +1,7 @@
 import type { MatchSim, SimEvent } from '../game/sim';
 import { TUTORIAL_STEPS, type TutorialCoach, type TutorialStep } from '../game/tutorial';
 import { getSettings } from '../data/storage';
+import { controlsSentence, firstKey, getControls, moveKeysLabel } from '../data/controls';
 import { badgeSvg } from './kitPreview';
 
 export interface HudRefs {
@@ -75,7 +76,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       <div class="hud-banner" id="hud-banner"></div>
       <div class="replay-frame" id="replay-frame" hidden><span class="replay-label">▶ REPLAY</span></div>
       <div class="hud-comm" id="hud-comm"><span class="hud-comm-mic">🎙️</span><span id="hud-comm-text"></span></div>
-      <div class="touch-controls">
+      <div class="touch-controls ${getControls().touch.leftHanded ? 'is-lefty' : ''}" style="--tc-size:${getControls().touch.size};--tc-opacity:${getControls().touch.opacity}">
         <div class="joystick" id="joy"><div class="joy-knob" id="joy-knob"></div></div>
         <div class="action-buttons">
           <button class="abtn abtn-trick" id="btn-trick">Trick</button>
@@ -145,7 +146,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       root.querySelector<HTMLElement>('#tut-skip')!.hidden = true;
       return;
     }
-    const t = TUTORIAL_TEXT[c.step];
+    const t = TUTORIAL_TEXT()[c.step];
     tutCard.innerHTML = c.praise
       ? `<div class="tut-dots">${dots}</div><p class="tut-praise">${esc(c.praise)}</p>`
       : `<div class="tut-dots">${dots}</div><h3>${t.title}</h3><p>${touch ? t.touch : t.keys}</p>`;
@@ -171,8 +172,8 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
             : mode === 'training'
               ? '<p class="muted">Collect the ball, run at goal and hold shoot to power up. Hard shots that fly in are worth 2 points.</p>'
               : s.config.humanSide2 != null
-                ? '<p class="muted"><strong>Player 1:</strong> WASD to move, hold Space to shoot, Z to pass, left Shift to sprint, Q to switch, C for a trick.<br/><strong>Player 2:</strong> arrows to move, hold Enter to shoot, / to pass, right Shift to sprint, . to switch, \' for a trick.</p>'
-                : '<p class="muted">Arrow keys or WASD to move. Hold Space to power up a shot and release to shoot, Z to pass, Shift to sprint, Q to switch player, C for a step-over or nutmeg. The orange ring and arrow mark your player; the small rings show each team\'s colour.</p>'}
+                ? `<p class="muted"><strong>Player 1:</strong> ${esc(controlsSentence('p1'))}.<br/><strong>Player 2:</strong> ${esc(controlsSentence('p2'))}.</p>`
+                : `<p class="muted">${esc(controlsSentence('solo'))}. Hold shoot to power up, then let go. A controller works too. The orange ring and arrow mark your player; the small rings show each team's colour.</p>`}
           <div class="row">
             <button class="btn btn-primary" id="ov-resume">Keep playing</button>
             <button class="btn btn-ghost" id="ov-quit">${mode === 'tutorial' ? 'Skip tutorial' : 'Quit match'}</button>
@@ -275,7 +276,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         // Coach the human taker through their own set pieces.
         const sp = s.phase === 'setpiece' ? s.setPiece : null;
         const mine = sp && sp.placed && (sp.taker === s.controlled || sp.taker === s.controlled2) ? sp : null;
-        const keys = mine && sp!.taker === s.controlled2 ? P2_TIP_KEYS : touch ? TOUCH_TIP_KEYS : P1_TIP_KEYS;
+        const keys = mine && sp!.taker === s.controlled2 ? tipKeys('p2') : touch ? TOUCH_TIP_KEYS : tipKeys(s.config.humanSide2 != null ? 'p1' : 'solo');
         const text = !mine ? '' : mine.kind === 'throwin' ? `Throw-in: aim, then ${keys.pass} to throw it to a team-mate`
           : mine.kind === 'corner' ? `Corner: hold ${keys.shoot} to cross it into the box, or ${keys.pass} for a short one`
           : mine.kind === 'goalkick' ? `Goal kick: hold ${keys.shoot} to boot it, or ${keys.pass} to a team-mate`
@@ -298,16 +299,17 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
 }
 
 const touch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
-const P1_TIP_KEYS = { shoot: 'Space', pass: 'Z' };
-const P2_TIP_KEYS = { shoot: 'Enter', pass: '/' };
+const tipKeys = (profile: 'solo' | 'p1' | 'p2') => ({ shoot: firstKey(profile, 'shoot'), pass: firstKey(profile, 'pass') });
 const TOUCH_TIP_KEYS = { shoot: 'Shoot', pass: 'Pass' };
 
-const TUTORIAL_TEXT: Record<Exclude<TutorialStep, 'done'>, { title: string; keys: string; touch: string }> = {
-  move: { title: '1. Run with the ball', keys: 'Use the <kbd>arrow keys</kbd> or <kbd>WASD</kbd> to dribble to the yellow star.', touch: 'Drag the joystick on the left to dribble to the yellow star.' },
-  pass: { title: '2. Pass to your team-mate', keys: 'Point towards your team-mate and press <kbd>Z</kbd> to pass.', touch: 'Point the joystick towards your team-mate and tap <b>Pass</b>.' },
-  shoot: { title: '3. Score a goal!', keys: 'Run at goal, hold <kbd>Space</kbd> to power up, then let go to shoot.', touch: 'Run at goal, hold <b>Shoot</b> to power up, then let go.' },
-  trick: { title: '4. Show off a trick', keys: 'Press <kbd>C</kbd> for a step-over. With a defender right in front, it\'s a nutmeg!', touch: 'Tap <b>Trick</b> for a step-over. With a defender right in front, it\'s a nutmeg!' },
-};
+const kbd = (a: 'shoot' | 'pass' | 'trick') => `<kbd>${esc(firstKey('solo', a))}</kbd>`;
+/** Built on demand so the cards show the player's own key bindings. */
+const TUTORIAL_TEXT = (): Record<Exclude<TutorialStep, 'done'>, { title: string; keys: string; touch: string }> => ({
+  move: { title: '1. Run with the ball', keys: `Use <kbd>${esc(moveKeysLabel('solo'))}</kbd> or the stick to dribble to the yellow star.`, touch: 'Drag the joystick to dribble to the yellow star.' },
+  pass: { title: '2. Pass to your team-mate', keys: `Point towards your team-mate and press ${kbd('pass')} to pass.`, touch: 'Point the joystick towards your team-mate and tap <b>Pass</b>.' },
+  shoot: { title: '3. Score a goal!', keys: `Run at goal, hold ${kbd('shoot')} to power up, then let go to shoot.`, touch: 'Run at goal, hold <b>Shoot</b> to power up, then let go.' },
+  trick: { title: '4. Show off a trick', keys: `Press ${kbd('trick')} for a step-over. With a defender right in front, it's a nutmeg!`, touch: 'Tap <b>Trick</b> for a step-over. With a defender right in front, it\'s a nutmeg!' },
+});
 
 const GOAL_LINES = ['What a strike!', 'Top corner!', 'The keeper had no chance!', 'Cool as you like!', 'Smashed it!', 'Into the net!', 'Goal of the season?', 'Brilliant finish!'];
 const SAVE_LINES = ['What a stop!', 'Fingertips!', 'Safe hands!', 'Denied!'];
