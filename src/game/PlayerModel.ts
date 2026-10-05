@@ -4,7 +4,7 @@ import { cloneRig, loadPlayerAsset, playerAssetNow, type PlayerAsset } from './p
 import { contrastColour, numberTexture, playerAtlas } from './playerAtlas';
 import { faceTexture, type Expression } from './playerFace';
 import { ProceduralPlayerModel } from './ProceduralPlayerModel';
-import { addOutline, addSkinnedOutline, toonMaterial } from './toon';
+import { addOutline, addSkinnedOutline, smoothOutlineNormals, toonMaterial } from './toon';
 
 /** Models are drawn bigger than their physical size so the kids read clearly from the camera. */
 export const MODEL_SCALE = 1.35;
@@ -156,13 +156,14 @@ export class PlayerModel {
     // Collect first: the outline is itself a skinned child, and traverse would walk into it.
     const skinned: THREE.SkinnedMesh[] = [];
     rig.traverse((o) => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) skinned.push(o as THREE.SkinnedMesh); });
+    smoothOutlineNormals(skinned);
     for (const m of skinned) {
       const isFace = (m.material as THREE.Material).name === 'face';
       m.material = isFace ? this.faceMat : this.material;
       m.castShadow = true;
       m.receiveShadow = false;
       m.frustumCulled = false;
-      if (!isFace) addSkinnedOutline(m, 0.028);
+      addSkinnedOutline(m, 0.028);
     }
     for (const name of ['Head_plain', 'Head_short', 'Head_long'] as Head[]) {
       const node = rig.getObjectByName(name);

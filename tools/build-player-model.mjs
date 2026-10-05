@@ -91,6 +91,138 @@ const MAP = {
   Rogue_LegLeft: legMap, Rogue_LegRight: legMap,
 };
 const clamp01 = (v) => Math.min(0.98, Math.max(0.02, v));
+
+// ---- Hole capping -------------------------------------------------------------------------------
+// Cutting parts away (scarf, hem, eyes, brows, pouches) leaves open edges, and the game's inverted
+// hull outline shows through any opening as a dark patch. Every closed boundary loop is filled
+// with a flat fan/ear-clip cap made of the loop's own vertices, so UVs, normals and skin weights
+// come along for free. Caps go into the last primitive that holds the whole loop, which puts eye
+// sockets into the painted face patch.
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const unit = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+function earClip(p) {
+  const idx = p.map((_, i) => i);
+  let area = 0;
+  for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length]; area += a[0] * b[1] - b[0] * a[1]; }
+  if (area < 0) idx.reverse();
+  const cr = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const inside = (q, a, b, c) => cr(a, b, q) >= -1e-9 && cr(b, c, q) >= -1e-9 && cr(c, a, q) >= -1e-9;
+  const tris = [];
+  let guard = 0;
+  while (idx.length > 3 && guard++ < 5000) {
+    let found = false;
+    for (let i = 0; i < idx.length; i++) {
+      const i0 = idx[(i + idx.length - 1) % idx.length], i1 = idx[i], i2 = idx[(i + 1) % idx.length];
+      if (cr(p[i0], p[i1], p[i2]) <= 1e-9) continue;
+      if (idx.some((j) => j !== i0 && j !== i1 && j !== i2 && inside(p[j], p[i0], p[i1], p[i2]))) continue;
+      tris.push([i0, i1, i2]); idx.splice(i, 1); found = true; break;
+    }
+    if (!found) { for (let i = 1; i < idx.length - 1; i++) tris.push([idx[0], idx[i], idx[i + 1]]); return tris; }
+  }
+  if (idx.length === 3) tris.push([idx[0], idx[1], idx[2]]);
+  return tris;
+}
+function capHoles(mesh, name) {
+  const prims = mesh.listPrimitives();
+  const P = prims.map((p) => p.getAttribute('POSITION').getArray());
+  const I = prims.map((p) => Array.from(p.getIndices().getArray()));
+  const owners = []; const wid = new Map();
+  const W = prims.map((_, pi) => new Int32Array(P[pi].length / 3));
+  for (let pi = 0; pi < prims.length; pi++) for (let i = 0; i < W[pi].length; i++) {
+    const pos = [P[pi][3 * i], P[pi][3 * i + 1], P[pi][3 * i + 2]];
+    const k = pos.map((v) => v.toFixed(3)).join(',');
+    let w = wid.get(k);
+    if (w === undefined) { w = owners.length; wid.set(k, w); owners.push({ pos, by: new Map() }); }
+    if (!owners[w].by.has(pi)) owners[w].by.set(pi, i);
+    W[pi][i] = w;
+  }
+  const edges = new Map();
+  for (let pi = 0; pi < prims.length; pi++) for (let t = 0; t < I[pi].length; t += 3) for (let e = 0; e < 3; e++) {
+    const a = W[pi][I[pi][t + e]], b = W[pi][I[pi][t + (e + 1) % 3]];
+    if (a === b) continue;
+    const k = a < b ? `${a}_${b}` : `${b}_${a}`;
+    edges.set(k, (edges.get(k) || 0) + 1);
+  }
+  const adj = new Map();
+  for (const [k, n] of edges) if (n === 1) { const [a, b] = k.split('_').map(Number); (adj.get(a) || adj.set(a, []).get(a)).push(b); (adj.get(b) || adj.set(b, []).get(b)).push(a); }
+  const centre = [0, 0, 0];
+  for (const o of owners) for (let c = 0; c < 3; c++) centre[c] += o.pos[c] / owners.length;
+  const seen = new Set(); const added = prims.map(() => 0);
+  for (const s of adj.keys()) {
+    if (seen.has(s)) continue;
+    const loop = []; let cur = s, prev = -1;
+    while (cur !== undefined && !seen.has(cur)) { seen.add(cur); loop.push(cur); const nx = adj.get(cur).filter((n) => n !== prev); prev = cur; cur = nx[0]; }
+    if (loop.length < 3) continue;
+    let pi = -1;
+    const order = [...prims.keys()].sort((a, b) => (prims[b].getMaterial()?.getName() === 'face') - (prims[a].getMaterial()?.getName() === 'face'));
+    for (const p of order) if (loop.every((w) => owners[w].by.has(p))) { pi = p; break; }
+    if (pi < 0) { console.warn(name, 'hole spans primitives, left open:', loop.length, 'vertices'); continue; }
+    const pts = loop.map((w) => owners[w].pos);
+    const n = [0, 0, 0];
+    for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; n[0] += (a[1] - b[1]) * (a[2] + b[2]); n[1] += (a[2] - b[2]) * (a[0] + b[0]); n[2] += (a[0] - b[0]) * (a[1] + b[1]); }
+    const nn = unit(n);
+    const lc = [0, 0, 0];
+    for (const p of pts) for (let c = 0; c < 3; c++) lc[c] += p[c] / pts.length;
+    // Face the cap outward: along the rim's own normals when they agree, else away from the mesh.
+    const prim = prims[pi];
+    const NA = prim.getAttribute('NORMAL')?.getArray();
+    const rimN = [0, 0, 0];
+    if (NA) for (const w of loop) { const i = owners[w].by.get(pi); for (let c = 0; c < 3; c++) rimN[c] += NA[3 * i + c]; }
+    const away = [lc[0] - centre[0], lc[1] - centre[1], lc[2] - centre[2]];
+    const ref = Math.hypot(...rimN) > loop.length * 0.3 ? rimN : away;
+    const flip = dot3(nn, ref) < 0;
+    const u = unit(cross3(nn, Math.abs(nn[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), v = cross3(nn, u);
+    const tris = earClip(pts.map((p) => [dot3(p, u), dot3(p, v)]));
+    // Some caps get their own vertices with chosen UVs and a flat normal:
+    //  - the body's tall opening is the neck (where the scarf was): plain skin, a clean V-neck;
+    //  - a head's eye sockets map onto the eye drawn in the face texture, so the painted eye
+    //    (with its expressions and gaze) fills the socket exactly;
+    //  - a head's other face holes (brow slots, nose, ear notches) continue the flat face mapping.
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const isHead = name.startsWith('Head_'), isFacePrim = prim.getMaterial()?.getName() === 'face';
+    let uvFor = null;
+    if (name === 'Rogue_Body' && y1 - y0 > 0.3) uvFor = () => [(CELL.skin[0] + 0.5) / 8, (CELL.skin[1] + 0.5) / 4];
+    else if (isHead && isFacePrim && x1 - x0 < 0.35 && (y0 + y1) / 2 < 1.7 && Math.abs(lc[0]) > 0.1 && Math.abs(lc[0]) < 0.33) {
+      // Face texture eye centres: u = 0.5 -/+ 0.28 (the kid's right eye is at +x), v = 0.49.
+      const cu = lc[0] > 0 ? 0.5 - 0.28 : 0.5 + 0.28;
+      uvFor = (p) => [cu + ((p[0] - x0) / (x1 - x0) - 0.5) * 0.2, 0.49 + ((y1 - p[1]) / (y1 - y0) - 0.5) * 0.22];
+    } else if (isHead && isFacePrim) uvFor = (p) => [(p[0] + 0.36) / 0.72, (1.92 - p[1]) / 0.62]; // brow slots, nose, ears: continue the face
+    let vertexOf = (k) => owners[loop[k]].by.get(pi);
+    if (uvFor) {
+      const nrm = flip ? nn.map((c) => -c) : nn;
+      // Attributes may be shared with a sibling primitive, so give this one its own copies first.
+      for (const sem of prim.listSemantics()) prim.setAttribute(sem, prim.getAttribute(sem).clone());
+      const arrays = Object.fromEntries(prim.listSemantics().map((sem) => [sem, Array.from(prim.getAttribute(sem).getArray())]));
+      const copies = new Map();
+      let next = prim.getAttribute('POSITION').getCount();
+      vertexOf = (k) => {
+        if (copies.has(k)) return copies.get(k);
+        const src = owners[loop[k]].by.get(pi);
+        for (const sem of prim.listSemantics()) {
+          const n = prim.getAttribute(sem).getElementSize();
+          const vals = sem === 'TEXCOORD_0' ? uvFor(owners[loop[k]].pos) : sem === 'NORMAL' ? nrm : arrays[sem].slice(src * n, src * n + n);
+          arrays[sem].push(...vals);
+        }
+        copies.set(k, next);
+        return next++;
+      };
+      for (const t of tris) for (const k of t) vertexOf(k);
+      for (const sem of prim.listSemantics()) { const a = prim.getAttribute(sem); a.setArray(new (a.getArray().constructor)(arrays[sem])); }
+    }
+    if (process.env.CAPLOG) console.log(name, 'cap', loop.length, 'verts in', prim.getMaterial()?.getName(), 'x', x0.toFixed(2), x1.toFixed(2), 'y', y0.toFixed(2), y1.toFixed(2), 'n', nn.map((c) => c.toFixed(2)).join(','), 'flip', flip, uvFor ? 'own-uv' : '');
+    for (const t of tris) {
+      const tri = t.map(vertexOf);
+      if (flip) tri.reverse();
+      I[pi].push(...tri);
+    }
+    added[pi] += tris.length;
+  }
+  prims.forEach((prim, pi) => { if (added[pi]) prim.getIndices().setArray(new Uint16Array(I[pi])); });
+  if (added.some((n) => n)) console.log(name, 'capped', added.reduce((a, b) => a + b, 0), 'triangles over', seen.size, 'boundary vertices');
+}
+
 if (REMAP) {
   const faceMat = doc.createMaterial('face').setDoubleSided(false);
   for (const node of root.listNodes()) {
@@ -161,6 +293,7 @@ if (REMAP) {
       }
       console.log(node.getName(), 'tris kept', keep.length / 3, 'face', face.length / 3, 'of', idx.length / 3, 'verts', vcount);
     }
+    capHoles(node.getMesh(), node.getName());
   }
   // The game paints its own atlas, so the pack texture is not shipped.
   for (const t of root.listTextures()) t.dispose();
