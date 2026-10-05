@@ -9,7 +9,7 @@ const KEY = 'five-a-side-stars:v1';
 
 interface SaveFile {
   teams: Team[];
-  settings: { sound: boolean; music: boolean; reduceMotion: boolean; halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard' };
+  settings: { sound: boolean; music: boolean; reduceMotion: boolean; halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard'; tutorialDone: boolean };
   progress?: Progress;
   league?: LeagueState | null;
   career?: CareerState | null;
@@ -19,7 +19,7 @@ let cache: SaveFile | null = null;
 
 function fresh(): SaveFile {
   const prefersLess = typeof window !== 'undefined' && 'matchMedia' in window && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  return { teams: starterTeams(), settings: { sound: true, music: true, reduceMotion: prefersLess, halfLengthSeconds: 120, difficulty: 'normal' } };
+  return { teams: starterTeams(), settings: { sound: true, music: true, reduceMotion: prefersLess, halfLengthSeconds: 120, difficulty: 'normal', tutorialDone: false } };
 }
 
 export function loadSave(): SaveFile {
@@ -29,7 +29,8 @@ export function loadSave(): SaveFile {
     if (raw) {
       const parsed = JSON.parse(raw) as SaveFile;
       if (Array.isArray(parsed.teams) && parsed.teams.length > 0) {
-        cache = { ...fresh(), ...parsed, teams: parsed.teams.map(migrateTeam), settings: { ...fresh().settings, ...(parsed.settings ?? {}) } };
+        // Saves from before the tutorial existed belong to players who already know the controls.
+        cache = { ...fresh(), ...parsed, teams: parsed.teams.map(migrateTeam), settings: { ...fresh().settings, ...(parsed.settings ?? {}), tutorialDone: (parsed.settings as Partial<SaveFile['settings']> | undefined)?.tutorialDone ?? true } };
         return cache;
       }
     }

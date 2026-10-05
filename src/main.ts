@@ -1,7 +1,8 @@
 import './style.css';
 import { MatchScene } from './game/MatchScene';
 import { recordResult } from './data/progress';
-import { loadSave } from './data/storage';
+import { getSettings, getTeams, loadSave, updateSettings } from './data/storage';
+import { generateOpponent } from './data/defaults';
 import { applyMotionSetting } from './ui/motion';
 import { music } from './game/music';
 import { loadPlayerAsset } from './game/playerAsset';
@@ -50,6 +51,23 @@ const router: Router = {
     // `?debug` exposes the running match so screenshot scripts can poke at it.
     if (location.search.includes('debug')) (window as unknown as { __match?: MatchScene }).__match = match;
   },
+  startTutorial() {
+    // A short guided kick-about with your first team. Finishing or skipping both count as done.
+    const home = getTeams()[0];
+    const away = generateOpponent(home.ageGroup, home.kit);
+    const leave = (next: Screen) => { match = null; updateSettings({ tutorialDone: true }); router.go(next); };
+    if (match) match.dispose();
+    ui.innerHTML = '';
+    ui.className = 'match-ui';
+    canvas.classList.add('is-live');
+    document.body.classList.add('in-match');
+    music.setQuiet(true);
+    match = new MatchScene(canvas, ui, { home, away, difficulty: 'easy', halfSeconds: 600, humanSide: 0, mode: 'tutorial' },
+      () => leave({ name: 'setup', homeId: home.id }),
+      () => leave({ name: 'menu' }));
+  },
 };
 
-router.go({ name: 'menu' });
+// First visit: straight into the tutorial (with a skip button). Everyone else lands on the menu.
+if (getSettings().tutorialDone) router.go({ name: 'menu' });
+else router.startTutorial();

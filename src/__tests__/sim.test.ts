@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { IDLE_INPUT, MatchSim } from '../game/sim';
+import { IDLE_INPUT, MatchSim, RUNOFF_END } from '../game/sim';
 import { AGE_STATS } from '../data/ageGroups';
 import { AGE_GROUPS } from '../data/types';
 import { cpuMatch, runUntil, team } from './helpers';
@@ -139,7 +139,8 @@ describe('match engine: goals', () => {
     rollIntoGoal(wide, 1, wide.goalWidth / 2 + 0.5);
     runUntil(wide, (s) => s.phase === 'goal', 30);
     expect(wide.score).toEqual([0, 0]);
-    expect(Math.abs(wide.ball.pos.x)).toBeLessThanOrEqual(wide.length / 2);
+    // Match pitches have run-off behind the goal line (for goal kicks and corners); the boards stop it there.
+    expect(Math.abs(wide.ball.pos.x)).toBeLessThanOrEqual(wide.length / 2 + RUNOFF_END);
   });
 
   it('after a goal the side that conceded kicks off', () => {

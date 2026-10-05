@@ -82,9 +82,22 @@ export interface SimPlayer {
   charge: number;
   /** Which way the keeper has committed to for a penalty (0 = not yet). */
   penaltyGuess: number;
+  /** 1 when a skill move starts, fading to 0 (drives the animation). */
+  trickAnim: number;
+  trickKind: TrickKind | null;
+  /** Which way a step-over feints: -1 or 1 across the kid's body. */
+  trickDir: number;
+  /** Seconds before another skill move is allowed. */
+  trickCooldown: number;
+  /** Seconds of burst left after a skill move that worked. */
+  trickBoost: number;
   mul: SkillMuls;
   match: PlayerMatchStats;
 }
+
+export type TrickKind = 'stepover' | 'nutmeg';
+/** Restarts after the ball goes out of play, plus the two the referee gives for fouls. */
+export type SetPieceKind = 'freekick' | 'penalty' | 'corner' | 'throwin' | 'goalkick';
 
 export interface SimBall {
   pos: V2;
@@ -113,21 +126,32 @@ export interface SimBall {
 export type Phase = 'kickoff' | 'play' | 'setpiece' | 'goal' | 'halftime' | 'fulltime' | 'paused';
 
 export interface SetPiece {
-  kind: 'freekick' | 'penalty';
+  kind: SetPieceKind;
   /** Team taking the kick. */
   side: Side;
   taker: SimPlayer;
   spot: V2;
   timer: number;
+  /** Seconds the ball rolls dead and the taker walks over before it is placed (0 for fouls). */
+  wait: number;
+  /** Where the taker stands and which way they face once the ball is placed. */
+  stand: V2;
+  face: number;
+  placed: boolean;
+  /** Where the other players head while it is set up (players not listed stand still). */
+  targets: Map<SimPlayer, V2>;
 }
 
 export interface GoalEvent { side: Side; scorer: Player; minute: number; ownGoal: boolean }
 
 export interface SimEvent {
-  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'shot' | 'foul' | 'whistle' | 'miss';
-  kind?: 'freekick' | 'penalty';
+  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'shot' | 'foul' | 'whistle' | 'miss' | 'restart' | 'trick';
+  /** foul: the set piece awarded; restart: corner, throw-in or goal kick; trick: the skill move. */
+  kind?: SetPieceKind | TrickKind;
   side?: Side;
   player?: Player;
+  /** trick: whether it beat the defender. */
+  ok?: boolean;
 }
 
 export interface SimConfig {
@@ -139,8 +163,8 @@ export interface SimConfig {
   humanSide: Side | null;
   /** Second player on the same keyboard, if any. */
   humanSide2?: Side | null;
-  /** match (default), a penalty shoot-out, or target practice against a lone keeper. */
-  mode?: 'match' | 'shootout' | 'training';
+  /** match (default), a penalty shoot-out, target practice against a lone keeper, or the first-time tutorial. */
+  mode?: 'match' | 'shootout' | 'training' | 'tutorial';
   /**
    * Fine-grained computer strength for league play: 0 is a touch below Easy,
    * 1 is a touch above Hard. When set it overrides `difficulty`.
@@ -159,7 +183,11 @@ export interface Shootout {
   kicked: boolean;
 }
 
-export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootHeld: false, pass: false, sprint: false, switchPlayer: false, pause: false };
+export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootHeld: false, pass: false, sprint: false, switchPlayer: false, pause: false, trick: false };
+
+/** Grass between the lines and the boards, so the ball can go out for throw-ins, corners and goal kicks. */
+export const RUNOFF_SIDE = 1.2;
+export const RUNOFF_END = 1.6;
 
 const DIFF = {
   easy: { speed: 0.85, think: 0.55, accuracy: 0.6, tackle: 0.6, humanTackle: 1.3, shootRange: 0.3 },
@@ -225,8 +253,10 @@ export class MatchSim {
   private readonly diff: DiffSettings;
   /** Training: points scored (a normal goal is 1, a rocket is 2). */
   trainingPoints = 0;
-  get mode(): 'match' | 'shootout' | 'training' { return this.config.mode ?? 'match'; }
+  get mode(): 'match' | 'shootout' | 'training' | 'tutorial' { return this.config.mode ?? 'match'; }
   private lastPhase: Phase = 'kickoff';
+  /** Tutorial: the one player the learner controls the whole way through. */
+  tutorialHero: SimPlayer | null = null;
   private pressureTimer = 0;
 
   constructor(readonly config: SimConfig) {
@@ -243,14 +273,19 @@ export class MatchSim {
     ([0, 1] as Side[]).forEach((side) => {
       const team = this.teams[side];
       const isCpu = !this.isHuman(side);
-      startingFive(team).forEach((info) => {
-        if (config.mode === 'training' && side === 1 && info.position !== 'GK') return;
+      const five = startingFive(team);
+      // Tutorial: you and one team-mate against a lone keeper.
+      const tutorialPair = five.filter((pl) => pl.position !== 'GK').sort((a, b) => (a.position === 'ATT' ? 0 : 1) - (b.position === 'ATT' ? 0 : 1)).slice(0, 2);
+      five.forEach((info) => {
+        if ((config.mode === 'training' || config.mode === 'tutorial') && side === 1 && info.position !== 'GK') return;
+        if (config.mode === 'tutorial' && side === 0 && !tutorialPair.includes(info)) return;
         const mul = skillMuls(info, config.home.ageGroup);
         const p: SimPlayer = {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, distanceRun: 0, isKeeper: info.position === 'GK',
           speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, stamina: 1, charge: 0, penaltyGuess: 0,
+          trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
           mul, match: freshMatchStats(),
         };
         this.players.push(p);
@@ -259,6 +294,10 @@ export class MatchSim {
     if (config.mode === 'shootout') {
       this.shootout = { taking: 0, results: [[], []], resolved: false, timer: 0, kicked: false };
       this.setupPenalty(0);
+    } else if (config.mode === 'tutorial') {
+      this.setupKickoff(0);
+      this.tutorialHero = this.ball.owner ?? this.teamOf(0).find((p) => !p.isKeeper) ?? null;
+      this.phase = 'play';
     } else {
       this.setupKickoff(config.mode === 'training' && config.humanSide !== null ? config.humanSide : 0);
     }
@@ -286,7 +325,7 @@ export class MatchSim {
     keeper.pos = v(this.ownGoalX((1 - side) as Side) + (-dir) * 0.4, 0);
     const b = this.ball;
     b.owner = taker; b.pos = v(spot.x, spot.z); b.vel = v(); b.vy = 0; b.y = 0; b.lastKick = null;
-    this.setPiece = { kind: 'penalty', side, taker, spot, timer: 0 };
+    this.setPiece = { kind: 'penalty', side, taker, spot, timer: 0, wait: 0, stand: v(taker.pos.x, taker.pos.z), face: taker.facing, placed: true, targets: new Map() };
     this.phase = 'setpiece';
     this.controlledBy = [null, null];
     if (this.isHuman(side)) this.controlledBy[side] = taker;
@@ -386,6 +425,7 @@ export class MatchSim {
       this.phaseTimer += dt;
       if (this.phaseTimer > (this.mode === 'training' ? 1.6 : 3.2)) {
         if (this.shootout) this.advanceShootout();
+        else if (this.mode === 'tutorial') return; // the coach puts the ball back
         else if (this.mode === 'training') this.setupKickoff(this.config.humanSide ?? 0);
         else {
           const conceded = (1 - this.goals[this.goals.length - 1].side) as Side;
@@ -409,13 +449,17 @@ export class MatchSim {
     if (this.phase === 'setpiece' && this.setPiece) {
       const sp = this.setPiece;
       sp.timer += dt;
-      // Nobody may steal the ball while the taker lines it up.
-      if (this.ball.owner !== sp.taker && sp.timer < 8) { this.ball.owner = sp.taker; this.ball.pos = v(sp.spot.x, sp.spot.z); this.ball.vel = v(); }
-      if (sp.timer > 8) this.pass(sp.taker, null); // taker dawdled: the referee hurries them up
+      if (sp.timer >= sp.wait) {
+        if (!sp.placed) this.placeSetPiece(sp);
+        // Nobody may steal the ball while the taker lines it up.
+        if (this.ball.owner !== sp.taker && sp.timer < sp.wait + 8) { this.ball.owner = sp.taker; this.ball.pos = v(sp.spot.x, sp.spot.z); this.ball.vel = v(); }
+        if (sp.timer > sp.wait + 8) this.autoTake(sp.taker); // taker dawdled: the referee hurries them up
+      }
     }
     const halfEnd = this.config.halfSeconds * this.half;
+    if (this.mode === 'tutorial') this.clock = Math.min(this.clock, 1); // no clock in the tutorial
     if (this.mode === 'training' && this.clock >= this.config.halfSeconds) { this.phase = 'fulltime'; this.events.push({ type: 'fulltime' }); return; }
-    if (this.mode !== 'training' && this.clock >= halfEnd && this.ballIsCalm()) {
+    if (this.mode !== 'training' && this.mode !== 'tutorial' && this.clock >= halfEnd && this.ballIsCalm()) {
       if (this.half === 1) { this.phase = 'halftime'; this.phaseTimer = 0; this.events.push({ type: 'halftime' }); }
       else { this.phase = 'fulltime'; this.events.push({ type: 'fulltime' }); }
       return;
@@ -432,6 +476,10 @@ export class MatchSim {
       if (this.controlledBy[p.side] !== p) p.stamina = Math.min(1, p.stamina + dt / 4);
       p.kickAnim = Math.max(0, p.kickAnim - dt * 4);
       p.diveAnim = Math.max(0, p.diveAnim - dt * 1.4);
+      p.trickAnim = Math.max(0, p.trickAnim - dt * 2.2);
+      p.trickBoost = Math.max(0, p.trickBoost - dt);
+      p.trickCooldown = Math.max(0, p.trickCooldown - dt);
+      if (p.trickAnim <= 0) p.trickKind = null;
       const inp = inputs[p.side];
       if (inp && this.controlledBy[p.side] === p) this.driveHuman(p, inp, dt);
       else this.driveAI(p, dt);
@@ -439,8 +487,10 @@ export class MatchSim {
     this.integratePlayers(dt);
     this.updateFacing(dt);
     this.integrateBall(dt);
+    this.settleDeadBall(dt);
     this.resolvePossession(dt);
     this.checkGoal();
+    this.checkOut();
   }
 
   /**
@@ -500,7 +550,7 @@ export class MatchSim {
     if (so.kicked && !so.resolved) {
       const b = this.ball;
       const dir = so.taking === 0 ? 1 : -1;
-      const dead = (b.owner && b.owner.isKeeper) || (len(b.vel) < 0.8 && b.y < 0.05) || b.vel.x * dir < -1 || so.timer > 4.5;
+      const dead = (b.owner && b.owner.isKeeper) || (len(b.vel) < 0.8 && b.y < 0.05) || b.vel.x * dir < -1 || so.timer > 4.5 || this.isOut();
       if (dead) { this.resolveShootoutKick(false); this.phase = 'goal'; this.phaseTimer = 1.6; }
     }
   }
@@ -536,6 +586,14 @@ export class MatchSim {
     const outfield = team.filter((p) => !p.isKeeper);
     const b = this.ball;
     const current = this.controlledBy[side];
+    if (this.mode === 'tutorial' && this.tutorialHero) {
+      this.controlledBy[side] = this.tutorialHero; // one player to learn with
+      return;
+    }
+    if (this.phase === 'setpiece' && this.setPiece?.side === side) {
+      this.controlledBy[side] = this.setPiece.taker; // you take your own throw-ins, corners and goal kicks
+      return;
+    }
     if (b.owner && b.owner.side === side) {
       this.controlledBy[side] = b.owner; // always control the player on the ball (keeper included)
       return;
@@ -563,24 +621,27 @@ export class MatchSim {
   }
 
   private driveHuman(p: SimPlayer, input: InputState, _dt: number): void {
-    if (this.phase === 'setpiece' && this.setPiece) {
+    const sp = this.phase === 'setpiece' ? this.setPiece : null;
+    if (sp && p === sp.taker) {
+      if (sp.timer < sp.wait) { this.moveTowards(p, sp.stand, 1.1); return; } // walking over to the ball
       this.steer(p, v(), 30);
-      if (p !== this.setPiece.taker) return;
       // The taker may turn and kick, but not run off with the ball.
       const aimV = v(input.moveX, input.moveZ);
-      if (len(aimV) > 0.05) p.facing = Math.atan2(aimV.z, aimV.x);
+      const aim = len(aimV) > 0.05 ? aimV : null;
+      if (aim) p.facing = Math.atan2(aimV.z, aimV.x);
       if (input.shootHeld) p.charge = Math.min(1, p.charge + _dt / 0.7);
-      else if (p.charge > 0) { this.shoot(p, len(aimV) > 0.05 ? aimV : null, 0.7 + 0.45 * p.charge); p.charge = 0; }
-      else if (input.pass && this.setPiece.kind === 'freekick') this.pass(p, len(aimV) > 0.05 ? aimV : null);
+      else if (p.charge > 0) { this.takeSetPiece(p, sp.kind, aim, true, p.charge); p.charge = 0; }
+      else if (input.pass && sp.kind !== 'penalty') this.takeSetPiece(p, sp.kind, aim, false, 0);
       return;
     }
+    // Everyone else can move about while a set piece is lined up (the ball is out of bounds to them).
     const want = v(input.moveX, input.moveZ);
     const l = len(want);
     const sprinting = input.sprint && l > 0.05 && p.stamina > 0.02;
     p.stamina = clamp(p.stamina + (sprinting ? -_dt / 3 : _dt / 5), 0, 1);
     const sprint = sprinting ? 1.18 : 1;
-    const dribble = this.ball.owner === p ? 0.88 : 1;
-    const max = this.stats.speed * sprint * dribble * p.speedMul;
+    const dribble = this.ball.owner === p && p.trickBoost <= 0 ? 0.88 : 1;
+    const max = this.stats.speed * sprint * dribble * p.speedMul * this.trickPace(p);
     const target = l > 0.05 ? v(want.x * max, want.z * max) : v();
     this.steer(p, target, 22);
     if (l > 0.05 && this.ball.owner === p) p.facing = Math.atan2(want.z, want.x); // off the ball, updateFacing decides
@@ -593,6 +654,8 @@ export class MatchSim {
         p.charge = 0;
       } else if (input.pass) {
         this.pass(p, l > 0.05 ? want : null);
+      } else if (input.trick) {
+        this.trick(p, l > 0.05 ? want : null);
       }
     } else {
       p.charge = 0;
@@ -611,21 +674,32 @@ export class MatchSim {
     const mates = this.teamOf(p.side);
     const opps = this.teamOf((1 - p.side) as Side);
 
+    if (this.phase === 'setpiece' && this.setPiece) {
+      const sp = this.setPiece;
+      if (p !== sp.taker) {
+        if (p.isKeeper) { this.driveKeeper(p, dt); return; }
+        const t = sp.targets.get(p);
+        if (t) this.moveTowards(p, t, 0.9); else this.steer(p, v(), 30);
+        return;
+      }
+      if (sp.timer < sp.wait) { this.moveTowards(p, sp.stand, 1.1); return; }
+      this.steer(p, v(), 30);
+      if (sp.kind === 'penalty' || sp.kind === 'freekick') p.facing = Math.atan2(0 - p.pos.z, this.goalX(p.side) - p.pos.x);
+      if (sp.timer < sp.wait + (sp.kind === 'throwin' ? 1.0 : sp.kind === 'goalkick' ? 1.2 : 1.6)) return;
+      this.autoTake(p);
+      return;
+    }
     if (p.isKeeper) {
       this.driveKeeper(p, dt);
       return;
     }
-    if (this.phase === 'setpiece' && this.setPiece) {
-      const sp = this.setPiece;
-      if (p !== sp.taker) { this.steer(p, v(), 30); return; }
-      this.steer(p, v(), 30);
-      p.facing = Math.atan2(0 - p.pos.z, this.goalX(p.side) - p.pos.x);
-      if (sp.timer < 1.6) return;
-      if (sp.kind === 'penalty') { this.shoot(p, null, rand(0.95, 1.15)); return; }
-      const goal = v(this.goalX(p.side), 0);
-      if (dist(p.pos, goal) < this.length * 0.4 && Math.abs(p.pos.z) < this.width * 0.35) { this.shoot(p, null, 1.05); return; }
-      const mate = this.bestPassTarget(p, null);
-      if (mate) this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z)); else this.shoot(p, null, 1);
+    if (this.mode === 'tutorial') {
+      // The tutorial team-mate waits on their spot and gives the ball straight back.
+      if (b.owner === p) {
+        const human = this.controlledBy[p.side];
+        if (p.holdTime > 0.8 && human && human !== p) this.pass(p, v(human.pos.x - p.pos.x, human.pos.z - p.pos.z));
+        this.steer(p, v(), 20);
+      } else this.moveTowards(p, p.home, 0.8);
       return;
     }
 
@@ -655,6 +729,13 @@ export class MatchSim {
           return;
         }
         const tight = pressure < 1.3 * this.stats.scale + 0.7;
+        // Now and then a cornered dribbler tries a step-over or a nutmeg instead of passing.
+        if (tight && p.trickCooldown <= 0 && Math.random() < (isCpuTeam ? 0.02 + 0.025 * diff.accuracy : 0.03)) {
+          this.trick(p, null);
+          const g = norm(v(goal.x - p.pos.x, goal.z - p.pos.z));
+          p.aiTarget = v(p.pos.x + g.x * 3, p.pos.z + g.z * 3);
+          return;
+        }
         if (tight || p.holdTime > 0.7) {
           const mate = this.bestPassTarget(p, null);
           const forward = mate ? (mate.pos.x - p.pos.x) * (p.side === 0 ? 1 : -1) : -99;
@@ -670,9 +751,10 @@ export class MatchSim {
           const away = norm(v(p.pos.x - nearestOpp.pos.x, p.pos.z - nearestOpp.pos.z));
           aim = norm(v(aim.x + away.x * 0.9, aim.z + away.z * 0.9));
         }
-        p.aiTarget = v(p.pos.x + aim.x * 3, p.pos.z + aim.z * 3);
+        // Stay inside the lines now that the ball can go out.
+        p.aiTarget = v(clamp(p.pos.x + aim.x * 3, -this.length / 2 + 0.6, this.length / 2 - 0.6), clamp(p.pos.z + aim.z * 3, -this.width / 2 + 0.7, this.width / 2 - 0.7));
       }
-      this.moveTowards(p, p.aiTarget, 0.88);
+      this.moveTowards(p, p.aiTarget, (p.trickBoost > 0 ? 1 : 0.88) * this.trickPace(p));
       return;
     }
 
@@ -726,6 +808,22 @@ export class MatchSim {
     this.moveTowards(p, p.aiTarget, chaser ? 1.12 : 1);
   }
 
+  /** Keeper with the ball (or taking a goal kick): roll it to an open team-mate, or boot it upfield. */
+  private keeperDistribute(p: SimPlayer, pressed: boolean): void {
+    const opps = this.teamOf((1 - p.side) as Side);
+    const dir = p.side === 0 ? 1 : -1;
+    const presser = this.nearest(opps, p.pos);
+    const mate = this.bestPassTarget(p, null);
+    const mateMarked = mate ? dist(this.nearest(opps, mate.pos)?.pos ?? v(99, 99), mate.pos) < 3 : true;
+    if (mate && !mateMarked && !pressed) {
+      this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z), 1.1);
+    } else {
+      // Big clearance upfield, away from whoever is closest.
+      const awayZ = presser ? Math.sign(p.pos.z - presser.pos.z) || 1 : (Math.random() < 0.5 ? -1 : 1);
+      this.kick(p, v(dir, awayZ * rand(0.2, 0.6)), this.stats.power * 0.95, this.stats.power * 0.35);
+    }
+  }
+
   private driveKeeper(p: SimPlayer, dt: number): void {
     const b = this.ball;
     const own = this.ownGoalX(p.side);
@@ -739,15 +837,7 @@ export class MatchSim {
       const pressed = presser !== null && dist(presser.pos, p.pos) < 3.5;
       if (pressed) p.think = Math.min(p.think, 0.15);
       if (p.think <= 0) {
-        const mate = this.bestPassTarget(p, null);
-        const mateMarked = mate ? dist(this.nearest(opps, mate.pos)?.pos ?? v(99, 99), mate.pos) < 3 : true;
-        if (mate && !mateMarked && !pressed) {
-          this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z), 1.1);
-        } else {
-          // Big clearance upfield, away from whoever is closest.
-          const awayZ = presser ? Math.sign(p.pos.z - presser.pos.z) || 1 : (Math.random() < 0.5 ? -1 : 1);
-          this.kick(p, v(dir, awayZ * rand(0.2, 0.6)), this.stats.power * 0.95, this.stats.power * 0.35);
-        }
+        this.keeperDistribute(p, pressed);
         p.think = 1;
       }
       this.steer(p, v(), 20);
@@ -783,7 +873,7 @@ export class MatchSim {
         targetX = own + dir * out;
         targetZ = clamp(b.owner.pos.z * 0.5, -this.goalWidth / 2, this.goalWidth / 2);
       }
-    } else if (b.owner === null && len(b.vel) < 4 && dist(b.pos, p.pos) < 3 * this.stats.scale && Math.abs(b.pos.x - own) < 4.5) {
+    } else if (this.mode !== 'tutorial' && b.owner === null && len(b.vel) < 4 && dist(b.pos, p.pos) < 3 * this.stats.scale && Math.abs(b.pos.x - own) < 4.5) {
       // Come and collect a slow loose ball near the goal if we are closest to it.
       const opp = this.nearest(this.teamOf((1 - p.side) as Side), b.pos);
       if (!opp || dist(opp.pos, b.pos) > dist(p.pos, b.pos)) { targetX = b.pos.x; targetZ = b.pos.z; }
@@ -872,7 +962,9 @@ export class MatchSim {
   }
 
   private integratePlayers(dt: number): void {
-    const L = this.length / 2 - 0.3, W = this.width / 2 - 0.3;
+    // Players may step just over the lines (to take a throw-in or a corner), but not into the boards.
+    const out = this.mode === 'match' ? 0.6 : -0.3;
+    const L = this.length / 2 + out, W = this.width / 2 + out;
     for (const p of this.players) {
       p.pos.x += p.vel.x * dt;
       p.pos.z += p.vel.z * dt;
@@ -897,12 +989,14 @@ export class MatchSim {
     }
     if (this.phase === 'setpiece' && this.setPiece) {
       const sp = this.setPiece;
-      const centre = sp.kind === 'penalty' ? v(this.goalX(sp.side), 0) : sp.spot;
-      const radius = sp.kind === 'penalty' ? this.width * 0.26 + 0.8 : 3;
+      // Opponents keep their distance: out of the box for penalties and goal kicks, a few steps back otherwise.
+      const box = this.width * 0.26 + 0.8;
+      const centre = sp.kind === 'penalty' ? v(this.goalX(sp.side), 0) : sp.kind === 'goalkick' ? v(this.ownGoalX(sp.side), 0) : sp.spot;
+      const radius = sp.kind === 'penalty' || sp.kind === 'goalkick' ? box : sp.kind === 'throwin' ? 2 : 3;
       const defendingKeeper = this.teamOf((1 - sp.side) as Side).find((k) => k.isKeeper);
       for (const p of this.players) {
         if (p === sp.taker || p === defendingKeeper) continue;
-        if (sp.kind === 'freekick' && p.side === sp.side) continue;
+        if (sp.kind !== 'penalty' && p.side === sp.side) continue;
         const d = dist(p.pos, centre);
         if (d < radius) {
           const n = d > 1e-3 ? norm(v(p.pos.x - centre.x, p.pos.z - centre.z)) : v(sp.side === 0 ? -1 : 1, 0);
@@ -930,6 +1024,14 @@ export class MatchSim {
 
   private integrateBall(dt: number): void {
     const b = this.ball;
+    if (b.owner && this.phase === 'setpiece' && this.setPiece?.kind === 'throwin' && this.setPiece.taker === b.owner) {
+      // Throw-in: the ball is held up over the taker's head.
+      const o = b.owner;
+      b.pos = v(o.pos.x + Math.cos(o.facing) * 0.08, o.pos.z + Math.sin(o.facing) * 0.08);
+      b.vel = v(); b.vy = 0;
+      b.y = Math.min(b.y + 8 * dt, this.throwHeight());
+      return;
+    }
     if (b.owner) {
       // Glue the ball just in front of the dribbler's feet.
       const o = b.owner;
@@ -959,14 +1061,15 @@ export class MatchSim {
     b.pos.x += b.vel.x * dt;
     b.pos.z += b.vel.z * dt;
     b.spin += newSpeed * dt / b.radius;
-    // Rebound boards all round the pitch, with a gap for each goal mouth.
+    // Rebound boards all round, set back from the lines in a match so the ball can go out of play.
     const L = this.length / 2, W = this.width / 2, r = b.radius;
-    if (b.pos.z > W - r) { b.pos.z = W - r; b.vel.z = -Math.abs(b.vel.z) * 0.55; }
-    if (b.pos.z < -W + r) { b.pos.z = -W + r; b.vel.z = Math.abs(b.vel.z) * 0.55; }
+    const sideBoard = W + (this.mode === 'match' ? RUNOFF_SIDE : 0), endBoard = L + (this.mode === 'match' ? RUNOFF_END : 0);
+    if (b.pos.z > sideBoard - r) { b.pos.z = sideBoard - r; b.vel.z = -Math.abs(b.vel.z) * 0.55; }
+    if (b.pos.z < -sideBoard + r) { b.pos.z = -sideBoard + r; b.vel.z = Math.abs(b.vel.z) * 0.55; }
     const inMouth = Math.abs(b.pos.z) < this.goalWidth / 2 - r && b.y < this.goalHeight - r;
     if (!inMouth) {
-      if (b.pos.x > L - r) { b.pos.x = L - r; b.vel.x = -Math.abs(b.vel.x) * 0.55; }
-      if (b.pos.x < -L + r) { b.pos.x = -L + r; b.vel.x = Math.abs(b.vel.x) * 0.55; }
+      if (b.pos.x > endBoard - r) { b.pos.x = endBoard - r; b.vel.x = -Math.abs(b.vel.x) * 0.55; }
+      if (b.pos.x < -endBoard + r) { b.pos.x = -endBoard + r; b.vel.x = Math.abs(b.vel.x) * 0.55; }
     } else {
       // Inside the goal: the net catches it.
       const back = L + this.goalDepth - r;
@@ -993,6 +1096,7 @@ export class MatchSim {
     if (b.owner) {
       const o = b.owner;
       if (o.isKeeper && this.phase !== 'kickoff') return; // a keeper holding the ball cannot be tackled
+      if (this.mode === 'tutorial') return; // nobody tackles while you learn
       // Tackles: an opponent close to the ball may win it.
       for (const p of this.players) {
         if (p.side === o.side || p.kickCooldown > 0) continue;
@@ -1056,14 +1160,19 @@ export class MatchSim {
         let pSave = bd < easy ? 0.97 * Math.max(speedFactor, 0.75) : clamp(1 - (bd - easy) / (reach - easy), 0, 1) * speedFactor;
         if (b.penaltyShot) pSave *= bd < easy ? 0.6 : 0.45; // even a keeper who guessed right can be beaten
         pSave *= best.mul.save;
+        if (this.mode === 'tutorial') pSave *= 0.4; // the tutorial keeper lets most shots in
         if (Math.random() > pSave) return; // beaten
         best.match.saves++;
         this.events.push({ type: 'save', side: best.side, player: best.info });
         const dir = best.side === 0 ? 1 : -1; // away from our own goal
         if (bd > easy || ballSpeed > this.stats.power * 1.05) {
           // Parry: the ball flies back out towards the pitch, not into the net.
-          const sideways = Math.sign(b.pos.z - best.pos.z) || (Math.random() < 0.5 ? -1 : 1);
-          b.vel = v(dir * ballSpeed * rand(0.15, 0.35), sideways * ballSpeed * rand(0.45, 0.7));
+          let sideways = Math.sign(b.pos.z - best.pos.z) || (Math.random() < 0.5 ? -1 : 1);
+          if (this.mode === 'match' && Math.random() < 0.4) {
+            // Tipped round the post: out over the goal line for a corner.
+            sideways = Math.sign(b.pos.z) || sideways;
+            b.vel = v(-dir * ballSpeed * rand(0.25, 0.4), sideways * ballSpeed * rand(0.5, 0.7));
+          } else b.vel = v(dir * ballSpeed * rand(0.15, 0.35), sideways * ballSpeed * rand(0.45, 0.7));
           b.vy = rand(1, 3);
           best.kickCooldown = 0.35;
           best.diveAnim = Math.max(best.diveAnim, 0.9);
@@ -1138,10 +1247,291 @@ export class MatchSim {
     taker.charge = 0;
     offender.kickCooldown = 1;
     for (const q of this.players) q.think = 0.2;
-    this.setPiece = { kind: penalty ? 'penalty' : 'freekick', side, taker, spot, timer: 0 };
+    const targets = new Map<SimPlayer, V2>();
+    if (!penalty && dist(spot, goal) < this.length * 0.42) {
+      // Close to goal: the two nearest defenders make a wall between the ball and the goal.
+      const toGoal = norm(v(goal.x - spot.x, goal.z - spot.z));
+      const across = v(-toGoal.z, toGoal.x);
+      const gap = 3.2;
+      const defenders = this.teamOf(offender.side).filter((q) => !q.isKeeper).sort((a, c) => dist(a.pos, spot) - dist(c.pos, spot)).slice(0, 2);
+      defenders.forEach((q, i) => {
+        const off = (i === 0 ? -1 : 1) * (q.radius + 0.04);
+        targets.set(q, v(spot.x + toGoal.x * gap + across.x * off, spot.z + toGoal.z * gap + across.z * off));
+      });
+    }
+    this.setPiece = { kind: penalty ? 'penalty' : 'freekick', side, taker, spot, timer: 0, wait: 0, stand: v(taker.pos.x, taker.pos.z), face: taker.facing, placed: true, targets };
     this.phase = 'setpiece';
     if (this.isHuman(side)) this.controlledBy[side] = taker;
     this.events.push({ type: 'foul', side: offender.side, player: offender.info, kind: penalty ? 'penalty' : 'freekick' });
+  }
+
+  // ---------- out of play and restarts ----------
+
+  /** How high a throw-in is held: just over the kid's head. */
+  private throwHeight(): number { return 1.75 * this.stats.scale + 0.15; }
+
+  /** True once the whole ball is over a touchline, or over a goal line anywhere but into the goal. */
+  isOut(): boolean {
+    const b = this.ball;
+    const L = this.length / 2, W = this.width / 2, r = b.radius;
+    if (Math.abs(b.pos.z) > W + r) return true;
+    const intoGoal = Math.abs(b.pos.z) < this.goalWidth / 2 && b.y < this.goalHeight;
+    return Math.abs(b.pos.x) > L + r && !intoGoal;
+  }
+
+  /** Ball out: training goes back to the centre, a match gets a throw-in, corner or goal kick. */
+  private checkOut(): void {
+    if (this.phase !== 'play' || !this.isOut()) return;
+    if (this.mode === 'training') { this.setupKickoff(this.config.humanSide ?? 0); return; }
+    if (this.mode !== 'match') return; // the tutorial coach fetches the ball itself
+    const b = this.ball;
+    const last = b.lastTouch ?? b.owner;
+    b.owner = null;
+    // Let it roll on a touch so everyone sees it go out.
+    b.vel = v(b.vel.x * 0.35, b.vel.z * 0.35);
+    const L = this.length / 2, W = this.width / 2;
+    const sz = Math.sign(b.pos.z) || 1;
+    if (Math.abs(b.pos.x) > L + b.radius) {
+      const sx = Math.sign(b.pos.x);
+      const defending: Side = sx > 0 ? 1 : 0; // the side whose goal line it crossed
+      if (last && last.side === defending) {
+        const side = (1 - defending) as Side;
+        this.awardRestart('corner', side, v(sx * (L - 0.25), sz * (W - 0.25)));
+      } else {
+        this.awardRestart('goalkick', defending, v(this.ownGoalX(defending) + -sx * 1.3, 0));
+      }
+    } else {
+      const side: Side = last ? ((1 - last.side) as Side) : b.pos.x > 0 ? 1 : 0;
+      this.awardRestart('throwin', side, v(clamp(b.pos.x, -L + 0.8, L - 0.8), sz * W));
+    }
+  }
+
+  private awardRestart(kind: 'corner' | 'throwin' | 'goalkick', side: Side, spot: V2): void {
+    const team = this.teamOf(side);
+    const opps = this.teamOf((1 - side) as Side);
+    const dir = side === 0 ? 1 : -1;
+    const outfield = team.filter((q) => !q.isKeeper);
+    const keeper = team.find((q) => q.isKeeper);
+    const taker = kind === 'goalkick' && keeper ? keeper : this.nearest(outfield.length ? outfield : team, spot)!;
+    const goalX = this.goalX(side);
+    const targets = new Map<SimPlayer, V2>();
+    let face: number;
+    let stand: V2;
+    if (kind === 'throwin') {
+      const sz = Math.sign(spot.z);
+      face = Math.atan2(-sz, 0);
+      stand = v(spot.x, spot.z + sz * 0.3);
+      // Two team-mates come short to offer an easy throw.
+      const mates = outfield.filter((q) => q !== taker).sort((a, c) => dist(a.pos, spot) - dist(c.pos, spot));
+      const offers = [v(spot.x + dir * this.width * 0.2, spot.z - sz * this.width * 0.22), v(spot.x - dir * this.width * 0.12, spot.z - sz * this.width * 0.34)];
+      mates.slice(0, 2).forEach((q, i) => targets.set(q, v(clamp(offers[i].x, -this.length / 2 + 1, this.length / 2 - 1), offers[i].z)));
+    } else if (kind === 'corner') {
+      const sz = Math.sign(spot.z);
+      const pen = v(goalX - dir * (this.width * 0.26 + 0.6), 0);
+      face = Math.atan2(pen.z - spot.z, pen.x - spot.x);
+      stand = v(spot.x - Math.cos(face) * 0.45, spot.z - Math.sin(face) * 0.45);
+      // Attackers fill the box: near post, the penalty spot, the edge. Defenders pick them up goal-side.
+      const W = this.width;
+      const runs = [v(goalX - dir * W * 0.16, sz * W * 0.08), v(goalX - dir * W * 0.3, -sz * W * 0.05), v(goalX - dir * W * 0.48, sz * W * 0.12)];
+      const attackers = outfield.filter((q) => q !== taker);
+      attackers.forEach((q, i) => targets.set(q, runs[i % runs.length]));
+      const defenders = opps.filter((q) => !q.isKeeper);
+      defenders.forEach((q, i) => {
+        const mark = runs[i % runs.length];
+        targets.set(q, i < attackers.length ? v(mark.x + dir * 0.7, mark.z * 0.8) : v(goalX - dir * 0.9, sz * this.goalWidth * 0.6));
+      });
+    } else {
+      face = dir > 0 ? 0 : Math.PI;
+      stand = v(spot.x - dir * 0.45, spot.z);
+      // Team-mates spread out to their formation spots for the kick.
+      for (const q of outfield) targets.set(q, v(q.home.x, q.home.z));
+    }
+    for (const q of this.players) { q.think = 0.2; q.charge = 0; }
+    this.setPiece = { kind, side, taker, spot, timer: 0, wait: 0.9, stand, face, placed: false, targets };
+    this.phase = 'setpiece';
+    if (this.isHuman(side)) this.controlledBy[side] = taker;
+    this.events.push({ type: 'restart', kind, side });
+  }
+
+  /** The dead ball stops rolling and stays near the line while the taker walks over. */
+  private settleDeadBall(dt: number): void {
+    const sp = this.setPiece;
+    if (this.phase !== 'setpiece' || !sp || sp.placed || this.ball.owner) return;
+    const b = this.ball;
+    const k = Math.max(0, 1 - 6 * dt);
+    b.vel = v(b.vel.x * k, b.vel.z * k);
+    const lim = (n: number, line: number) => clamp(n, -line - 0.45, line + 0.45);
+    b.pos.z = lim(b.pos.z, this.width / 2);
+    if (Math.abs(b.pos.z) > this.goalWidth / 2 + 0.3 || b.y >= this.goalHeight) b.pos.x = lim(b.pos.x, this.length / 2);
+  }
+
+  /** Put the ball on the spot and the taker behind it. */
+  private placeSetPiece(sp: SetPiece): void {
+    const t = sp.taker;
+    t.pos = v(sp.stand.x, sp.stand.z);
+    t.vel = v();
+    t.facing = sp.face;
+    t.kickCooldown = 0;
+    t.charge = 0;
+    const b = this.ball;
+    b.owner = t;
+    b.pos = v(sp.spot.x, sp.spot.z);
+    b.vel = v(); b.vy = 0; b.y = 0;
+    sp.placed = true;
+  }
+
+  /** The computer's choice at a set piece (also used when a human taker runs out of time). */
+  private autoTake(p: SimPlayer): void {
+    const sp = this.setPiece;
+    if (!sp) return;
+    switch (sp.kind) {
+      case 'penalty': this.shoot(p, null, rand(0.95, 1.15)); return;
+      case 'freekick': {
+        const goal = v(this.goalX(p.side), 0);
+        if (dist(p.pos, goal) < this.length * 0.4 && Math.abs(p.pos.z) < this.width * 0.35) { this.shoot(p, null, 1.05); return; }
+        const mate = this.bestPassTarget(p, null);
+        if (mate) this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z)); else this.shoot(p, null, 1);
+        return;
+      }
+      case 'throwin': this.throwIn(p, null, -1); return;
+      case 'corner': this.cross(p, null, rand(0.9, 1.1)); return;
+      case 'goalkick': this.keeperDistribute(p, false); return;
+    }
+  }
+
+  /** A human taker pressed shoot (released after charging) or pass at a set piece. */
+  private takeSetPiece(p: SimPlayer, kind: SetPieceKind, aim: V2 | null, shot: boolean, charge: number): void {
+    switch (kind) {
+      case 'penalty':
+      case 'freekick':
+        if (shot) this.shoot(p, aim, 0.7 + 0.45 * charge); else this.pass(p, aim);
+        return;
+      case 'throwin': this.throwIn(p, aim, shot ? charge : -1); return;
+      case 'corner':
+        if (shot) this.cross(p, aim, 0.85 + 0.3 * charge); else this.pass(p, aim);
+        return;
+      case 'goalkick':
+        if (shot) this.longKick(p, aim, 0.75 + 0.35 * charge); else this.pass(p, aim, 1.1);
+        return;
+    }
+  }
+
+  /** Throw-in from over the head: to a team-mate, or (charge >= 0) a long throw where the stick points. */
+  private throwIn(p: SimPlayer, aim: V2 | null, charge: number): void {
+    const long = charge >= 0;
+    const mate = long ? null : this.bestPassTarget(p, aim);
+    let dir: V2;
+    let d: number;
+    if (mate) {
+      const lead = v(mate.pos.x + mate.vel.x * 0.3, mate.pos.z + mate.vel.z * 0.3);
+      dir = v(lead.x - p.pos.x, lead.z - p.pos.z);
+      d = len(dir);
+    } else {
+      dir = aim ?? v(Math.cos(p.facing), Math.sin(p.facing));
+      d = long ? 5 + 6 * charge : 5;
+    }
+    const wobble = (1 - this.stats.control) * 0.3;
+    const a = Math.atan2(dir.z, dir.x) + rand(-wobble, wobble);
+    const speed = clamp(1.8 + d * 0.55, 3, this.stats.power * 0.55);
+    this.kick(p, v(Math.cos(a), Math.sin(a)), speed, 1.2);
+    p.kickAnim = 0; // thrown, not kicked
+    this.ball.y = Math.max(this.ball.y, this.throwHeight());
+  }
+
+  /** Corner cross into the box: to the best-placed team-mate, or where the stick points. */
+  private cross(p: SimPlayer, aim: V2 | null, powerMul: number): void {
+    const dir = p.side === 0 ? 1 : -1;
+    let target = v(this.goalX(p.side) - dir * (this.width * 0.26 + 0.6), 0);
+    const runner = this.nearest(this.teamOf(p.side).filter((m) => m !== p && !m.isKeeper), target);
+    if (runner) target = v(runner.pos.x + runner.vel.x * 0.4, runner.pos.z + runner.vel.z * 0.4);
+    let to = v(target.x - p.pos.x, target.z - p.pos.z);
+    const d = len(to);
+    if (aim) { const a = norm(aim); to = v(a.x * d, a.z * d); }
+    const wobble = (1 - this.stats.control) * 0.25;
+    const ang = Math.atan2(to.z, to.x) + rand(-wobble, wobble);
+    const speed = clamp(2.5 + d * 0.62, 5, this.stats.power * 0.8) * powerMul;
+    this.kick(p, v(Math.cos(ang), Math.sin(ang)), speed, 1.4);
+  }
+
+  /** Goal kick booted upfield (where the stick points, or straight ahead). */
+  private longKick(p: SimPlayer, aim: V2 | null, powerMul: number): void {
+    const dir = p.side === 0 ? 1 : -1;
+    const to = aim ?? v(dir, rand(-0.35, 0.35));
+    this.kick(p, to, this.stats.power * 0.95 * powerMul, this.stats.power * 0.33 * powerMul);
+  }
+
+  // ---------- skill moves ----------
+
+  /** Running pace while a trick plays: slower during the feint, a burst once it has worked. */
+  private trickPace(p: SimPlayer): number {
+    if (p.trickBoost > 0) return 1.22;
+    if (p.trickKind === 'stepover' && p.trickAnim > 0.45) return 0.7;
+    return 1;
+  }
+
+  /**
+   * The trick button. With a defender right in front it is a nutmeg: the ball goes
+   * through their legs and the dribbler runs round to collect it. Otherwise it is a
+   * step-over that sends nearby defenders the wrong way. Both can fail, more often
+   * for the little age groups.
+   */
+  trick(p: SimPlayer, aim: V2 | null): void {
+    const b = this.ball;
+    if (b.owner !== p || p.isKeeper || p.trickCooldown > 0 || this.phase === 'setpiece') return;
+    p.trickCooldown = 1.1;
+    p.trickAnim = 1;
+    const fwd = aim ? norm(aim) : v(Math.cos(p.facing), Math.sin(p.facing));
+    const across = v(-fwd.z, fwd.x);
+    const skill = this.stats.control;
+    const opps = this.teamOf((1 - p.side) as Side).filter((o) => !o.isKeeper);
+    const reach = 1.1 * this.stats.scale + 0.7;
+    let victim: SimPlayer | null = null;
+    let bestAlong = Infinity;
+    for (const o of opps) {
+      const rel = v(o.pos.x - p.pos.x, o.pos.z - p.pos.z);
+      const along = rel.x * fwd.x + rel.z * fwd.z;
+      const perp = Math.abs(rel.x * across.x + rel.z * across.z);
+      if (along > 0.1 && along < reach && perp < 0.75 && along < bestAlong) { bestAlong = along; victim = o; }
+    }
+    if (victim) {
+      p.trickKind = 'nutmeg';
+      p.kickAnim = 0.7; // a little poke
+      p.facing = Math.atan2(fwd.z, fwd.x);
+      const ok = Math.random() < 0.35 + 0.5 * skill;
+      b.owner = null;
+      b.lastTouch = p;
+      b.vy = 0;
+      p.kickCooldown = 0.3;
+      if (ok) {
+        // Through the legs, and the defender spins round looking for it.
+        const pace = 3 + 2.5 * this.stats.scale;
+        b.vel = v(fwd.x * pace, fwd.z * pace);
+        victim.kickCooldown = 1;
+        victim.tackleTimer = Math.max(victim.tackleTimer, 1);
+        victim.stunAnim = 0.8;
+        victim.think = 0.6;
+        p.trickBoost = 0.7;
+      } else {
+        // Off the shins: the ball pops loose.
+        b.vel = v(-fwd.x * 1.5 + rand(-1.5, 1.5), -fwd.z * 1.5 + rand(-1.5, 1.5));
+      }
+      this.events.push({ type: 'trick', kind: 'nutmeg', side: p.side, player: p.info, ok });
+      return;
+    }
+    p.trickKind = 'stepover';
+    p.trickDir = Math.random() < 0.5 ? -1 : 1;
+    const ok = Math.random() < 0.45 + 0.45 * skill;
+    const near = opps.filter((o) => dist(o.pos, p.pos) < 2.4 * this.stats.scale + 0.8);
+    if (ok) {
+      // Defenders lean the way of the feint and cannot tackle for a moment.
+      for (const o of near) {
+        o.vel = v(across.x * p.trickDir * 2.6, across.z * p.trickDir * 2.6);
+        o.tackleTimer = Math.max(o.tackleTimer, 0.8);
+        o.think = 0.6;
+      }
+      p.trickBoost = 0.6;
+    }
+    this.events.push({ type: 'trick', kind: 'stepover', side: p.side, player: p.info, ok: ok && near.length > 0 });
   }
 
   /** Each starter's match stats by player id (for player of the match and career growth). */
@@ -1202,6 +1592,7 @@ export class MatchSim {
   }
 
   private checkGoal(): void {
+    if (this.phase === 'setpiece') return; // a dead ball cannot go in
     const b = this.ball;
     const L = this.length / 2;
     if (Math.abs(b.pos.x) > L + b.radius && Math.abs(b.pos.z) < this.goalWidth / 2 && b.y < this.goalHeight) {

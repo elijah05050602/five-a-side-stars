@@ -5,13 +5,15 @@ import { buildPitch, pitchExtras } from './Pitch';
 import { Crowd } from './Crowd';
 import { Commentator } from './commentary';
 import { Weather, resolveConditions, type Conditions, type WeatherChoice } from './Weather';
+import { toonMaterial } from './toon';
 import { PlayerModel, type AnimState } from './PlayerModel';
 import type { Expression } from './playerFace';
 import type { Kit } from '../data/types';
-import { MatchSim, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side } from './sim';
+import { MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
 import { getSettings } from '../data/storage';
+import { TutorialCoach } from './tutorial';
 
 export type SimMode = NonNullable<SimConfig['mode']>;
 
@@ -75,6 +77,9 @@ export class MatchScene {
   private readonly camLook = new THREE.Vector3();
   private disposed = false;
   private readonly onResize = () => this.resize();
+  /** First-time tutorial coach and its glowing star, when this is the tutorial. */
+  private readonly coach: TutorialCoach | null = null;
+  private readonly marker = new THREE.Group();
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, config: SimConfig, private readonly onFinish: (r: MatchResult) => void, private readonly onQuit: () => void, options: SceneOptions = {}) {
     this.sim = new MatchSim(config);
@@ -111,7 +116,8 @@ export class MatchScene {
     rim.position.set(14, 10, -18);
     this.scene.add(sun, rim, new THREE.HemisphereLight(0xdff3ff, 0x3b7f4e, 1.25));
 
-    const pitch = buildPitch({ length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth });
+    const runoff = this.sim.mode === 'match';
+    const pitch = buildPitch({ length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth, runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0 });
     this.scene.add(pitch);
     this.extras = pitchExtras(pitch);
     this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, touch);
@@ -134,18 +140,32 @@ export class MatchScene {
     }
     this.ball = new BallModel(this.sim.ball.radius);
     this.scene.add(this.ball.group);
+    if (this.sim.mode === 'tutorial') {
+      this.coach = new TutorialCoach(this.sim);
+      const gold = new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.75, 1.0, 40), gold);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.02;
+      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.45), toonMaterial({ color: 0xffd23f }));
+      star.position.y = 2.1;
+      star.name = 'star';
+      this.marker.add(ring, star);
+      this.marker.visible = false;
+      this.scene.add(this.marker);
+    }
 
     this.hud = renderHud(uiRoot, this.sim, {
       onPause: () => this.sim.togglePause(),
       onResume: () => this.sim.togglePause(),
       onQuit: () => { this.dispose(); this.onQuit(); },
       onFinish: () => { const r = this.result(); this.dispose(); this.onFinish(r); },
-    });
+    }, this.coach ?? undefined);
     this.input.attachJoystick(this.hud.joystickZone, this.hud.joystickKnob);
     this.input.attachButton(this.hud.btnShoot, 'shoot');
     this.input.attachButton(this.hud.btnPass, 'pass');
     this.input.attachButton(this.hud.btnSprint, 'sprint');
     this.input.attachButton(this.hud.btnSwitch, 'switch');
+    this.input.attachButton(this.hud.btnTrick, 'trick');
 
     window.addEventListener('resize', this.onResize);
     this.resize();
@@ -238,7 +258,7 @@ export class MatchScene {
     const step = 1 / 60;
     let steps = 0;
     while (!replaying && this.acc >= step && steps < 8) {
-      const once = { shoot: false, pass: false, switchPlayer: false, pause: false };
+      const once = { shoot: false, pass: false, switchPlayer: false, pause: false, trick: false };
       this.sim.step(step, steps === 0 ? input : { ...input, ...once }, input2 ? (steps === 0 ? input2 : { ...input2, ...once }) : undefined);
       if (this.sim.phase === 'play' || this.sim.phase === 'setpiece' || this.sim.phase === 'kickoff') this.record();
       this.acc -= step;
@@ -252,6 +272,17 @@ export class MatchScene {
         this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, this.sim.score[0], this.sim.score[1]);
         this.extras.nets[ev.side === 0 ? 1 : 0]?.hit(this.sim.ball.pos.z, Math.hypot(this.sim.ball.vel.x, this.sim.ball.vel.z));
         if (this.sim.mode !== 'training' && !getSettings().reduceMotion && this.history.length > 30) this.replay = { frames: this.history.slice(-125), t: 0, wait: 1.1 };
+      }
+    }
+    if (this.coach) {
+      this.coach.update(dt, this.sim.events);
+      const m = this.coach.marker;
+      this.marker.visible = m !== null;
+      if (m) {
+        this.marker.position.set(m.x, 0, m.z);
+        const star = this.marker.getObjectByName('star')!;
+        star.rotation.y = now / 400;
+        star.position.y = 2.1 + Math.sin(now / 250) * 0.15;
       }
     }
     const lines = this.commentator.onEvents(this.sim, this.sim.events);
@@ -294,7 +325,7 @@ export class MatchScene {
       const ahead = Math.cos(ang) > -0.2;
       const gazeX = ahead ? Math.round(Math.sin(ang) * 2) / 2 : 0;
       const gazeY = ahead && Math.hypot(b.pos.x - p.pos.x, b.pos.z - p.pos.z) < 2.5 * scale ? 0.5 : 0;
-      const st: AnimState = { speed, kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, tackle: p.tackleTimer, scale, wobble, mood, gazeX, gazeY, cheer: celebrating === p.side };
+      const st: AnimState = { speed, kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, tackle: p.tackleTimer, scale, wobble, mood, gazeX, gazeY, cheer: celebrating === p.side, stepover: p.trickKind === 'stepover' ? p.trickAnim : 0, stepoverDir: p.trickDir };
       m.animate(dt, st);
       const isP1 = p === this.sim.controlled;
       const isP2 = p === this.sim.controlled2;
@@ -309,8 +340,10 @@ export class MatchScene {
         ? new THREE.Vector3(b.pos.x * 0.6 + c1.pos.x * 0.2 + c2.pos.x * 0.2, 0, b.pos.z * 0.6 + c1.pos.z * 0.2 + c2.pos.z * 0.2)
         : new THREE.Vector3(b.pos.x * 0.65 + c1.pos.x * 0.35, 0, b.pos.z * 0.65 + c1.pos.z * 0.35))
       : new THREE.Vector3(b.pos.x, 0, b.pos.z);
-    focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.32, this.sim.length * 0.32);
-    focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.2, this.sim.width * 0.2);
+    // Set pieces happen out by the lines, so let the camera follow further out for them.
+    const wide = this.sim.phase === 'setpiece' ? 1.25 : 1;
+    focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.32 * wide, this.sim.length * 0.32 * wide);
+    focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.2 * wide * wide, this.sim.width * 0.2 * wide * wide);
     this.camTarget.lerp(focus, 1 - Math.pow(0.02, dt));
     // After a goal in a match (and after the replay, which plays from 1.1s), swing round to the
     // scoring team's fans going wild, then back for kick-off.

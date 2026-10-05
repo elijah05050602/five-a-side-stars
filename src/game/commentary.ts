@@ -186,7 +186,7 @@ export class Commentator {
         if (!g.ownGoal) this.goalsBy.set(key, n);
         const longRange = !!w && Math.abs(sim.goalX(g.side) - w.from.x) > sim.length * 0.4;
         const rocket = sim.mode === 'training' && Math.hypot(sim.ball.vel.x, sim.ball.vel.z) > sim.stats.power * 0.95;
-        return goalLine({ score: sim.score, side: g.side, scorer: g.scorer.name, team: this.teamName(sim, g.side), ownGoal: g.ownGoal, minute: g.minute, scorerGoals: n, penalty: sim.ball.penaltyShot && sim.mode === 'match', longRange, mode: sim.mode, rocket }, rng);
+        return goalLine({ score: sim.score, side: g.side, scorer: g.scorer.name, team: this.teamName(sim, g.side), ownGoal: g.ownGoal, minute: g.minute, scorerGoals: n, penalty: sim.ball.penaltyShot && sim.mode === 'match', longRange, mode: sim.mode === 'tutorial' ? 'training' : sim.mode, rocket }, rng);
       }
       case 'foul': {
         const team = this.teamName(sim, (1 - ev.side!) as Side);

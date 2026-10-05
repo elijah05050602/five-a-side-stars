@@ -41,9 +41,11 @@ export interface StartOptions {
 export interface Router {
   go(screen: Screen): void;
   startMatch(o: StartOptions): void;
+  /** The guided first-time kick-about. */
+  startTutorial(): void;
 }
 
-export type SetupMode = SimMode | 'tournament' | 'league' | 'career';
+export type SetupMode = Exclude<SimMode, 'tutorial'> | 'tournament' | 'league' | 'career';
 
 export type Screen =
   | { name: 'menu' }
@@ -133,7 +135,7 @@ function renderMenu(root: HTMLElement, router: Router): void {
           </div>
         </div>
       </div>
-      ${hasKeyboard ? dock() : '<footer class="dock dock-touch"><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></footer>'}
+      ${hasKeyboard ? dock() : '<footer class="dock dock-touch"><button class="dock-chip dock-link" id="m-howto">🎓 How to play</button><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></footer>'}
       <p class="version">Goal Rush! v${pkg.version} · works offline once loaded · no accounts, no adverts</p>
     </div>`;
   wireShell(root, router);
@@ -146,6 +148,7 @@ function renderMenu(root: HTMLElement, router: Router): void {
   root.querySelector('#m-train')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'training' }));
   root.querySelector('#m-teams')!.addEventListener('click', () => router.go({ name: 'teams' }));
   root.querySelector('#m-album')!.addEventListener('click', () => router.go({ name: 'album' }));
+  root.querySelector('#m-howto')!.addEventListener('click', () => router.startTutorial());
   const onKey = (e: KeyboardEvent) => { if (e.code === 'Space' && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); router.go({ name: 'setup' }); } };
   window.addEventListener('keydown', onKey);
   cleanup = () => window.removeEventListener('keydown', onKey);
@@ -688,7 +691,7 @@ function renderResults(root: HTMLElement, router: Router, r: MatchResult, sticke
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
-  root.querySelector('#r-again')?.addEventListener('click', () => router.go({ name: 'setup', homeId: r.home.id, mode: r.mode }));
+  root.querySelector('#r-again')?.addEventListener('click', () => router.go({ name: 'setup', homeId: r.home.id, mode: r.mode === 'tutorial' ? 'match' : r.mode }));
   root.querySelector('#r-cup')?.addEventListener('click', () => {
     if (tournament!.needsShootout) {
       const f = currentFixture(tournament!)!;
