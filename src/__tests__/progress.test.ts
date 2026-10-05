@@ -9,7 +9,7 @@ const home = team('h', 'Home');
 const away = team('a', 'Away');
 
 function match(score: [number, number], goals: GoalEvent[] = [], extra: Partial<MatchResult> = {}): MatchResult {
-  return { mode: 'match', score, goals, home, away, stats: { touches: [0, 0], distance: [0, 0] }, shootout: null, trainingPoints: 0, twoPlayer: false, ...extra };
+  return { mode: 'match', score, goals, home, away, stats: { touches: [0, 0], distance: [0, 0] }, players: {}, shootout: null, trainingPoints: 0, twoPlayer: false, ...extra };
 }
 const goal = (side: 0 | 1, scorer = side === 0 ? home.players[3] : away.players[3], minute = 10): GoalEvent => ({ side, scorer, minute, ownGoal: false });
 

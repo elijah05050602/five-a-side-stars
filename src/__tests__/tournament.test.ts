@@ -19,7 +19,7 @@ describe('tournament', () => {
   it('a win takes you to the final; a drawn match needs a shoot-out first', () => {
     const s = createTournament(you, 'normal', 60);
     const f = s.semis[0];
-    const res = (score: [number, number], mode: MatchResult['mode'] = 'match'): MatchResult => ({ mode, score, goals: [], home: f.home, away: f.away, stats: { touches: [0, 0], distance: [0, 0] }, shootout: null, trainingPoints: 0, twoPlayer: false });
+    const res = (score: [number, number], mode: MatchResult['mode'] = 'match'): MatchResult => ({ mode, score, goals: [], home: f.home, away: f.away, stats: { touches: [0, 0], distance: [0, 0] }, players: {}, shootout: null, trainingPoints: 0, twoPlayer: false });
     applyResult(s, res([1, 1]));
     expect(s.needsShootout).toBe(true);
     expect(s.stage).toBe('semi');
@@ -38,7 +38,7 @@ describe('tournament', () => {
   it('losing the semi lets the computer finish the cup', () => {
     const s = createTournament(you, 'easy', 60);
     const f = s.semis[0];
-    applyResult(s, { mode: 'match', score: [0, 2], goals: [], home: f.home, away: f.away, stats: { touches: [0, 0], distance: [0, 0] }, shootout: null, trainingPoints: 0, twoPlayer: false });
+    applyResult(s, { mode: 'match', score: [0, 2], goals: [], home: f.home, away: f.away, stats: { touches: [0, 0], distance: [0, 0] }, players: {}, shootout: null, trainingPoints: 0, twoPlayer: false });
     expect(s.stage).toBe('done');
     expect(humanStillIn(s)).toBe(false);
     expect(s.final?.winnerId).not.toBe('you');

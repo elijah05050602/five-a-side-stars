@@ -338,3 +338,37 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
 .logo-row { align-items: center; gap: 10px; margin: 6px 0 10px; }
 .logo-mini .btn-small { padding: 2px 6px; font-size: .75rem; border-width: 2px; margin-left: 4px; vertical-align: middle; }
 .league-table .t-name .logo-controls { display: inline-flex; }
+
+/* ---------- Stars, skills and career ---------- */
+.stars { color: #e8a700; letter-spacing: 1px; font-size: 1.1em; text-shadow: 0 1px 0 rgba(27,42,65,.25); white-space: nowrap; }
+.pc-stars { font-size: 12px; font-weight: 700; color: #b37d00; }
+.chip-career { background: #d9f7e5; font-size: 12px; }
+.skills { display: flex; flex-direction: column; gap: 6px; }
+.skill-row { display: grid; grid-template-columns: minmax(110px, 1fr) auto auto; align-items: center; gap: 10px; background: #f3f6fb; border-radius: 12px; padding: 6px 10px; }
+.skill-name { font-weight: 700; }
+.skill-btns { gap: 6px; }
+.skill-btns .btn-icon { min-height: 40px; min-width: 40px; padding: 0; }
+.skill-btns .btn:disabled { opacity: .35; cursor: default; }
+.skills-field .is-over { color: #c0392b; font-weight: 700; }
+.xp { justify-self: end; }
+.age-ladder { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-weight: 800; }
+.rung-age { background: var(--yellow); border: 2px solid var(--navy); border-radius: 999px; padding: 4px 10px; }
+.rung-arrow { color: #64748b; }
+.rung-wide { width: auto; min-width: 42px; padding: 0 8px; border-radius: 999px; font-size: .9rem; }
+.career-banner { background: linear-gradient(135deg, #ff7a00, #ffd23f); color: var(--navy); }
+.career-banner .rung { border-color: rgba(27,42,65,.35); background: rgba(255,255,255,.35); }
+.career-banner .rung.is-reached { background: rgba(255,255,255,.85); }
+.career-banner .rung.is-here { background: var(--navy); color: #fff; border-color: var(--navy); }
+.growth { background: #fff8dc; border: 3px solid var(--yellow); border-radius: 14px; padding: 8px 14px; margin: 10px 0; text-align: left; }
+.growth h3 { margin: 0 0 4px; }
+.growth .plain-list { margin: 0; }
+.stat-cards-wrap { max-width: 900px; margin: 14px auto 0; }
+.stat-cards-wrap h3 { margin: 0; }
+.stat-cards-wrap .pill { min-height: 40px; padding: 4px 14px; font-size: 15px; }
+.stat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 10px; }
+.player-stat-card { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.player-stat-card.is-sub { opacity: .8; }
+.psc-top { display: flex; align-items: center; gap: 10px; }
+.psc-skills { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .9rem; }
+.psc-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .85rem; color: #3a4a63; }
+.psc-stats strong { color: var(--navy); }

@@ -8,7 +8,7 @@ import { Weather, resolveConditions, type Conditions, type WeatherChoice } from 
 import { PlayerModel, type AnimState } from './PlayerModel';
 import type { Expression } from './playerFace';
 import type { Kit } from '../data/types';
-import { MatchSim, type SimConfig, type SimPlayer, type Side } from './sim';
+import { MatchSim, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
 import { getSettings } from '../data/storage';
@@ -33,6 +33,8 @@ export interface MatchResult {
   home: SimConfig['home'];
   away: SimConfig['away'];
   stats: { touches: [number, number]; distance: [number, number] };
+  /** What each starter did, by player id. */
+  players: Record<string, PlayerMatchStats>;
   /** Penalty-by-penalty record in a shoot-out (true = scored). */
   shootout: [boolean[], boolean[]] | null;
   trainingPoints: number;
@@ -207,6 +209,7 @@ export class MatchScene {
       home: this.sim.config.home,
       away: this.sim.config.away,
       stats: { touches, distance },
+      players: this.sim.playerStats(),
       shootout: this.sim.shootout ? [[...this.sim.shootout.results[0]], [...this.sim.shootout.results[1]]] : null,
       trainingPoints: this.sim.trainingPoints,
       twoPlayer: this.sim.config.humanSide2 != null,

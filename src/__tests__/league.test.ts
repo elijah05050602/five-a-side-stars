@@ -6,7 +6,7 @@ import { team } from './helpers';
 const you = team('you', 'Your Team');
 
 function result(home: LeagueState['teams'][number], away: LeagueState['teams'][number], score: [number, number]): MatchResult {
-  return { mode: 'match', score, goals: [], home, away, stats: { touches: [0, 0], distance: [0, 0] }, shootout: null, trainingPoints: 0, twoPlayer: false };
+  return { mode: 'match', score, goals: [], home, away, stats: { touches: [0, 0], distance: [0, 0] }, players: {}, shootout: null, trainingPoints: 0, twoPlayer: false };
 }
 
 /** Hand-write every fixture's score so the table is predictable. */
