@@ -33,6 +33,8 @@ export interface StartOptions {
 export interface Router {
   go(screen: Screen): void;
   startMatch(o: StartOptions): void;
+  /** The guided first-time kick-about. */
+  startTutorial(): void;
 }
 
 export type SetupMode = Exclude<SimMode, 'tutorial'> | 'tournament' | 'league';
@@ -96,9 +98,12 @@ function renderMenu(root: HTMLElement, router: Router): void {
           <button class="btn btn-ghost" id="m-teams">👕 My Teams</button>
           <button class="btn btn-ghost" id="m-album">📒 Stickers <span class="pill-badge">${getProgress().stickers.length}/${STICKERS.length}</span></button>
         </div>
-        <button class="btn btn-ghost" id="m-parents">🛡️ Parents</button>
+        <div class="menu-row">
+          <button class="btn btn-ghost" id="m-howto">🎓 How to play</button>
+          <button class="btn btn-ghost" id="m-parents">🛡️ Parents</button>
+        </div>
       </div>
-      <p class="hint">Keyboard: arrows or WASD to run · hold Space to shoot · Z pass · Shift sprint · Q switch</p>
+      <p class="hint">Keyboard: arrows or WASD to run · hold Space to shoot · Z pass · Shift sprint · Q switch · C trick</p>
       <p class="version">v${pkg.version} · works offline once loaded · no accounts, no adverts</p>
     </div>`;
   root.querySelector('#m-play')!.addEventListener('click', () => router.go({ name: 'setup' }));
@@ -109,6 +114,7 @@ function renderMenu(root: HTMLElement, router: Router): void {
   root.querySelector('#m-teams')!.addEventListener('click', () => router.go({ name: 'teams' }));
   root.querySelector('#m-album')!.addEventListener('click', () => router.go({ name: 'album' }));
   root.querySelector('#m-parents')!.addEventListener('click', () => router.go({ name: 'parents' }));
+  root.querySelector('#m-howto')!.addEventListener('click', () => router.startTutorial());
 }
 
 // ---------- Teams list ----------

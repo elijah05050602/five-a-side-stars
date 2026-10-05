@@ -327,3 +327,25 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
 .logo-row { align-items: center; gap: 10px; margin: 6px 0 10px; }
 .logo-mini .btn-small { padding: 2px 6px; font-size: .75rem; border-width: 2px; margin-left: 4px; vertical-align: middle; }
 .league-table .t-name .logo-controls { display: inline-flex; }
+
+/* First-time tutorial */
+.hud-tutorial .scoreboard { display: none; }
+.tut-card { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100vw - 32px - 460px)); text-align: center; border: 3px solid var(--navy); box-shadow: 0 4px 0 var(--navy); padding: 12px 16px; pointer-events: none; }
+.tut-card[hidden] { display: none; }
+.tut-card h3 { margin: 4px 0 2px; font-size: 20px; color: var(--navy); }
+.tut-card p { margin: 0; font-size: 15px; line-height: 1.35; color: var(--navy); }
+.tut-card kbd { display: inline-block; padding: 0 6px; border: 2px solid var(--navy); border-radius: 6px; background: var(--yellow); font-family: var(--font); font-weight: 700; font-size: 13px; box-shadow: 0 2px 0 var(--navy); }
+.tut-dots { display: flex; gap: 6px; justify-content: center; }
+.tut-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--navy); background: var(--white); }
+.tut-dot.is-done { background: var(--green); }
+.tut-dot.is-now { background: var(--yellow); }
+.tut-praise { font-size: 22px !important; font-weight: 700; padding: 6px 0; }
+.tut-skip { position: absolute; top: 14px; right: 80px; padding: 10px 14px; font-size: 14px; }
+.tut-skip[hidden] { display: none; }
+@media (max-width: 1000px) {
+  .tut-skip-long { display: none; }
+  .tut-card { width: max(280px, calc(100vw - 420px)); padding: 8px 12px; }
+  .tut-card h3 { font-size: 16px; }
+  .tut-card p { font-size: 13px; }
+}
+@media (max-width: 720px) { .tut-card { top: 128px; width: calc(100vw - 32px); } }

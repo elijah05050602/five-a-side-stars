@@ -2,12 +2,14 @@ import * as THREE from 'three';
 import { BallModel } from './BallModel';
 import { Input, P1_KEYS, P2_KEYS, SOLO_KEYS } from './input';
 import { buildPitch } from './Pitch';
+import { toonMaterial } from './toon';
 import { PlayerModel, type AnimState } from './PlayerModel';
 import type { Expression } from './playerFace';
 import { MatchSim, RUNOFF_END, RUNOFF_SIDE, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
 import { getSettings } from '../data/storage';
+import { TutorialCoach } from './tutorial';
 
 export type SimMode = NonNullable<SimConfig['mode']>;
 
@@ -49,6 +51,9 @@ export class MatchScene {
   private readonly camPos = new THREE.Vector3();
   private disposed = false;
   private readonly onResize = () => this.resize();
+  /** First-time tutorial coach and its glowing star, when this is the tutorial. */
+  private readonly coach: TutorialCoach | null = null;
+  private readonly marker = new THREE.Group();
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, config: SimConfig, private readonly onFinish: (r: MatchResult) => void, private readonly onQuit: () => void) {
     this.sim = new MatchSim(config);
@@ -94,13 +99,26 @@ export class MatchScene {
     }
     this.ball = new BallModel(this.sim.ball.radius);
     this.scene.add(this.ball.group);
+    if (this.sim.mode === 'tutorial') {
+      this.coach = new TutorialCoach(this.sim);
+      const gold = new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.75, 1.0, 40), gold);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.02;
+      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.45), toonMaterial({ color: 0xffd23f }));
+      star.position.y = 2.1;
+      star.name = 'star';
+      this.marker.add(ring, star);
+      this.marker.visible = false;
+      this.scene.add(this.marker);
+    }
 
     this.hud = renderHud(uiRoot, this.sim, {
       onPause: () => this.sim.togglePause(),
       onResume: () => this.sim.togglePause(),
       onQuit: () => { this.dispose(); this.onQuit(); },
       onFinish: () => { const r = this.result(); this.dispose(); this.onFinish(r); },
-    });
+    }, this.coach ?? undefined);
     this.input.attachJoystick(this.hud.joystickZone, this.hud.joystickKnob);
     this.input.attachButton(this.hud.btnShoot, 'shoot');
     this.input.attachButton(this.hud.btnPass, 'pass');
@@ -168,6 +186,17 @@ export class MatchScene {
       steps++;
     }
     for (const ev of this.sim.events) this.sfx.play(ev.type);
+    if (this.coach) {
+      this.coach.update(dt, this.sim.events);
+      const m = this.coach.marker;
+      this.marker.visible = m !== null;
+      if (m) {
+        this.marker.position.set(m.x, 0, m.z);
+        const star = this.marker.getObjectByName('star')!;
+        star.rotation.y = now / 400;
+        star.position.y = 2.1 + Math.sin(now / 250) * 0.15;
+      }
+    }
     this.hud.update(this.sim, this.sim.events);
     this.sim.events.length = 0;
 
@@ -208,8 +237,10 @@ export class MatchScene {
         ? new THREE.Vector3(b.pos.x * 0.6 + c1.pos.x * 0.2 + c2.pos.x * 0.2, 0, b.pos.z * 0.6 + c1.pos.z * 0.2 + c2.pos.z * 0.2)
         : new THREE.Vector3(b.pos.x * 0.65 + c1.pos.x * 0.35, 0, b.pos.z * 0.65 + c1.pos.z * 0.35))
       : new THREE.Vector3(b.pos.x, 0, b.pos.z);
-    focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.32, this.sim.length * 0.32);
-    focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.2, this.sim.width * 0.2);
+    // Set pieces happen out by the lines, so let the camera follow further out for them.
+    const wide = this.sim.phase === 'setpiece' ? 1.25 : 1;
+    focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.32 * wide, this.sim.length * 0.32 * wide);
+    focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.2 * wide * wide, this.sim.width * 0.2 * wide * wide);
     this.camTarget.lerp(focus, 1 - Math.pow(0.02, dt));
     const goal = this.cameraGoal(this.camTarget);
     this.camPos.lerp(goal, 1 - Math.pow(0.02, dt));

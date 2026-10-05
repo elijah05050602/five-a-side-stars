@@ -233,7 +233,7 @@ export class MatchSim {
       this.setupPenalty(0);
     } else if (config.mode === 'tutorial') {
       this.setupKickoff(0);
-      this.tutorialHero = this.ball.owner;
+      this.tutorialHero = this.ball.owner ?? this.teamOf(0).find((p) => !p.isKeeper) ?? null;
       this.phase = 'play';
     } else {
       this.setupKickoff(config.mode === 'training' && config.humanSide !== null ? config.humanSide : 0);
@@ -807,7 +807,7 @@ export class MatchSim {
         targetX = own + dir * out;
         targetZ = clamp(b.owner.pos.z * 0.5, -this.goalWidth / 2, this.goalWidth / 2);
       }
-    } else if (b.owner === null && len(b.vel) < 4 && dist(b.pos, p.pos) < 3 * this.stats.scale && Math.abs(b.pos.x - own) < 4.5) {
+    } else if (this.mode !== 'tutorial' && b.owner === null && len(b.vel) < 4 && dist(b.pos, p.pos) < 3 * this.stats.scale && Math.abs(b.pos.x - own) < 4.5) {
       // Come and collect a slow loose ball near the goal if we are closest to it.
       const opp = this.nearest(this.teamOf((1 - p.side) as Side), b.pos);
       if (!opp || dist(opp.pos, b.pos) > dist(p.pos, b.pos)) { targetX = b.pos.x; targetZ = b.pos.z; }
@@ -1030,6 +1030,7 @@ export class MatchSim {
     if (b.owner) {
       const o = b.owner;
       if (o.isKeeper && this.phase !== 'kickoff') return; // a keeper holding the ball cannot be tackled
+      if (this.mode === 'tutorial') return; // nobody tackles while you learn
       // Tackles: an opponent close to the ball may win it.
       for (const p of this.players) {
         if (p.side === o.side || p.kickCooldown > 0) continue;

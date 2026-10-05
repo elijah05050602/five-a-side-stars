@@ -1,4 +1,5 @@
 import type { MatchSim, SimEvent } from '../game/sim';
+import { TUTORIAL_STEPS, type TutorialCoach, type TutorialStep } from '../game/tutorial';
 import { getSettings } from '../data/storage';
 import { badgeSvg } from './kitPreview';
 
@@ -36,11 +37,12 @@ function pensDots(res: boolean[]): string {
   return out;
 }
 
-export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void }): HudRefs {
+export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void }, coach?: TutorialCoach): HudRefs {
   const [home, away] = sim.teams;
   const mode = sim.mode;
   root.innerHTML = `
     <div class="hud hud-${mode}">
+      ${coach ? `<div class="tut-card card" id="tut-card"></div><button class="btn btn-ghost tut-skip" id="tut-skip">Skip<span class="tut-skip-long"> tutorial</span> ⏭</button>` : ''}
       <div class="scoreboard">
         ${mode === 'training' ? `
         <div class="sb-team sb-home">${badgeSvg(home.badge, 30)}<span class="sb-name">${esc(home.short)}</span></div>
@@ -99,6 +101,36 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   let lastPens = -1;
   let lastTaking: number | null = null;
   pauseBtn.addEventListener('click', () => cb.onPause());
+  const tutCard = root.querySelector<HTMLElement>('#tut-card');
+  root.querySelector('#tut-skip')?.addEventListener('click', () => cb.onQuit());
+  let tutKey = '';
+  const renderTutorial = (c: TutorialCoach) => {
+    const key = `${c.step}|${c.praise}`;
+    if (!tutCard || key === tutKey) return;
+    tutKey = key;
+    const dots = TUTORIAL_STEPS.map((_, i) => `<i class="tut-dot ${i < c.index ? 'is-done' : i === c.index ? 'is-now' : ''}"></i>`).join('');
+    if (c.step === 'done') {
+      tutCard.hidden = true;
+      overlay.hidden = false;
+      overlay.innerHTML = `
+        <div class="card overlay-card">
+          <h2>You're ready! ⭐</h2>
+          <p class="muted">Run, pass, shoot and show off your tricks. Corners, throw-ins and free kicks work the same way: aim, then pass or shoot.</p>
+          <div class="row">
+            <button class="btn btn-primary" id="tut-play">Play a match ⚽</button>
+            <button class="btn btn-ghost" id="tut-lobby">Back to the lobby</button>
+          </div>
+        </div>`;
+      overlay.querySelector('#tut-play')!.addEventListener('click', () => cb.onFinish());
+      overlay.querySelector('#tut-lobby')!.addEventListener('click', () => cb.onQuit());
+      root.querySelector<HTMLElement>('#tut-skip')!.hidden = true;
+      return;
+    }
+    const t = TUTORIAL_TEXT[c.step];
+    tutCard.innerHTML = c.praise
+      ? `<div class="tut-dots">${dots}</div><p class="tut-praise">${esc(c.praise)}</p>`
+      : `<div class="tut-dots">${dots}</div><h3>${t.title}</h3><p>${touch ? t.touch : t.keys}</p>`;
+  };
 
   const showBanner = (html: string, ms: number) => {
     banner.innerHTML = html;
@@ -113,7 +145,9 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       overlay.innerHTML = `
         <div class="card overlay-card">
           <h2>Paused</h2>
-          ${mode === 'shootout'
+          ${mode === 'tutorial'
+            ? '<p class="muted">Learning the ropes. Carry on, or skip and go straight to the lobby.</p>'
+            : mode === 'shootout'
             ? '<p class="muted">Taking a penalty: hold shoot to power up, aim with the stick, release to kick. In goal: push left or right to dive.</p>'
             : mode === 'training'
               ? '<p class="muted">Collect the ball, run at goal and hold shoot to power up. Hard shots that fly in are worth 2 points.</p>'
@@ -122,7 +156,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
                 : '<p class="muted">Arrow keys or WASD to move. Hold Space to power up a shot and release to shoot, Z to pass, Shift to sprint, Q to switch player, C for a step-over or nutmeg.</p>'}
           <div class="row">
             <button class="btn btn-primary" id="ov-resume">Keep playing</button>
-            <button class="btn btn-ghost" id="ov-quit">Quit match</button>
+            <button class="btn btn-ghost" id="ov-quit">${mode === 'tutorial' ? 'Skip tutorial' : 'Quit match'}</button>
           </div>
         </div>`;
       overlay.querySelector('#ov-resume')!.addEventListener('click', () => cb.onResume());
@@ -223,8 +257,9 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       }
       if (s.phase !== lastPhase) {
         lastPhase = s.phase;
-        renderOverlay(s);
+        if (!(coach && coach.step === 'done')) renderOverlay(s);
       }
+      if (coach) renderTutorial(coach);
     },
     destroy() {
       window.clearTimeout(bannerTimer);
@@ -237,6 +272,13 @@ const touch = typeof window !== 'undefined' && window.matchMedia('(pointer: coar
 const P1_TIP_KEYS = { shoot: 'Space', pass: 'Z' };
 const P2_TIP_KEYS = { shoot: 'Enter', pass: '/' };
 const TOUCH_TIP_KEYS = { shoot: 'Shoot', pass: 'Pass' };
+
+const TUTORIAL_TEXT: Record<Exclude<TutorialStep, 'done'>, { title: string; keys: string; touch: string }> = {
+  move: { title: '1. Run with the ball', keys: 'Use the <kbd>arrow keys</kbd> or <kbd>WASD</kbd> to dribble to the yellow star.', touch: 'Drag the joystick on the left to dribble to the yellow star.' },
+  pass: { title: '2. Pass to your team-mate', keys: 'Point towards your team-mate and press <kbd>Z</kbd> to pass.', touch: 'Point the joystick towards your team-mate and tap <b>Pass</b>.' },
+  shoot: { title: '3. Score a goal!', keys: 'Run at goal, hold <kbd>Space</kbd> to power up, then let go to shoot.', touch: 'Run at goal, hold <b>Shoot</b> to power up, then let go.' },
+  trick: { title: '4. Show off a trick', keys: 'Press <kbd>C</kbd> for a step-over. With a defender right in front, it\'s a nutmeg!', touch: 'Tap <b>Trick</b> for a step-over. With a defender right in front, it\'s a nutmeg!' },
+};
 
 const GOAL_LINES = ['What a strike!', 'Top corner!', 'The keeper had no chance!', 'Cool as you like!', 'Smashed it!', 'Into the net!', 'Goal of the season?', 'Brilliant finish!'];
 const SAVE_LINES = ['What a stop!', 'Fingertips!', 'Safe hands!', 'Denied!'];
