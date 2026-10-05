@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BallModel } from './BallModel';
 import { Input, P1_KEYS, P2_KEYS, SOLO_KEYS } from './input';
 import { buildPitch, pitchExtras } from './Pitch';
+import { Crowd } from './Crowd';
 import { Commentator } from './commentary';
 import { Weather, resolveConditions, type Conditions, type WeatherChoice } from './Weather';
 import { PlayerModel, type AnimState } from './PlayerModel';
@@ -56,6 +57,7 @@ export class MatchScene {
   private readonly input2: Input | null;
   private readonly hud: HudRefs;
   private readonly sfx = new Sfx();
+  private readonly crowd: Crowd;
   private readonly commentator: Commentator;
   readonly conditions: Conditions;
   private readonly weather: Weather;
@@ -68,6 +70,7 @@ export class MatchScene {
   private acc = 0;
   private readonly camTarget = new THREE.Vector3();
   private readonly camPos = new THREE.Vector3();
+  private readonly camLook = new THREE.Vector3();
   private disposed = false;
   private readonly onResize = () => this.resize();
 
@@ -112,6 +115,12 @@ export class MatchScene {
     this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, touch);
     this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, 0, 0);
 
+    this.crowd = new Crowd(this.sim, { touch });
+    this.crowd.setConditions({ night: this.conditions.time === 'night', weather: this.conditions.weather });
+    this.scene.add(this.crowd.group);
+    // Dev builds only: lets a test script poke the crowd (window.__crowd.onEvent({ type: 'goal', side: 0 })).
+    if (import.meta.env.DEV) (window as unknown as { __crowd: Crowd }).__crowd = this.crowd;
+
     const ringColours = teamRingColours(this.sim.teams[0].kit, this.sim.teams[1].kit);
     for (const p of this.sim.players) {
       const team = this.sim.teams[p.side];
@@ -141,6 +150,7 @@ export class MatchScene {
     this.camTarget.set(0, 0, 0);
     this.camPos.copy(this.cameraGoal(this.camTarget));
     this.camera.position.copy(this.camPos);
+    this.camLook.set(0, 0.5, 0);
     this.last = performance.now();
     this.sfx.start(this.conditions.weather);
     this.raf = requestAnimationFrame(this.frame);
@@ -234,6 +244,7 @@ export class MatchScene {
     if (replaying) this.acc = 0;
     for (const ev of this.sim.events) {
       this.sfx.play(ev);
+      this.crowd.onEvent(ev);
       if (ev.type === 'goal') {
         this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, this.sim.score[0], this.sim.score[1]);
         this.extras.nets[ev.side === 0 ? 1 : 0]?.hit(this.sim.ball.pos.z, Math.hypot(this.sim.ball.vel.x, this.sim.ball.vel.z));
@@ -247,6 +258,7 @@ export class MatchScene {
     if (quip) this.hud.say(quip);
     this.sfx.update(dt, this.sim);
     this.weather.update(dt);
+    this.crowd.update(dt);
     for (const n of this.extras.nets) n.update(dt);
 
     // Sync models
@@ -297,10 +309,16 @@ export class MatchScene {
     focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.32, this.sim.length * 0.32);
     focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.2, this.sim.width * 0.2);
     this.camTarget.lerp(focus, 1 - Math.pow(0.02, dt));
-    const goal = this.cameraGoal(this.camTarget);
-    this.camPos.lerp(goal, 1 - Math.pow(0.02, dt));
+    // After a goal in a match (and after the replay, which plays from 1.1s), swing round to the
+    // scoring team's fans going wild, then back for kick-off.
+    const scorer = this.sim.goals[this.sim.goals.length - 1];
+    const crowdShot = this.sim.mode === 'match' && this.sim.phase === 'goal' && this.sim.phaseTimer > 1.2 && scorer
+      ? this.crowd.celebrationShot(scorer.side) : null;
+    const k = 1 - Math.pow(crowdShot ? 0.01 : 0.02, dt);
+    this.camPos.lerp(crowdShot ? crowdShot.pos : this.cameraGoal(this.camTarget), k);
+    this.camLook.lerp(crowdShot ? crowdShot.look : new THREE.Vector3(this.camTarget.x, 0.5, this.camTarget.z), k);
     this.camera.position.copy(this.camPos);
-    this.camera.lookAt(this.camTarget.x, 0.5, this.camTarget.z);
+    this.camera.lookAt(this.camLook);
 
     this.renderer.render(this.scene, this.camera);
   };
@@ -316,6 +334,7 @@ export class MatchScene {
     this.weather.dispose();
     this.hud.destroy();
     this.models.forEach((m) => m.dispose());
+    this.crowd.dispose();
     this.renderer.dispose();
     this.renderer.clear();
   }
