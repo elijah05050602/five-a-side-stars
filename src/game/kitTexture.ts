@@ -7,8 +7,9 @@ const cache = new Map<string, THREE.CanvasTexture>();
  * Draws a shirt texture: the kit pattern plus the shirt number on the back.
  * The texture wraps around a cylinder, so u=0..1 goes once around the body;
  * the number sits in the half that faces away from the player's facing direction.
+ * Pass null for a plain replica shirt with no number (the crowd wears these).
  */
-export function kitTexture(kit: Kit, number: number): THREE.CanvasTexture {
+export function kitTexture(kit: Kit, number: number | null): THREE.CanvasTexture {
   const key = `${kit.pattern}|${kit.shirt}|${kit.shirt2}|${number}`;
   const hit = cache.get(key);
   if (hit) return hit;
@@ -77,16 +78,18 @@ export function kitTexture(kit: Kit, number: number): THREE.CanvasTexture {
   ctx.fillStyle = 'rgba(0,0,0,0.12)';
   ctx.fillRect(0, 0, size, 10);
   // Number on the back (back = u around 0.5 for our cylinder orientation)
-  const text = String(number);
-  const numberColour = contrast(kit.shirt);
-  ctx.font = `bold ${size * 0.5}px Fredoka, "Arial Rounded MT Bold", Arial, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.lineWidth = 14;
-  ctx.strokeStyle = numberColour === '#ffffff' ? '#1b2a41' : '#ffffff';
-  ctx.strokeText(text, size * 0.5, size * 0.48);
-  ctx.fillStyle = numberColour;
-  ctx.fillText(text, size * 0.5, size * 0.48);
+  if (number !== null) {
+    const text = String(number);
+    const numberColour = contrast(kit.shirt);
+    ctx.font = `bold ${size * 0.5}px Fredoka, "Arial Rounded MT Bold", Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = numberColour === '#ffffff' ? '#1b2a41' : '#ffffff';
+    ctx.strokeText(text, size * 0.5, size * 0.48);
+    ctx.fillStyle = numberColour;
+    ctx.fillText(text, size * 0.5, size * 0.48);
+  }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;

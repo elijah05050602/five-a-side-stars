@@ -4,7 +4,7 @@ import { cloneRig, loadPlayerAsset, playerAssetNow, type PlayerAsset } from './p
 import { contrastColour, numberTexture, playerAtlas } from './playerAtlas';
 import { faceTexture, type Expression } from './playerFace';
 import { ProceduralPlayerModel } from './ProceduralPlayerModel';
-import { addOutline, addSkinnedOutline, toonMaterial } from './toon';
+import { addOutline, addSkinnedOutline, smoothOutlineNormals, toonMaterial } from './toon';
 
 /** Models are drawn bigger than their physical size so the kids read clearly from the camera. */
 export const MODEL_SCALE = 1.35;
@@ -76,6 +76,13 @@ export class PlayerModel {
   readonly group = new THREE.Group();
   private readonly body = new THREE.Group();
   private readonly ring: THREE.Mesh;
+  /** Always-on ring in the team's colour, so sides are easy to tell apart from above. */
+  private readonly teamRing: THREE.Mesh;
+  /** Bobbing arrow over the controlled player's head. */
+  private readonly marker: THREE.Mesh;
+  private readonly shadow: THREE.Mesh;
+  private readonly baseScale: number;
+  private markerT = 0;
   private readonly material: THREE.MeshToonMaterial;
   private readonly faceMat: THREE.MeshToonMaterial;
   private readonly hairMat: THREE.MeshToonMaterial;
@@ -120,21 +127,33 @@ export class PlayerModel {
     this.isKeeper = player.position === 'GK';
     this.scale = scale;
     this.material = toonMaterial({ map: this.atlas() });
-    this.faceMat = toonMaterial({ map: faceTexture(this.skin, 'neutral') });
+    this.faceMat = toonMaterial({ map: faceTexture(this.skin, 'neutral', 0, 0, this.hair) });
     this.hairMat = toonMaterial({ color: this.hair });
 
     const s = scale * MODEL_SCALE;
+    this.baseScale = s;
     const shadow = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ map: shadowTexture(), transparent: true, depthWrite: false }));
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.012;
     shadow.scale.setScalar(s);
     shadow.renderOrder = -1;
-    this.ring = new THREE.Mesh(new THREE.RingGeometry(0.44, 0.56, 32), new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.9, depthWrite: false }));
+    this.shadow = shadow;
+    this.teamRing = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.5, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false }));
+    this.teamRing.rotation.x = -Math.PI / 2;
+    this.teamRing.position.y = 0.016;
+    this.teamRing.scale.setScalar(s);
+    // The controlled player's ring: bigger, brighter and pulsing, outside the team ring.
+    this.ring = new THREE.Mesh(new THREE.RingGeometry(0.56, 0.72, 40), new THREE.MeshBasicMaterial({ color: 0xff8a00, transparent: true, opacity: 0.95, depthWrite: false }));
     this.ring.rotation.x = -Math.PI / 2;
     this.ring.position.y = 0.02;
     this.ring.scale.setScalar(s);
     this.ring.visible = false;
-    this.group.add(shadow, this.ring, this.body);
+    this.marker = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.3, 4), new THREE.MeshBasicMaterial({ color: 0xff8a00 }));
+    this.marker.rotation.x = Math.PI;
+    this.marker.position.y = 1.95 * s;
+    this.marker.scale.setScalar(s);
+    this.marker.visible = false;
+    this.group.add(shadow, this.teamRing, this.ring, this.marker, this.body);
 
     const ready = playerAssetNow();
     if (ready) this.buildRig(ready);
@@ -156,13 +175,14 @@ export class PlayerModel {
     // Collect first: the outline is itself a skinned child, and traverse would walk into it.
     const skinned: THREE.SkinnedMesh[] = [];
     rig.traverse((o) => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) skinned.push(o as THREE.SkinnedMesh); });
+    smoothOutlineNormals(skinned);
     for (const m of skinned) {
       const isFace = (m.material as THREE.Material).name === 'face';
       m.material = isFace ? this.faceMat : this.material;
       m.castShadow = true;
       m.receiveShadow = false;
       m.frustumCulled = false;
-      if (!isFace) addSkinnedOutline(m, 0.028);
+      addSkinnedOutline(m, 0.028);
     }
     for (const name of ['Head_plain', 'Head_short', 'Head_long'] as Head[]) {
       const node = rig.getObjectByName(name);
@@ -192,8 +212,8 @@ export class PlayerModel {
 
   private useFallback(): void {
     this.fallback = new ProceduralPlayerModel({ ...this.player, number: this.number, skin: this.skin, hair: this.hair, boots: this.boots, hairStyle: this.hairStyle }, this.kit, this.scale);
-    // The fallback has its own shadow and ring; hide ours.
-    this.group.children.forEach((c) => { if (c !== this.body) c.visible = false; });
+    // The fallback has its own shadow; the rings and marker here still apply.
+    this.shadow.visible = false;
     this.group.add(this.fallback.group);
     this.fallback.setFacing(this.facing);
   }
@@ -275,10 +295,15 @@ export class PlayerModel {
     this.applyBuild();
   }
 
+  /** Colour of the always-on ring under the feet (the team's identifying colour). */
+  setTeamColour(colour: THREE.ColorRepresentation): void {
+    (this.teamRing.material as THREE.MeshBasicMaterial).color.set(colour);
+  }
+
   setSelected(on: boolean, colour?: number): void {
-    if (this.fallback) { this.fallback.setSelected(on, colour); return; }
     this.ring.visible = on;
-    if (colour !== undefined) (this.ring.material as THREE.MeshBasicMaterial).color.set(colour);
+    this.marker.visible = on;
+    if (colour !== undefined) { (this.ring.material as THREE.MeshBasicMaterial).color.set(colour); (this.marker.material as THREE.MeshBasicMaterial).color.set(colour); }
   }
 
   setFacing(yaw: number): void {
@@ -300,12 +325,19 @@ export class PlayerModel {
     const key = `${expr}|${gx}|${gy}`;
     if (key === this.faceKey) return;
     this.faceKey = key;
-    this.faceMat.map = faceTexture(this.skin, expr, gx, gy);
+    this.faceMat.map = faceTexture(this.skin, expr, gx, gy, this.hair);
     this.faceMat.needsUpdate = true;
   }
 
   /** Drives the clips and the procedural layer (leans, hops, slides) from the sim state. */
   animate(dt: number, st: AnimState): void {
+    if (this.ring.visible) {
+      this.markerT += dt;
+      const s = this.baseScale;
+      this.ring.scale.setScalar(s * (1 + 0.05 * Math.sin(this.markerT * 6)));
+      this.marker.position.y = s * (1.95 + 0.06 * Math.sin(this.markerT * 5));
+      this.marker.rotation.y += dt * 2;
+    }
     if (this.fallback) { this.fallback.animate(st.speed, st.kick, st.dive, st.diveDir, dt, st.scale, st.wobble); return; }
     if (!this.mixer) return;
     const scale = Math.max(0.4, st.scale);
@@ -409,6 +441,10 @@ export class PlayerModel {
     this.hairMat.dispose();
     (this.ring.material as THREE.Material).dispose();
     this.ring.geometry.dispose();
+    (this.teamRing.material as THREE.Material).dispose();
+    this.teamRing.geometry.dispose();
+    (this.marker.material as THREE.Material).dispose();
+    this.marker.geometry.dispose();
     this.fallback?.dispose();
   }
 }

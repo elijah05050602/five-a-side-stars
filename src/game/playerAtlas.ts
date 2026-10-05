@@ -31,7 +31,6 @@ export function playerAtlas(kit: Kit, look: LookColours): THREE.CanvasTexture {
   fill('brow', look.hair);
   fill('eyes', '#1b2a41');
   fill('shirt', kit.shirt);
-  fill('shirt2', kit.shirt2);
   fill('shorts', kit.shorts);
 
   // Upper leg strip: the shorts reach a little below the hem, then bare leg.
@@ -77,11 +76,11 @@ export function playerAtlas(kit: Kit, look: LookColours): THREE.CanvasTexture {
     ctx.restore();
   }
 
-  // Kit pattern inside the shirt cell. In the model's UVs, v runs down the chest: the top 22% is
+  // Kit pattern inside the shirt cell. In the model's UVs, v runs down the chest: the top 24% is
   // the rolled collar (painted in the second colour), the middle is the shirt, and the bottom 44%
   // is the tunic ring under the waistband, painted as shorts so the shirt reads as tucked in.
   const [sx, sy] = CELL.shirt;
-  const T = C * 0.22, H = C * 0.56;
+  const T = C * 0.24, H = C * 0.56;
   ctx.save();
   ctx.translate(sx * C, sy * C);
   ctx.fillStyle = kit.shorts; ctx.fillRect(0, H, C, C - H);
@@ -89,7 +88,7 @@ export function playerAtlas(kit: Kit, look: LookColours): THREE.CanvasTexture {
   ctx.beginPath(); ctx.rect(0, T, C, H - T); ctx.clip();
   ctx.fillStyle = kit.shirt2;
   switch (kit.pattern) {
-    case 'stripes': for (let i = 0; i < 4; i++) ctx.fillRect(i * (C / 4), T, C / 8, H - T); break;
+    case 'stripes': for (let i = 0; i < 4; i++) ctx.fillRect(i * (C / 4) + C / 16, T, C / 8, H - T); break;
     case 'hoops': for (let i = 0; i < 3; i++) ctx.fillRect(0, T + (H - T) * 0.12 + i * ((H - T) / 3), C, (H - T) / 6); break;
     case 'halves': ctx.fillRect(0, T, C / 2, H - T); break;
     case 'sash': ctx.beginPath(); ctx.moveTo(C * 0.45, T); ctx.lineTo(C * 0.8, T); ctx.lineTo(C * 0.35, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill(); break;
@@ -97,6 +96,9 @@ export function playerAtlas(kit: Kit, look: LookColours): THREE.CanvasTexture {
     default: break;
   }
   ctx.restore();
+  // The torso's u runs round the body and wraps at the back, where triangles spill into the next
+  // cell, so the shirt is repeated there.
+  ctx.drawImage(canvas, sx * C, sy * C, C, C, (sx + 1) * C, sy * C, C, C);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.flipY = false;

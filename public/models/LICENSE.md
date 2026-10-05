@@ -14,6 +14,11 @@ Changes made for Five-a-Side Stars (see `tools/build-player-model.mjs`):
 - scarf, belt buckle, hip pouches and the ragged tunic hem cut away; the belt ring becomes the
   shorts' waistband, and the legs are mapped as strips so shorts, socks and boots can be painted
   at exact heights
+- the tunic's rolled collar is cut off and a new chest patch, collar band and lid are built in
+  its place (a round crew neck); every other opening left by the cuts is capped so the outline
+  hull never shows through, with eye sockets mapped onto the painted face's eyes
+- the shoulder straps are removed and the torso is UV-mapped by angle and height so kit
+  patterns run straight
 - only the animations the game uses are kept; geometry is quantised
 
 Thank you Kay for making these free for everyone.

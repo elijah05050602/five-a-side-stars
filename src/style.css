@@ -205,6 +205,18 @@ input[type='number'] { max-width: 120px; text-align: center; }
   .bar { width: 130px; }
 }
 
+/* Commentary ticker and instant replay */
+.hud-comm { position: absolute; left: 50%; bottom: 18px; transform: translate(-50%, 30px); opacity: 0; transition: transform .3s cubic-bezier(.2,1.4,.4,1), opacity .3s; display: flex; align-items: center; gap: 8px; max-width: min(92vw, 640px); background: rgba(27,42,65,.82); color: #fff; font-weight: 700; font-size: 18px; padding: 8px 16px; border-radius: 999px; border: 2px solid rgba(255,255,255,.35); pointer-events: none; text-align: center; }
+.hud-comm.show { opacity: 1; transform: translate(-50%, 0); }
+.hud-comm-mic { font-size: 20px; }
+@media (pointer: coarse) { .hud-comm { bottom: auto; top: 112px; font-size: 15px; } }
+.replay-frame { position: absolute; inset: 0; pointer-events: none; }
+.replay-frame::before, .replay-frame::after { content: ''; position: absolute; left: 0; right: 0; height: 9vh; background: #0b1220; }
+.replay-frame::before { top: 0; }
+.replay-frame::after { bottom: 0; }
+.replay-label { position: absolute; top: calc(9vh + 12px); right: 18px; color: #fff; font-weight: 700; font-size: 22px; letter-spacing: 2px; background: #e63946; padding: 4px 12px; border-radius: 8px; animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+
 /* Phase 3 additions */
 .badge { vertical-align: middle; }
 .pill-badge { padding: 4px 10px; min-height: 48px; }
