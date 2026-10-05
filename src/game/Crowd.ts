@@ -7,7 +7,7 @@ import { faceTexture, type Expression } from './playerFace';
 import { kitTexture } from './kitTexture';
 import { getSettings } from '../data/storage';
 
-export type CrowdWeather = 'clear' | 'rain' | 'snow';
+export type CrowdWeather = 'clear' | 'cloudy' | 'rain' | 'snow';
 export interface CrowdConditions { night?: boolean; weather?: CrowdWeather }
 
 /** What one side of the crowd is doing right now. Neutral fans have their own. */
