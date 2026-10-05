@@ -35,6 +35,11 @@ export interface SimPlayer {
   distanceRun: number;
   isKeeper: boolean;
   speedMul: number;
+  tackleTimer: number;
+  /** Seconds this player has held the ball in the current spell. */
+  holdTime: number;
+  /** 0..1 sprint energy (human-controlled player only). */
+  stamina: number;
 }
 
 export interface SimBall {
@@ -47,6 +52,12 @@ export interface SimBall {
   /** Player currently dribbling the ball, if any. */
   owner: SimPlayer | null;
   lastTouch: SimPlayer | null;
+  /** Last player who deliberately kicked the ball (decides who scored). */
+  lastKick: SimPlayer | null;
+  /** Increments on every kick so a keeper gets one attempt per shot. */
+  flightId: number;
+  /** flightId the keeper has already tried (and failed) to save. */
+  keeperTried: number;
 }
 
 export type Phase = 'kickoff' | 'play' | 'goal' | 'halftime' | 'fulltime' | 'paused';
@@ -54,7 +65,7 @@ export type Phase = 'kickoff' | 'play' | 'goal' | 'halftime' | 'fulltime' | 'pau
 export interface GoalEvent { side: Side; scorer: Player; minute: number; ownGoal: boolean }
 
 export interface SimEvent {
-  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'whistle';
+  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'shot' | 'whistle';
   side?: Side;
   player?: Player;
 }
@@ -69,9 +80,9 @@ export interface SimConfig {
 }
 
 const DIFF = {
-  easy: { speed: 0.85, think: 0.55, accuracy: 0.6, tackle: 0.6, shootRange: 0.3 },
-  normal: { speed: 1.0, think: 0.35, accuracy: 0.8, tackle: 0.9, shootRange: 0.38 },
-  hard: { speed: 1.08, think: 0.2, accuracy: 1.0, tackle: 1.2, shootRange: 0.45 },
+  easy: { speed: 0.85, think: 0.55, accuracy: 0.6, tackle: 0.6, humanTackle: 1.3, shootRange: 0.3 },
+  normal: { speed: 1.0, think: 0.35, accuracy: 0.8, tackle: 0.9, humanTackle: 0.85, shootRange: 0.38 },
+  hard: { speed: 1.08, think: 0.2, accuracy: 1.0, tackle: 1.2, humanTackle: 0.6, shootRange: 0.45 },
 } as const;
 
 export class MatchSim {
@@ -106,7 +117,7 @@ export class MatchSim {
     this.goalWidth = this.stats.goalWidth;
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
-    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.08 + 0.04 * this.stats.scale, spin: 0, owner: null, lastTouch: null };
+    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.08 + 0.04 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1 };
     const diff = DIFF[config.difficulty];
     ([0, 1] as Side[]).forEach((side) => {
       const team = this.teams[side];
@@ -116,7 +127,7 @@ export class MatchSim {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, diveDir: 1, distanceRun: 0, isKeeper: info.position === 'GK',
-          speedMul: isCpu ? diff.speed : 1,
+          speedMul: isCpu ? diff.speed : 1, tackleTimer: 0, holdTime: 0, stamina: 1,
         };
         this.players.push(p);
       });
@@ -198,6 +209,10 @@ export class MatchSim {
     }
     this.clock += dt;
     this.pressureTimer -= dt;
+    if (this.phase === 'kickoff') {
+      this.phaseTimer += dt;
+      if (this.phaseTimer > 4) this.phase = 'play';
+    }
     const halfEnd = this.config.halfSeconds * this.half;
     if (this.clock >= halfEnd && this.ballIsCalm()) {
       if (this.half === 1) { this.phase = 'halftime'; this.phaseTimer = 0; this.events.push({ type: 'halftime' }); }
@@ -207,6 +222,9 @@ export class MatchSim {
     this.updateControlledSelection(input);
     for (const p of this.players) {
       p.kickCooldown = Math.max(0, p.kickCooldown - dt);
+      p.tackleTimer = Math.max(0, p.tackleTimer - dt);
+      p.holdTime = this.ball.owner === p ? p.holdTime + dt : 0;
+      if (p !== this.controlled) p.stamina = Math.min(1, p.stamina + dt / 4);
       p.kickAnim = Math.max(0, p.kickAnim - dt * 4);
       p.diveAnim = Math.max(0, p.diveAnim - dt * 1.4);
       if (p === this.controlled) this.driveHuman(p, input, dt);
@@ -255,9 +273,13 @@ export class MatchSim {
 
   private driveHuman(p: SimPlayer, input: InputState, _dt: number): void {
     const want = v(input.moveX, input.moveZ);
-    const sprint = input.sprint ? 1.28 : 1;
     const l = len(want);
-    const target = l > 0.05 ? v(want.x * this.stats.speed * sprint, want.z * this.stats.speed * sprint) : v();
+    const sprinting = input.sprint && l > 0.05 && p.stamina > 0.02;
+    p.stamina = clamp(p.stamina + (sprinting ? -_dt / 3 : _dt / 5), 0, 1);
+    const sprint = sprinting ? 1.18 : 1;
+    const dribble = this.ball.owner === p ? 0.88 : 1;
+    const max = this.stats.speed * sprint * dribble;
+    const target = l > 0.05 ? v(want.x * max, want.z * max) : v();
     this.steer(p, target, 22);
     if (l > 0.05) p.facing = Math.atan2(want.z, want.x);
     if (this.ball.owner === p) {
@@ -301,13 +323,16 @@ export class MatchSim {
           if (mate) this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z));
           return;
         }
-        if (dGoal < range && angleClear && (pressure > 1.2 || dGoal < range * 0.6)) {
+        if (dGoal < range && angleClear && (pressure < 1.6 || dGoal < range * 0.6 || p.holdTime > 1.5)) {
           this.shoot(p, null);
           return;
         }
-        if (pressure < 1.6 * this.stats.scale + 0.6) {
+        const tight = pressure < 1.3 * this.stats.scale + 0.45;
+        if (tight || p.holdTime > 0.7) {
           const mate = this.bestPassTarget(p, null);
-          if (mate && Math.random() < 0.8) {
+          const forward = mate ? (mate.pos.x - p.pos.x) * (p.side === 0 ? 1 : -1) : -99;
+          const worthIt = mate !== null && (tight ? Math.random() < 0.8 : forward > 3 && Math.random() < 0.35);
+          if (worthIt && mate) {
             this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z));
             return;
           }
@@ -320,7 +345,7 @@ export class MatchSim {
         }
         p.aiTarget = v(p.pos.x + aim.x * 3, p.pos.z + aim.z * 3);
       }
-      this.moveTowards(p, p.aiTarget, 0.95);
+      this.moveTowards(p, p.aiTarget, 0.88);
       return;
     }
 
@@ -329,8 +354,8 @@ export class MatchSim {
       const chaser = this.nearestOutfield(mates, b.pos);
       const ballLoose = b.owner === null;
       if ((ballLoose || oppHasBall) && chaser === p && this.phase !== 'kickoff') {
-        // Chase the ball (lead it a little).
-        p.aiTarget = v(b.pos.x + b.vel.x * 0.25, b.pos.z + b.vel.z * 0.25);
+        // Chase the ball: run to the point where we can meet it.
+        p.aiTarget = oppHasBall ? v(b.pos.x + b.vel.x * 0.6, b.pos.z + b.vel.z * 0.6) : this.interceptPoint(p);
       } else if (teamHasBall) {
         // Support: push up and offer a passing lane.
         const carrier = b.owner!;
@@ -346,11 +371,23 @@ export class MatchSim {
         const toBall = v(b.pos.x - p.home.x, b.pos.z - p.home.z);
         const shift = p.info.position === 'DEF' ? 0.35 : 0.55;
         p.aiTarget = v(p.home.x + toBall.x * shift, p.home.z + toBall.z * shift);
-        // Mark the nearest opponent if they are close to our goal.
-        const danger = opps.filter((o) => !o.isKeeper && Math.abs(o.pos.x - own) < this.length * 0.4);
-        const m = this.nearest(danger, p.pos);
-        if (m && p.info.position === 'DEF' && dist(m.pos, p.pos) < 5) {
-          p.aiTarget = v(m.pos.x + (own - m.pos.x) * 0.25, m.pos.z + (0 - m.pos.z) * 0.25);
+        const carrier = b.owner;
+        const inOurHalf = carrier !== null && (carrier.pos.x - 0) * dir < 0;
+        if (carrier && inOurHalf && p.info.position === 'DEF') {
+          // Get goal-side of the dribbler and close them down.
+          const toGoal = norm(v(own - carrier.pos.x, 0 - carrier.pos.z));
+          const gap = dist(carrier.pos, p.pos) < 4 ? 0.6 : 1.6;
+          p.aiTarget = v(carrier.pos.x + toGoal.x * gap, carrier.pos.z + toGoal.z * gap + (p.home.z >= 0 ? 0.4 : -0.4));
+        } else if (carrier && inOurHalf) {
+          // Attackers drop back to the halfway line to help.
+          p.aiTarget = v(clamp(carrier.pos.x + dir * 3, -this.length / 2 + 2, this.length / 2 - 2), p.home.z * 0.6 + carrier.pos.z * 0.3);
+        } else {
+          // Mark the nearest opponent if they are close to our goal.
+          const danger = opps.filter((o) => !o.isKeeper && Math.abs(o.pos.x - own) < this.length * 0.4);
+          const m = this.nearest(danger, p.pos);
+          if (m && p.info.position === 'DEF' && dist(m.pos, p.pos) < 5) {
+            p.aiTarget = v(m.pos.x + (own - m.pos.x) * 0.25, m.pos.z + (0 - m.pos.z) * 0.25);
+          }
         }
       }
       if (this.phase === 'kickoff' && !(this.kickoffSide === p.side && this.ball.owner === null)) {
@@ -370,8 +407,17 @@ export class MatchSim {
       // Hold for a moment, then throw to the most open team-mate.
       p.think -= dt;
       if (p.think <= 0) {
-        const mate = this.bestPassTarget(p, null) ?? this.nearestOutfield(this.teamOf(p.side), p.pos);
-        if (mate) this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z), 1.1);
+        const mate = this.bestPassTarget(p, null);
+        const opps = this.teamOf((1 - p.side) as Side);
+        const presser = this.nearest(opps, p.pos);
+        const mateMarked = mate ? dist(this.nearest(opps, mate.pos)?.pos ?? v(99, 99), mate.pos) < 2.5 : true;
+        if (mate && !mateMarked) {
+          this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z), 1.1);
+        } else {
+          // Big clearance upfield, away from whoever is closest.
+          const awayZ = presser ? Math.sign(p.pos.z - presser.pos.z) || 1 : (Math.random() < 0.5 ? -1 : 1);
+          this.kick(p, v(dir, awayZ * rand(0.2, 0.6)), this.stats.power * 0.95, this.stats.power * 0.35);
+        }
         p.think = 1;
       }
       this.steer(p, v(), 20);
@@ -390,13 +436,40 @@ export class MatchSim {
         p.diveAnim = 1;
         p.diveDir = Math.sign(predZ - p.pos.z) || 1;
       }
-    } else if (b.owner === null && dist(b.pos, p.pos) < 3.5 * this.stats.scale && Math.abs(b.pos.x - own) < 5) {
-      // Come and collect a loose ball near the goal.
-      targetX = b.pos.x; targetZ = b.pos.z;
+    } else if (b.owner && b.owner.side !== p.side && Math.abs(b.owner.pos.x - own) < 6 && Math.abs(b.owner.pos.z) < this.goalWidth) {
+      // A dribbler is bearing down on goal: come out to narrow the angle if no defender is on them.
+      const defender = this.nearest(this.teamOf(p.side).filter((m) => !m.isKeeper), b.owner.pos);
+      if (!defender || dist(defender.pos, b.owner.pos) > 1.5) {
+        const out = clamp(Math.abs(b.owner.pos.x - own) * 0.45, 0.7, 2.6);
+        targetX = own + dir * out;
+        targetZ = clamp(b.owner.pos.z * 0.5, -this.goalWidth / 2, this.goalWidth / 2);
+      }
+    } else if (b.owner === null && len(b.vel) < 4 && dist(b.pos, p.pos) < 3 * this.stats.scale && Math.abs(b.pos.x - own) < 4.5) {
+      // Come and collect a slow loose ball near the goal if we are closest to it.
+      const opp = this.nearest(this.teamOf((1 - p.side) as Side), b.pos);
+      if (!opp || dist(opp.pos, b.pos) > dist(p.pos, b.pos)) { targetX = b.pos.x; targetZ = b.pos.z; }
     }
     const speed = p.diveAnim > 0 ? 1.6 : 1.1;
     this.moveTowards(p, v(targetX, targetZ), speed);
     p.facing = Math.atan2(b.pos.z - p.pos.z, b.pos.x - p.pos.x);
+  }
+
+  /** Earliest point on the ball's path that this player can reach. */
+  private interceptPoint(p: SimPlayer): V2 {
+    const b = this.ball;
+    const speed = len(b.vel);
+    if (speed < 0.5) return v(b.pos.x, b.pos.z);
+    const dir = norm(b.vel);
+    const run = this.stats.speed * p.speedMul;
+    const decel = 3.2;
+    for (let t = 0.05; t <= 2.5; t += 0.1) {
+      const sp = Math.max(0, speed - decel * t);
+      const travelled = (speed + sp) / 2 * Math.min(t, speed / decel);
+      const pt = v(b.pos.x + dir.x * travelled, b.pos.z + dir.z * travelled);
+      if (dist(p.pos, pt) <= run * t + 0.3) return pt;
+    }
+    const stopD = (speed * speed) / (2 * decel);
+    return v(b.pos.x + dir.x * stopD, b.pos.z + dir.z * stopD);
   }
 
   private nearest(list: SimPlayer[], pos: V2): SimPlayer | null {
@@ -510,7 +583,7 @@ export class MatchSim {
     }
     const speed = len(b.vel);
     const onGround = b.y < 0.01;
-    const friction = onGround ? 2.6 : 0.4;
+    const friction = onGround ? 3.2 : 0.4;
     const drag = 0.06;
     const newSpeed = Math.max(0, speed - (friction + drag * speed) * dt);
     if (speed > 1e-4) b.vel = v((b.vel.x / speed) * newSpeed, (b.vel.z / speed) * newSpeed);
@@ -519,12 +592,12 @@ export class MatchSim {
     b.spin += newSpeed * dt / b.radius;
     // Rebound boards all round the pitch, with a gap for each goal mouth.
     const L = this.length / 2, W = this.width / 2, r = b.radius;
-    if (b.pos.z > W - r) { b.pos.z = W - r; b.vel.z = -Math.abs(b.vel.z) * 0.7; }
-    if (b.pos.z < -W + r) { b.pos.z = -W + r; b.vel.z = Math.abs(b.vel.z) * 0.7; }
+    if (b.pos.z > W - r) { b.pos.z = W - r; b.vel.z = -Math.abs(b.vel.z) * 0.55; }
+    if (b.pos.z < -W + r) { b.pos.z = -W + r; b.vel.z = Math.abs(b.vel.z) * 0.55; }
     const inMouth = Math.abs(b.pos.z) < this.goalWidth / 2 - r && b.y < this.goalHeight - r;
     if (!inMouth) {
-      if (b.pos.x > L - r) { b.pos.x = L - r; b.vel.x = -Math.abs(b.vel.x) * 0.7; }
-      if (b.pos.x < -L + r) { b.pos.x = -L + r; b.vel.x = Math.abs(b.vel.x) * 0.7; }
+      if (b.pos.x > L - r) { b.pos.x = L - r; b.vel.x = -Math.abs(b.vel.x) * 0.55; }
+      if (b.pos.x < -L + r) { b.pos.x = -L + r; b.vel.x = Math.abs(b.vel.x) * 0.55; }
     } else {
       // Inside the goal: the net catches it.
       const back = L + this.goalDepth - r;
@@ -553,14 +626,18 @@ export class MatchSim {
       for (const p of this.players) {
         if (p.side === o.side || p.kickCooldown > 0) continue;
         const d = dist(p.pos, b.pos);
-        if (d < controlR * 0.9) {
+        if (d < controlR * 0.95) {
           const isCpu = p.side !== this.config.humanSide;
           const diff = DIFF[this.config.difficulty];
-          const base = p.isKeeper ? 0.9 : 0.5;
-          const chance = base * (isCpu ? diff.tackle : 1 / (DIFF[this.config.difficulty].tackle)) * (0.6 + this.stats.control * 0.6);
-          if (this.pressureTimer <= 0) {
-            this.pressureTimer = 0.45;
-            if (Math.random() < chance * 0.9) {
+          const base = p.isKeeper ? 0.95 : 0.5;
+          // Tackling head-on is much easier than chasing from behind.
+          const toBall = norm(v(b.pos.x - p.pos.x, b.pos.z - p.pos.z));
+          const facingDot = toBall.x * Math.cos(o.facing) + toBall.z * Math.sin(o.facing);
+          const angle = facingDot < 0 ? 1 : 0.35; // negative = we are in front of the dribbler
+          const chance = base * angle * (isCpu ? diff.tackle : diff.humanTackle) * (0.6 + this.stats.control * 0.6);
+          if (p.tackleTimer <= 0) {
+            p.tackleTimer = 0.45;
+            if (Math.random() < chance) {
               // Ball changes hands and squirts loose a little.
               b.owner = null;
               o.kickCooldown = 0.5;
@@ -585,18 +662,45 @@ export class MatchSim {
     }
     if (best) {
       const ballSpeed = len(b.vel);
-      // Fast balls are harder to bring under control; keepers are better at it.
-      const skill = best.isKeeper ? 0.9 : this.stats.control;
-      const hard = ballSpeed > 6 * (0.5 + skill);
-      if (hard && Math.random() > skill * 0.8) {
-        // Fluffed touch: ball deflects.
-        b.vel = v(b.vel.x * 0.45 + rand(-1.5, 1.5), b.vel.z * 0.45 + rand(-1.5, 1.5));
-        if (b.vy < 0) b.vy = 0;
-        best.kickCooldown = 0.25;
-        b.lastTouch = best;
-        return;
+      if (best.isKeeper && ballSpeed > 3.5) {
+        // One save attempt per shot, judged at the ball's closest approach. Comfortable
+        // balls are caught; the rest is a dive whose odds fall with distance and shot speed.
+        if (b.keeperTried === b.flightId) return;
+        const reach = this.stats.keeperReach;
+        const easy = reach * 0.5;
+        const rel = v(b.pos.x - best.pos.x, b.pos.z - best.pos.z);
+        const closing = rel.x * b.vel.x + rel.z * b.vel.z < 0;
+        if (closing && bd > easy * 0.6) return; // still getting closer: wait for the nearest point
+        b.keeperTried = b.flightId;
+        const speedFactor = clamp(1.5 - (0.7 * ballSpeed) / this.stats.power, 0.4, 1);
+        const pSave = bd < easy ? 0.97 * Math.max(speedFactor, 0.75) : clamp(1 - (bd - easy) / (reach - easy), 0, 1) * speedFactor;
+        if (Math.random() > pSave) return; // beaten
+        this.events.push({ type: 'save', side: best.side, player: best.info });
+        const dir = best.side === 0 ? 1 : -1; // away from our own goal
+        if (bd > easy || ballSpeed > this.stats.power * 1.05) {
+          // Parry: the ball flies back out towards the pitch, not into the net.
+          const sideways = Math.sign(b.pos.z - best.pos.z) || (Math.random() < 0.5 ? -1 : 1);
+          b.vel = v(dir * ballSpeed * rand(0.15, 0.35), sideways * ballSpeed * rand(0.45, 0.7));
+          b.vy = rand(1, 3);
+          best.kickCooldown = 0.35;
+          best.diveAnim = Math.max(best.diveAnim, 0.9);
+          best.diveDir = sideways;
+          b.lastTouch = best;
+          return;
+        }
+      } else {
+        // Fast balls are harder to bring under control.
+        const skill = this.stats.control;
+        const hard = ballSpeed > 7 * (0.5 + skill);
+        if (hard && Math.random() < (1 - skill) * 0.6) {
+          // Fluffed touch: ball deflects.
+          b.vel = v(b.vel.x * 0.45 + rand(-1.5, 1.5), b.vel.z * 0.45 + rand(-1.5, 1.5));
+          if (b.vy < 0) b.vy = 0;
+          best.kickCooldown = 0.25;
+          b.lastTouch = best;
+          return;
+        }
       }
-      if (best.isKeeper && ballSpeed > 4) this.events.push({ type: 'save', side: best.side, player: best.info });
       b.owner = best;
       b.lastTouch = best;
       b.vy = 0; b.y = 0;
@@ -613,6 +717,8 @@ export class MatchSim {
     b.vel = v(n.x * speed, n.z * speed);
     b.vy = loft;
     b.lastTouch = p;
+    b.lastKick = p;
+    b.flightId++;
     p.kickCooldown = 0.35;
     p.kickAnim = 1;
     p.facing = Math.atan2(n.z, n.x);
@@ -625,8 +731,8 @@ export class MatchSim {
     const isCpu = p.side !== this.config.humanSide;
     const acc = isCpu ? DIFF[this.config.difficulty].accuracy : 1;
     // Aim at a corner, with a wobble that shrinks with control.
-    const spread = (1 - this.stats.control) * 1.4 + (isCpu ? (1 - acc) * 1.2 : 0.2);
-    const targetZ = clamp(rand(-this.goalWidth / 2, this.goalWidth / 2) * 0.7 + rand(-spread, spread), -this.goalWidth, this.goalWidth);
+    const spread = (1 - this.stats.control) * 0.9 + (isCpu ? (1 - acc) * 0.8 : 0.15);
+    const targetZ = clamp(rand(-this.goalWidth / 2, this.goalWidth / 2) * 0.75 + rand(-spread, spread), -this.goalWidth * 0.6, this.goalWidth * 0.6);
     let dir = v(goal.x - p.pos.x, targetZ - p.pos.z);
     if (aim) {
       // The human's stick biases the shot direction.
@@ -636,8 +742,9 @@ export class MatchSim {
     }
     const d = dist(p.pos, goal);
     const power = this.stats.power * clamp(0.75 + d / this.length, 0.8, 1.15);
-    const loft = power * rand(0.08, 0.22);
+    const loft = power * rand(0.06, 0.2);
     this.kick(p, dir, power, loft);
+    this.events.push({ type: 'shot', side: p.side, player: p.info });
   }
 
   pass(p: SimPlayer, aim: V2 | null, speedMul = 1): void {
@@ -656,7 +763,7 @@ export class MatchSim {
     const wobble = (1 - this.stats.control) * 0.35;
     const a = Math.atan2(dir.z, dir.x) + rand(-wobble, wobble);
     dir = v(Math.cos(a), Math.sin(a));
-    const speed = clamp(4 + d * 0.75, 5, this.stats.power * 0.8) * speedMul;
+    const speed = clamp(3.5 + d * 0.65, 4.5, this.stats.power * 0.72) * speedMul;
     this.kick(p, dir, speed, 0);
   }
 
@@ -665,9 +772,10 @@ export class MatchSim {
     const L = this.length / 2;
     if (Math.abs(b.pos.x) > L + b.radius && Math.abs(b.pos.z) < this.goalWidth / 2 && b.y < this.goalHeight) {
       const scoringSide: Side = b.pos.x > 0 ? 0 : 1; // ball in +x goal means home scored
-      const touch = b.lastTouch ?? this.teamOf(scoringSide)[0];
+      // Deflections off a defender or keeper still count for the shooter.
+      const touch = b.lastKick ?? b.lastTouch ?? this.teamOf(scoringSide)[0];
       const ownGoal = touch.side !== scoringSide;
-      const scorer = ownGoal ? touch.info : touch.info;
+      const scorer = touch.info;
       this.score[scoringSide]++;
       this.goals.push({ side: scoringSide, scorer, minute: this.minute, ownGoal });
       this.phase = 'goal';

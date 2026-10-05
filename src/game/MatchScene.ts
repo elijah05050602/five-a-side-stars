@@ -43,7 +43,7 @@ export class MatchScene {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.scene.background = new THREE.Color('#9ad8ff');
     this.scene.fog = new THREE.Fog('#9ad8ff', 60, 120);
@@ -125,7 +125,7 @@ export class MatchScene {
     this.acc += dt;
     const step = 1 / 60;
     let steps = 0;
-    while (this.acc >= step && steps < 5) {
+    while (this.acc >= step && steps < 8) {
       this.sim.step(step, steps === 0 ? input : { ...input, shoot: false, pass: false, switchPlayer: false, pause: false });
       this.acc -= step;
       steps++;
