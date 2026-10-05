@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import type { Kit, Player } from '../data/types';
-import { PlayerModel } from '../game/PlayerModel';
+import type { Build, Kit, Player } from '../data/types';
+import { IDLE_STATE, PlayerModel } from '../game/PlayerModel';
 
 /** A small spinning 3D player used by the team builder's live kit preview. */
 export class KitPreview3D {
@@ -37,6 +37,7 @@ export class KitPreview3D {
 
   setKit(kit: Kit, number: number): void { this.model.setKit(kit, number); }
   setLook(skin: string, hair: string, hairStyle?: Player["hairStyle"], boots?: string): void { this.model.setLook(skin, hair, hairStyle, boots); }
+  setBuild(build: Build): void { this.model.setBuild(build); }
   setScale(scale: number): void { this.scale = scale; this.model.group.scale.setScalar(1); }
 
   private resize(): void {
@@ -53,7 +54,9 @@ export class KitPreview3D {
     this.last = now;
     if (!this.dragging) this.t += this.spin * dt;
     this.model.setFacing(-this.t + Math.PI / 2);
-    this.model.animate(0, 0, 0, 1, dt, this.scale);
+    // A happy little wave of the eyes every so often keeps the preview alive.
+    const mood = Math.sin(this.t * 0.7) > 0.93 ? 'happy' : 'neutral';
+    this.model.animate(dt, { ...IDLE_STATE, scale: this.scale, mood, gazeX: Math.round(Math.sin(this.t * 1.3) * 2) / 2 });
     const h = 1.6 * this.scale * 1.35;
     this.camera.position.set(0, h * 0.75, h * 2.4);
     this.camera.lookAt(0, h * 0.5, 0);

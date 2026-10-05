@@ -1,5 +1,5 @@
 /* Five-a-Side Stars service worker: caches the game so it plays offline. */
-const VERSION = 'fass-v2';
+const VERSION = 'fass-v3';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './favicon.svg', './icon-192.png', './icon-512.png', './models/player.glb'];
 
 self.addEventListener('install', (event) => {

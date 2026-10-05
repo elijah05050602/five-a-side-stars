@@ -1,26 +1,74 @@
 import * as THREE from 'three';
-import type { Kit, Player } from '../data/types';
+import type { Build, Kit, Player } from '../data/types';
 import { cloneRig, loadPlayerAsset, playerAssetNow, type PlayerAsset } from './playerAsset';
 import { contrastColour, numberTexture, playerAtlas } from './playerAtlas';
+import { faceTexture, type Expression } from './playerFace';
 import { ProceduralPlayerModel } from './ProceduralPlayerModel';
-import { addSkinnedOutline, toonMaterial } from './toon';
+import { addOutline, addSkinnedOutline, toonMaterial } from './toon';
 
 /** Models are drawn bigger than their physical size so the kids read clearly from the camera. */
 export const MODEL_SCALE = 1.35;
 /** Height in metres of a scale-1 kid before MODEL_SCALE (matches the old procedural model). */
 const BASE_HEIGHT = 1.4;
 
-const shadowGeo = new THREE.CircleGeometry(0.42, 20);
-const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false });
+/** Everything the sim tells a model each frame. */
+export interface AnimState {
+  /** Ground speed in m/s. */
+  speed: number;
+  /** 1 right after a kick, fading to 0. */
+  kick: number;
+  /** 1 at the start of a dive, fading to 0; diveDir is the world z sign. */
+  dive: number;
+  diveDir: number;
+  /** 1 right after being tackled off the ball, fading to 0. */
+  stun: number;
+  /** Seconds left on this kid's own tackle attempt (0 = not tackling). */
+  tackle: number;
+  /** Age-group scale, so strides and hops match the kid's size. */
+  scale: number;
+  /** 0..1 how wobbly the little ones run. */
+  wobble: number;
+  /** The face to pull, and where the eyes look (quantised -1..1). */
+  mood: Expression;
+  gazeX: number;
+  gazeY: number;
+  /** Jump for joy (goal celebration). */
+  cheer: boolean;
+}
+
+export const IDLE_STATE: AnimState = { speed: 0, kick: 0, dive: 0, diveDir: 1, stun: 0, tackle: 0, scale: 1, wobble: 0, mood: 'neutral', gazeX: 0, gazeY: 0, cheer: false };
+
+let shadowTex: THREE.CanvasTexture | null = null;
+/** A soft contact shadow: dark in the middle, fading out, so kids sit on the grass. */
+function shadowTexture(): THREE.CanvasTexture {
+  if (shadowTex) return shadowTex;
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(64, 64, 10, 64, 64, 64);
+  g.addColorStop(0, 'rgba(10,25,40,0.42)');
+  g.addColorStop(0.55, 'rgba(10,25,40,0.22)');
+  g.addColorStop(1, 'rgba(10,25,40,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  shadowTex = new THREE.CanvasTexture(c);
+  return shadowTex;
+}
+const shadowGeo = new THREE.PlaneGeometry(1.25, 1.0);
 const plateGeo = new THREE.PlaneGeometry(0.44, 0.44);
 
 type Loco = 'idle' | 'walk' | 'run' | 'cheer';
 type Head = 'Head_plain' | 'Head_short' | 'Head_long';
-const HEAD_FOR: Record<Player['hairStyle'], Head> = { short: 'Head_plain', spiky: 'Head_short', long: 'Head_long', curly: 'Head_short', bald: 'Head_short' };
+const HEAD_FOR: Record<Player['hairStyle'], Head> = { short: 'Head_plain', spiky: 'Head_short', long: 'Head_long', curly: 'Head_plain', afro: 'Head_short', buns: 'Head_short', bald: 'Head_short' };
+/** Body shapes as (width, height, depth) multipliers on the rig. */
+const BUILD_SCALE: Record<Build, [number, number, number]> = { small: [0.9, 0.88, 0.9], regular: [1, 1, 1], tall: [0.96, 1.1, 0.96], sturdy: [1.12, 0.97, 1.12] };
+
+const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
 /**
  * A rigged, animated kid (CC0 KayKit character, see public/models/LICENSE.md)
- * painted with the team kit. Local +x is "forward"; call setFacing(yaw).
+ * painted with the team kit and a face that reacts to the play.
+ * Local +x is "forward"; call setFacing(yaw).
  * Until the model file arrives nothing is drawn; if it fails to load, the old
  * procedural kid takes over so the game still plays.
  */
@@ -29,10 +77,14 @@ export class PlayerModel {
   private readonly body = new THREE.Group();
   private readonly ring: THREE.Mesh;
   private readonly material: THREE.MeshToonMaterial;
+  private readonly faceMat: THREE.MeshToonMaterial;
+  private readonly hairMat: THREE.MeshToonMaterial;
   private rig: THREE.Group | null = null;
+  private rigScale = 1;
   private mixer: THREE.AnimationMixer | null = null;
   private actions = new Map<string, THREE.AnimationAction>();
-  private heads = new Map<Head, THREE.SkinnedMesh>();
+  private heads = new Map<Head, THREE.Object3D>();
+  private hairAcc: THREE.Group | null = null;
   private plate: THREE.Mesh | null = null;
   private fallback: ProceduralPlayerModel | null = null;
   private disposed = false;
@@ -43,25 +95,39 @@ export class PlayerModel {
   private hair: string;
   private boots: string;
   private hairStyle: Player['hairStyle'];
+  private build: Build;
+  private readonly isKeeper: boolean;
   private readonly scale: number;
 
   private loco: Loco = 'idle';
   private oneShot: THREE.AnimationAction | null = null;
   private wasKicking = false;
   private wasDiving = false;
+  private wasStunned = false;
+  private wasTackling = false;
+  private slide = 0;
   private facing = 0;
-  private cheer = false;
+  private turn = 0;
+  private lean = 0;
+  private faceKey = '';
+  private blinkIn = 2 + Math.random() * 4;
+  private blinkLeft = 0;
 
   constructor(private readonly player: Player, kit: Kit, scale: number) {
     this.kit = kit; this.number = player.number; this.skin = player.skin; this.hair = player.hair;
-    this.boots = player.boots ?? '#222222'; this.hairStyle = player.hairStyle ?? 'short'; this.scale = scale;
+    this.boots = player.boots ?? '#222222'; this.hairStyle = player.hairStyle ?? 'short'; this.build = player.build ?? 'regular';
+    this.isKeeper = player.position === 'GK';
+    this.scale = scale;
     this.material = toonMaterial({ map: this.atlas() });
+    this.faceMat = toonMaterial({ map: faceTexture(this.skin, 'neutral') });
+    this.hairMat = toonMaterial({ color: this.hair });
 
     const s = scale * MODEL_SCALE;
-    const shadow = new THREE.Mesh(shadowGeo, shadowMat);
+    const shadow = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ map: shadowTexture(), transparent: true, depthWrite: false }));
     shadow.rotation.x = -Math.PI / 2;
-    shadow.position.y = 0.01;
+    shadow.position.y = 0.012;
     shadow.scale.setScalar(s);
+    shadow.renderOrder = -1;
     this.ring = new THREE.Mesh(new THREE.RingGeometry(0.44, 0.56, 32), new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.9, depthWrite: false }));
     this.ring.rotation.x = -Math.PI / 2;
     this.ring.position.y = 0.02;
@@ -70,32 +136,37 @@ export class PlayerModel {
     this.group.add(shadow, this.ring, this.body);
 
     const ready = playerAssetNow();
-    if (ready) this.build(ready);
-    else loadPlayerAsset().then((a) => { if (!this.disposed) this.build(a); }).catch(() => { if (!this.disposed) this.useFallback(); });
+    if (ready) this.buildRig(ready);
+    else loadPlayerAsset().then((a) => { if (!this.disposed) this.buildRig(a); }).catch(() => { if (!this.disposed) this.useFallback(); });
   }
 
   private atlas(): THREE.CanvasTexture {
-    return playerAtlas(this.kit, { skin: this.skin, hair: this.hair, boots: this.boots, bald: this.hairStyle === 'bald' });
+    const bald = this.hairStyle === 'bald' || this.hairStyle === 'afro';
+    return playerAtlas(this.kit, { skin: this.skin, hair: this.hair, boots: this.boots, bald });
   }
 
-  private build(asset: PlayerAsset): void {
+  private buildRig(asset: PlayerAsset): void {
     const rig = cloneRig(asset);
     // The file faces +z; the game treats local +x as forward.
     rig.rotation.y = Math.PI / 2;
-    const k = (this.scale * MODEL_SCALE * BASE_HEIGHT) / asset.height;
-    rig.scale.setScalar(k);
+    this.rigScale = (this.scale * MODEL_SCALE * BASE_HEIGHT) / asset.height;
+    this.rig = rig;
+    this.applyBuild();
     // Collect first: the outline is itself a skinned child, and traverse would walk into it.
     const skinned: THREE.SkinnedMesh[] = [];
     rig.traverse((o) => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) skinned.push(o as THREE.SkinnedMesh); });
     for (const m of skinned) {
-      m.material = this.material;
+      const isFace = (m.material as THREE.Material).name === 'face';
+      m.material = isFace ? this.faceMat : this.material;
       m.castShadow = true;
       m.receiveShadow = false;
       m.frustumCulled = false;
-      addSkinnedOutline(m, 0.028);
-      if (m.name.startsWith('Head_')) this.heads.set(m.name as Head, m);
+      if (!isFace) addSkinnedOutline(m, 0.028);
     }
-    this.rig = rig;
+    for (const name of ['Head_plain', 'Head_short', 'Head_long'] as Head[]) {
+      const node = rig.getObjectByName(name);
+      if (node) this.heads.set(name, node);
+    }
     this.body.add(rig);
     this.applyHead();
 
@@ -126,9 +197,55 @@ export class PlayerModel {
     this.fallback.setFacing(this.facing);
   }
 
+  private applyBuild(): void {
+    if (!this.rig) return;
+    const [w, h, d] = BUILD_SCALE[this.build] ?? BUILD_SCALE.regular;
+    // The rig is turned 90 degrees, so its own x is the kid's depth and z the width.
+    this.rig.scale.set(this.rigScale * d, this.rigScale * h, this.rigScale * w);
+  }
+
   private applyHead(): void {
     const want = HEAD_FOR[this.hairStyle] ?? 'Head_plain';
-    this.heads.forEach((mesh, name) => { mesh.visible = name === want; mesh.children.forEach((c) => { c.visible = name === want; }); });
+    this.heads.forEach((node, name) => { node.visible = name === want; });
+    this.buildHairAccessory();
+  }
+
+  /** Extra hair pieces (curls, buns, an afro) ride on the head bone over the base head. */
+  private buildHairAccessory(): void {
+    if (!this.rig) return;
+    const headBone = this.rig.getObjectByName('head');
+    if (!headBone) return;
+    if (!this.hairAcc) { this.hairAcc = new THREE.Group(); headBone.add(this.hairAcc); }
+    const g = this.hairAcc;
+    while (g.children.length) {
+      const c = g.children.pop() as THREE.Mesh;
+      c.geometry.dispose();
+    }
+    const add = (r: number, x: number, y: number, z: number) => {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), this.hairMat);
+      m.position.set(x, y, z);
+      m.castShadow = true;
+      addOutline(m, 0.03);
+      g.add(m);
+    };
+    switch (this.hairStyle) {
+      case 'afro':
+        add(0.62, 0, 0.5, -0.06);
+        break;
+      case 'buns':
+        add(0.2, 0.4, 0.78, -0.12);
+        add(0.2, -0.4, 0.78, -0.12);
+        break;
+      case 'curly':
+        for (let i = 0; i < 9; i++) {
+          const a = (i / 9) * Math.PI * 2;
+          add(0.19, Math.cos(a) * 0.42, 0.7 + (i % 2) * 0.12, Math.sin(a) * 0.4 - 0.04);
+        }
+        add(0.3, 0, 0.9, -0.05);
+        break;
+      default:
+        break;
+    }
   }
 
   setKit(kit: Kit, number: number): void {
@@ -145,8 +262,15 @@ export class PlayerModel {
     if (hairStyle) this.hairStyle = hairStyle;
     this.material.map = this.atlas();
     this.material.needsUpdate = true;
+    this.hairMat.color.set(hair);
+    this.faceKey = '';
     this.applyHead();
     this.fallback?.setLook(skin, hair, hairStyle, boots);
+  }
+
+  setBuild(build: Build): void {
+    this.build = build;
+    this.applyBuild();
   }
 
   setSelected(on: boolean, colour?: number): void {
@@ -156,44 +280,82 @@ export class PlayerModel {
   }
 
   setFacing(yaw: number): void {
+    this.turn += wrapAngle(yaw - this.facing);
     this.facing = yaw;
     // Sim yaw is measured in the x/z plane with 0 = +x; Three's rotation.y is anticlockwise about y.
     this.body.rotation.y = -yaw;
     this.fallback?.setFacing(yaw);
   }
 
-  /** Scoring team jumps for joy during the goal celebration. */
-  setCheer(on: boolean): void { this.cheer = on; }
+  private updateFace(mood: Expression, gazeX: number, gazeY: number, dt: number): void {
+    // Blink now and then, unless the face is already doing something bigger.
+    this.blinkIn -= dt;
+    if (this.blinkIn <= 0) { this.blinkLeft = 0.13; this.blinkIn = 2.5 + Math.random() * 4; }
+    if (this.blinkLeft > 0) this.blinkLeft -= dt;
+    const expr: Expression = this.blinkLeft > 0 && (mood === 'neutral' || mood === 'focus') ? 'blink' : mood;
+    const gx = expr === 'neutral' || expr === 'focus' || expr === 'sad' ? gazeX : 0;
+    const gy = expr === 'neutral' || expr === 'focus' ? gazeY : expr === 'sad' ? 1 : 0;
+    const key = `${expr}|${gx}|${gy}`;
+    if (key === this.faceKey) return;
+    this.faceKey = key;
+    this.faceMat.map = faceTexture(this.skin, expr, gx, gy);
+    this.faceMat.needsUpdate = true;
+  }
 
-  /**
-   * Drives the clips from the sim: speed in m/s, kick 0..1 (1 = just kicked),
-   * dive 0..1 with direction (+1 = towards +z), dt seconds.
-   */
-  animate(speed: number, kick: number, dive: number, diveDir: number, dt: number, scale: number, wobble = 0): void {
-    if (this.fallback) { this.fallback.animate(speed, kick, dive, diveDir, dt, scale, wobble); return; }
+  /** Drives the clips and the procedural layer (leans, hops, slides) from the sim state. */
+  animate(dt: number, st: AnimState): void {
+    if (this.fallback) { this.fallback.animate(st.speed, st.kick, st.dive, st.diveDir, dt, st.scale, st.wobble); return; }
     if (!this.mixer) return;
-    const norm = speed / Math.max(0.4, scale);
+    const scale = Math.max(0.4, st.scale);
+    const norm = st.speed / scale;
+    this.updateFace(st.mood, st.gazeX, st.gazeY, dt);
 
-    // One-shots: a kick snaps in over the run; a dive plays once and holds.
-    const kicking = kick > 0, diving = dive > 0;
+    // One-shots: a kick snaps in over the run; a dive plays once and holds; a tackle knocks you.
+    const kicking = st.kick > 0, diving = st.dive > 0, stunned = st.stun > 0, tackling = st.tackle > 0;
     if (kicking && !this.wasKicking) this.startOneShot('Unarmed_Melee_Attack_Kick', 2.4, false);
-    if (diving && !this.wasDiving) {
-      // Which way is that in the kid's own frame? Right is (-sin yaw, cos yaw).
-      const toRight = diveDir * Math.cos(this.facing) > 0;
-      this.startOneShot(toRight ? 'Dodge_Right' : 'Dodge_Left', 1.1, true);
-    }
+    const toRight = st.diveDir * Math.cos(this.facing) > 0;
+    if (diving && !this.wasDiving) this.startOneShot(toRight ? 'Dodge_Right' : 'Dodge_Left', 1.1, true);
     if (!diving && this.wasDiving && this.oneShot) this.endOneShot();
-    this.wasKicking = kicking; this.wasDiving = diving;
+    if (stunned && !this.wasStunned && !diving) this.startOneShot('Hit_A', 1.4, false);
+    if (tackling && !this.wasTackling && !kicking) this.slide = 0.42;
+    this.wasKicking = kicking; this.wasDiving = diving; this.wasStunned = stunned; this.wasTackling = tackling;
 
     // Locomotion from speed; feet speed follows the kid's actual speed.
-    const want: Loco = this.cheer && norm < 0.8 ? 'cheer' : norm < 0.35 ? 'idle' : norm < 2.4 ? 'walk' : 'run';
+    const want: Loco = st.cheer && norm < 0.8 ? 'cheer' : norm < 0.35 ? 'idle' : norm < 2.4 ? 'walk' : 'run';
     if (want !== this.loco) this.switchLoco(want);
     const run = this.actions.get('Running_A'), walk = this.actions.get('Walking_A');
     if (run) run.setEffectiveTimeScale(THREE.MathUtils.clamp(norm / 4.5, 0.75, 1.8));
     if (walk) walk.setEffectiveTimeScale(THREE.MathUtils.clamp(norm / 1.8, 0.7, 1.5));
-    // Little ones run with a wobble: the body sways side to side as they go.
-    this.body.rotation.z = wobble * Math.sin(performance.now() / 180) * 0.12 * Math.min(1, norm / 2);
     this.mixer.update(dt);
+
+    // Procedural layer on top of the clips. Body axes: x forward, y up, z the kid's right.
+    const turnRate = dt > 0 ? this.turn / dt : 0;
+    this.turn = 0;
+    const targetLean = THREE.MathUtils.clamp(turnRate * 0.06, -0.35, 0.35) * Math.min(1, norm / 2.5);
+    this.lean += (targetLean - this.lean) * Math.min(1, dt * 10);
+    let roll = this.lean;
+    let pitch = -0.1 * Math.min(1, norm / 4); // lean into the run
+    let lift = 0;
+    // Little ones run with a wobble: the body sways side to side as they go.
+    roll += st.wobble * Math.sin(performance.now() / 180) * 0.12 * Math.min(1, norm / 2);
+    if (kicking) lift += 0.07 * scale * Math.sin(st.kick * Math.PI);
+    if (stunned) roll += 0.22 * st.stun * Math.sin(st.stun * Math.PI * 3);
+    if (this.slide > 0) {
+      // Slide tackle: sit back and drop, then spring up.
+      this.slide = Math.max(0, this.slide - dt);
+      const k = Math.sin((1 - this.slide / 0.42) * Math.PI);
+      pitch += 0.8 * k;
+      lift -= 0.16 * scale * k;
+    }
+    if (diving && this.isKeeper) {
+      // Keepers fly: roll towards the ball and leave the ground.
+      const t = Math.sin(Math.min(1, (1 - st.dive) * 2) * Math.PI * 0.5);
+      roll += (toRight ? 1 : -1) * t * 1.15;
+      lift += t * 0.28 * scale;
+    }
+    this.body.rotation.x = roll;
+    this.body.rotation.z = pitch;
+    this.body.position.y = lift;
   }
 
   private clipName(l: Loco): string { return l === 'idle' ? 'Idle' : l === 'walk' ? 'Walking_A' : l === 'run' ? 'Running_A' : 'Cheer'; }
@@ -234,12 +396,15 @@ export class PlayerModel {
     this.disposed = true;
     this.mixer?.stopAllAction();
     if (this.rig) this.mixer?.uncacheRoot(this.rig);
-    // Geometry is shared with the loaded asset, so only our own materials go.
+    // Skinned geometry is shared with the loaded asset, so only our own materials and hair pieces go.
     this.rig?.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh && m.material !== this.material) (m.material as THREE.Material).dispose();
+      if (m.isMesh && m.material !== this.material && m.material !== this.faceMat && m.material !== this.hairMat) (m.material as THREE.Material).dispose();
     });
+    this.hairAcc?.children.forEach((c) => (c as THREE.Mesh).geometry.dispose());
     this.material.dispose();
+    this.faceMat.dispose();
+    this.hairMat.dispose();
     (this.ring.material as THREE.Material).dispose();
     this.ring.geometry.dispose();
     this.fallback?.dispose();
