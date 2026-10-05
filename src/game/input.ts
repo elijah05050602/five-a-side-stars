@@ -3,11 +3,22 @@ export interface InputState {
   moveX: number; // -1..1, world x (towards the right goal)
   moveZ: number; // -1..1, world z (down the screen)
   shoot: boolean; // pressed this frame
+  shootHeld: boolean; // still held (hold to power up a shot)
   pass: boolean; // pressed this frame
   sprint: boolean;
   switchPlayer: boolean; // pressed this frame
   pause: boolean; // pressed this frame
+  trick: boolean; // pressed this frame: step-over or nutmeg
 }
+
+import { getControls, type KeyMap, type PadMap } from '../data/controls';
+
+export type { KeyMap } from '../data/controls';
+
+/** Which gamepad drives this input: any connected pad, the nth connected pad (0 = first), or none. */
+export type PadSlot = 'any' | number | null;
+
+const STICK_DEAD = 0.25;
 
 export class Input {
   private keys = new Set<string>();
@@ -16,16 +27,17 @@ export class Input {
   private touchPressed = new Set<string>();
   private touchHeld = new Set<string>();
   private cleanup: (() => void)[] = [];
+  private padWas = new Set<number>();
 
-  constructor() {
+  constructor(private readonly map: KeyMap = getControls().keys.solo, private readonly pad: PadSlot = 'any', private readonly padMap: PadMap = getControls().pad) {
     const down = (e: KeyboardEvent) => {
       if (e.repeat) return;
-      const k = e.key.toLowerCase();
+      const k = e.code;
       this.keys.add(k);
       this.pressed.add(k);
-      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Slash', 'Quote', 'Tab'].includes(k) || Object.values(this.map).some((l) => l.includes(k))) e.preventDefault();
     };
-    const up = (e: KeyboardEvent) => this.keys.delete(e.key.toLowerCase());
+    const up = (e: KeyboardEvent) => this.keys.delete(e.code);
     const blur = () => this.keys.clear();
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -42,13 +54,15 @@ export class Input {
     let id: number | null = null;
     let ox = 0;
     let oy = 0;
-    const radius = 48;
+    // The knob travels about a third of the pad's width, so it scales with the touch size setting.
+    let radius = 48;
     const start = (e: PointerEvent) => {
       if (id !== null) return;
       id = e.pointerId;
       const r = zone.getBoundingClientRect();
       ox = r.left + r.width / 2;
       oy = r.top + r.height / 2;
+      radius = r.width * 0.34;
       zone.setPointerCapture(e.pointerId);
       move(e);
     };
@@ -88,7 +102,7 @@ export class Input {
   }
 
   /** Attach a touch button that maps to an action name. */
-  attachButton(el: HTMLElement, action: 'shoot' | 'pass' | 'sprint' | 'switch'): void {
+  attachButton(el: HTMLElement, action: 'shoot' | 'pass' | 'sprint' | 'switch' | 'trick'): void {
     const down = (e: PointerEvent) => {
       e.preventDefault();
       el.setPointerCapture(e.pointerId);
@@ -110,15 +124,48 @@ export class Input {
     });
   }
 
+  /** Gamepads this input listens to right now. */
+  private pads(): Gamepad[] {
+    if (this.pad === null || typeof navigator === 'undefined' || !navigator.getGamepads) return [];
+    const all = [...navigator.getGamepads()].filter((g): g is Gamepad => !!g && g.connected);
+    if (this.pad === 'any') return all;
+    const g = all[this.pad];
+    return g ? [g] : [];
+  }
+
   /** Read this frame's input, then clear one-shot presses. */
   poll(): InputState {
-    const k = this.keys;
+    const m = this.map;
+    const pm = this.padMap;
+    // Gamepad buttons held this frame, and which of those were not held last frame.
+    const padNow = new Set<number>();
+    let sx = 0;
+    let sz = 0;
+    for (const g of this.pads()) {
+      g.buttons.forEach((b, i) => { if (b.pressed || b.value > 0.5) padNow.add(i); });
+      const ax = g.axes[0] ?? 0;
+      const az = g.axes[1] ?? 0;
+      if (Math.hypot(ax, az) > Math.hypot(sx, sz)) { sx = ax; sz = az; }
+    }
+    const padHit = new Set([...padNow].filter((b) => !this.padWas.has(b)));
+    this.padWas = padNow;
+    const held = (codes: string[]) => codes.some((c) => this.keys.has(c));
+    const hit = (codes: string[]) => codes.some((c) => this.pressed.has(c));
+    const padHeld = (a: keyof PadMap) => pm[a].some((b) => padNow.has(b));
+    const padPress = (a: keyof PadMap) => pm[a].some((b) => padHit.has(b));
     let x = 0;
     let z = 0;
-    if (k.has('arrowleft') || k.has('a')) x -= 1;
-    if (k.has('arrowright') || k.has('d')) x += 1;
-    if (k.has('arrowup') || k.has('w')) z -= 1;
-    if (k.has('arrowdown') || k.has('s')) z += 1;
+    if (held(m.left) || padHeld('left')) x -= 1;
+    if (held(m.right) || padHeld('right')) x += 1;
+    if (held(m.up) || padHeld('up')) z -= 1;
+    if (held(m.down) || padHeld('down')) z += 1;
+    const stick = Math.hypot(sx, sz);
+    if (stick > STICK_DEAD) {
+      // Rescale past the dead zone so a light push still walks.
+      const k = Math.min(1, (stick - STICK_DEAD) / (1 - STICK_DEAD)) / stick;
+      x = sx * k;
+      z = sz * k;
+    }
     if (this.touchMove.active) {
       x = this.touchMove.x;
       z = this.touchMove.z;
@@ -131,11 +178,13 @@ export class Input {
     const state: InputState = {
       moveX: x,
       moveZ: z,
-      shoot: this.pressed.has(' ') || this.pressed.has('x') || this.pressed.has('k') || this.touchPressed.has('shoot'),
-      pass: this.pressed.has('z') || this.pressed.has('shift') || this.pressed.has('j') || this.pressed.has('enter') || this.touchPressed.has('pass'),
-      sprint: k.has('shift') || k.has('l') || this.touchHeld.has('sprint'),
-      switchPlayer: this.pressed.has('q') || this.pressed.has('e') || this.touchPressed.has('switch'),
-      pause: this.pressed.has('escape') || this.pressed.has('p'),
+      shoot: hit(m.shoot) || padPress('shoot') || this.touchPressed.has('shoot'),
+      shootHeld: held(m.shoot) || padHeld('shoot') || this.touchHeld.has('shoot'),
+      pass: hit(m.pass) || padPress('pass') || this.touchPressed.has('pass'),
+      sprint: held(m.sprint) || padHeld('sprint') || this.touchHeld.has('sprint'),
+      switchPlayer: hit(m.switch) || padPress('switch') || this.touchPressed.has('switch'),
+      pause: hit(m.pause) || padPress('pause'),
+      trick: hit(m.trick) || padPress('trick') || this.touchPressed.has('trick'),
     };
     this.pressed.clear();
     this.touchPressed.clear();

@@ -1,6 +1,6 @@
-# Five-a-Side Stars
+# Goal Rush!
 
-A top-down 3D 5-a-side football browser game for kids aged 7 and up. You build
+Goal Rush! is a top-down 3D five-a-side football browser game for kids aged 7 and up. You build
 grassroots youth teams in age groups U5 to U10, give the players names, numbers
 and kits, and play short matches against the computer.
 
@@ -14,18 +14,52 @@ npm install
 npm run dev      # dev server with hot reload
 npm run build    # type-check and build to dist/
 npm run preview  # serve the built game
+npm test         # run the automated checks (saves, league, cup, match engine)
 ```
+
+## Ways to play
+
+- **Quick Match**: one match against the computer (or a friend on the same keyboard).
+- **Tournament**: a four-team cup with two semi-finals and a final. Draws go to penalties.
+- **League**: a saved career through five tiers, from the Acorn League (Tier 5) up to the Star Premier League (Tier 1). Five matches a season, top two go up, bottom goes down, and the computer teams get stronger every tier.
+- **Penalties**: a best-of-five shoot-out, then sudden death. You take and save.
+- **Training**: just you and a keeper; score as many as you can before time runs out (rocket shots count double).
+- **Sticker album**: finish matches, win cups and hit milestones to collect stickers; some unlock extra badge icons.
+- **Team sheet**: from the squad step of the team builder, download a printable PNG team sheet.
+- **Weather and time of day**: pick sunny, cloudy, rain, snow, sunset or a night game under floodlights on the setup screen, or let the game surprise you.
+- **Commentary and replays**: a commentator who knows the score, calls shots wide, over or off the bar, and an instant slow-motion replay of every goal (off when reduce motion is on).
+
+## Sound
+
+Every sound is made in code with the Web Audio API, so there are no audio
+files: a crowd that murmurs, holds its breath when the ball nears a goal and
+roars at a goal, the referee's pea whistle, ball thumps, applause, rain and
+wind, and a looping menu tune with drums and a bass line. See `src/game/sfx.ts`,
+`src/game/music.ts` and `src/game/audio.ts`.
+
+## Parents and privacy
+
+Everything stays on the device: no accounts, no chat, no adverts, no purchases
+and no tracking. Teams, settings and stickers live in the browser's
+localStorage. A small word filter keeps rude words out of team and player
+names. The Parents screen (behind a quick multiplication sum) has toggles for
+sound, music and reduce motion, and a reset button. Once loaded, the game
+works offline and can be added to a phone or tablet home screen.
 
 ## Controls
 
 | Action | Keyboard | Touch |
 | --- | --- | --- |
 | Move | Arrow keys or WASD | Left joystick |
-| Shoot | Space or X | Shoot button |
+| Shoot | Hold Space or X, release to shoot | Shoot button (hold for power) |
 | Pass | Z or Enter | Pass button |
 | Sprint | Shift | Sprint button |
 | Switch player | Q | Switch button |
 | Pause | Esc or P | Pause button |
+
+Two players on one keyboard: player 1 uses WASD, Space (shoot), Z (pass), left
+Shift (sprint) and Q (switch); player 2 uses the arrow keys, Enter, `/`, right
+Shift and `.`.
 
 ## Age groups
 
@@ -33,3 +67,19 @@ U5 to U10 are the age groups of the teams **in the game**, not of the player at
 the keyboard. The age group changes player size, speed, shot power, ball
 control, keeper reach, pitch size and match length. See
 `src/data/ageGroups.ts`.
+
+## Look and feel
+
+The UI follows a Google Stitch design kit: Fredoka type, a sunshine-yellow
+primary, comic-ink navy outlines with hard drop shadows, pill buttons and
+20px cards. The tokens and component rules are in `docs/design-system.md`;
+the shared markup helpers (console bar, page heading, lobby dock) live in
+`src/ui/shell.ts` and the styles in `src/style.css`. Stadium and mascot art
+from the kit is in `public/art/`.
+
+## Credits
+
+The kids on the pitch are built from the
+[KayKit Character Pack: Adventurers](https://kaylousberg.itch.io/kaykit-adventurers)
+by Kay Lousberg (CC0, public domain). The game repaints the model with each
+team's kit; see `public/models/LICENSE.md` and `tools/build-player-model.mjs`.

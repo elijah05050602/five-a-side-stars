@@ -1,14 +1,16 @@
 {
-  "name": "five-a-side-stars",
+  "name": "goal-rush",
   "private": true,
-  "version": "0.1.0",
-  "description": "A top-down 3D 5-a-side football browser game for kids, with U5 to U10 youth teams you build yourself.",
+  "version": "1.0.0",
+  "description": "Goal Rush! A top-down 3D five-a-side football browser game for kids, with U5 to U10 youth teams you build yourself.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "license": "MIT",
   "dependencies": {
@@ -17,6 +19,7 @@
   "devDependencies": {
     "@types/three": "^0.186.0",
     "typescript": "^5.9.3",
-    "vite": "^8.3.2"
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
   }
 }
