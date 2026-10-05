@@ -140,7 +140,7 @@ export class MatchScene {
       const m = this.models.get(p)!;
       m.group.position.set(p.pos.x, 0, p.pos.z);
       m.setFacing(p.facing);
-      m.animate(Math.hypot(p.vel.x, p.vel.z), p.kickAnim, p.diveAnim, p.diveDir, dt, scale);
+      m.animate(Math.hypot(p.vel.x, p.vel.z), p.kickAnim, p.diveAnim, p.diveDir, dt, scale, Math.max(0, 0.75 - this.sim.stats.control) * 2);
       const isControlled = p === this.sim.controlled;
       m.setSelected(isControlled || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isControlled ? 0xffd23f : 0xffffff);
     }

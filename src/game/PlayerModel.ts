@@ -135,11 +135,13 @@ export class PlayerModel {
    * Procedural animation. speed in m/s, kick 0..1 (1 = just kicked),
    * dive 0..1 with direction, dt seconds.
    */
-  animate(speed: number, kick: number, dive: number, diveDir: number, dt: number, scale: number): void {
+  animate(speed: number, kick: number, dive: number, diveDir: number, dt: number, scale: number, wobble = 0): void {
     const stride = speed / Math.max(0.4, scale);
     this.walk += stride * dt * 2.2;
     const amp = Math.min(1, speed / 3) * 0.75;
     const swing = Math.sin(this.walk) * amp;
+    // Little ones run with a wobble: the body sways side to side as they go.
+    this.body.rotation.z = wobble * Math.sin(this.walk * 0.5) * 0.18 * Math.min(1, speed / 2);
     this.legL.rotation.z = swing;
     this.legR.rotation.z = -swing;
     this.armL.rotation.z = -swing * 0.8;

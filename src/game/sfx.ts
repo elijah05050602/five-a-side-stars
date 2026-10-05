@@ -45,6 +45,10 @@ export class Sfx {
         [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.25, 'square', 0.08, i * 0.12));
         tone(80, 0.5, 'sawtooth', 0.1, 0, 0.5);
         break;
+      case 'foul':
+        tone(1500, 0.18, 'square', 0.06, 0, 1.0);
+        tone(1500, 0.18, 'square', 0.06, 0.22, 1.0);
+        break;
       case 'kickoff':
       case 'halftime':
       case 'fulltime':

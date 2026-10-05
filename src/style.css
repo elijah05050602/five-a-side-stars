@@ -166,6 +166,7 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .hud-banner { position: absolute; top: 28%; left: 50%; transform: translate(-50%, -50%) scale(0.6); opacity: 0; transition: all 0.25s cubic-bezier(.2,1.6,.4,1); text-align: center; pointer-events: none; }
 .hud-banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 .goal-text { font-size: clamp(60px, 14vw, 140px); font-weight: 700; color: var(--yellow); -webkit-text-stroke: 4px var(--navy); text-shadow: 0 8px 0 var(--navy); line-height: 1; }
+.goal-text-small { font-size: clamp(40px, 9vw, 90px); }
 .goal-sub { font-size: 26px; font-weight: 700; color: var(--white); text-shadow: 0 3px 0 var(--navy); background: rgba(27,42,65,0.55); border-radius: 14px; padding: 6px 16px; display: inline-block; margin-top: 10px; }
 .save-text { font-size: 34px; font-weight: 700; color: var(--white); text-shadow: 0 3px 0 var(--navy); background: rgba(27,42,65,0.45); border-radius: 14px; padding: 8px 18px; }
 .confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }

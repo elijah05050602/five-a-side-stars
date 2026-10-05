@@ -128,6 +128,11 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
           confetti(root, team.kit.shirt, team.kit.shirt2);
         } else if (ev.type === 'save') {
           showBanner(`<div class="save-text">Great save, ${esc(ev.player?.name ?? 'keeper')}!</div>`, 1200);
+        } else if (ev.type === 'foul') {
+          const victimTeam = s.teams[1 - ev.side!];
+          showBanner(ev.kind === 'penalty'
+            ? `<div class="goal-text goal-text-small">PENALTY!</div><div class="goal-sub">${esc(victimTeam.name)} to take it</div>`
+            : `<div class="save-text">Foul! Free kick to ${esc(victimTeam.name)}</div>`, 1800);
         } else if (ev.type === 'kickoff' && s.clock > 0.1) {
           showBanner(`<div class="save-text">Kick off!</div>`, 900);
         }
