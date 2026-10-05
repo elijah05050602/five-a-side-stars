@@ -120,7 +120,7 @@ export class PlayerModel {
     this.isKeeper = player.position === 'GK';
     this.scale = scale;
     this.material = toonMaterial({ map: this.atlas() });
-    this.faceMat = toonMaterial({ map: faceTexture(this.skin, 'neutral') });
+    this.faceMat = toonMaterial({ map: faceTexture(this.skin, 'neutral', 0, 0, this.hair) });
     this.hairMat = toonMaterial({ color: this.hair });
 
     const s = scale * MODEL_SCALE;
@@ -301,7 +301,7 @@ export class PlayerModel {
     const key = `${expr}|${gx}|${gy}`;
     if (key === this.faceKey) return;
     this.faceKey = key;
-    this.faceMat.map = faceTexture(this.skin, expr, gx, gy);
+    this.faceMat.map = faceTexture(this.skin, expr, gx, gy, this.hair);
     this.faceMat.needsUpdate = true;
   }
 
