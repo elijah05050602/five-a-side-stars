@@ -14,6 +14,7 @@ npm install
 npm run dev      # dev server with hot reload
 npm run build    # type-check and build to dist/
 npm run preview  # serve the built game
+npm test         # run the automated checks (saves, league, cup, match engine)
 ```
 
 ## Ways to play
