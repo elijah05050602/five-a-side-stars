@@ -3,10 +3,23 @@ import { addOutline, toonMaterial } from './toon';
 
 export interface PitchDims { length: number; width: number; goalWidth: number; goalHeight: number; goalDepth: number }
 
+/** Where the four floodlight towers stand: [x, y, z] of each lamp head. */
+export function floodlightPositions(L: number, W: number): [number, number, number][] {
+  const out: [number, number, number][] = [];
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) out.push([sx * (L / 2 + 4.5), 9.5, sz * (W / 2 + 4.5)]);
+  return out;
+}
+
+/** The parts of the pitch the match scene animates: the nets and the big scoreboard. */
+export interface PitchExtras { nets: GoalNet[]; scoreboard: Scoreboard }
+export function pitchExtras(pitch: THREE.Group): PitchExtras {
+  return pitch.userData.extras as PitchExtras;
+}
+
 const KIT_PALETTE = ['#e63946', '#3da5f4', '#ffd23f', '#2eb872', '#ff6fb5', '#ff7a00', '#6a4c93', '#ffffff', '#1b2a41'];
 
 /** Mown stripes with a sprinkle of lighter and darker blades, so the grass is not a flat colour. */
-function grassTexture(stripes: number, light: string, dark: string, speckle = true): THREE.CanvasTexture {
+export function grassTexture(stripes: number, light: string, dark: string, speckle = true): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 1024; c.height = 1024;
   const ctx = c.getContext('2d')!;
@@ -68,6 +81,7 @@ export function buildPitch(d: PitchDims): THREE.Group {
   const grass = new THREE.Mesh(new THREE.PlaneGeometry(L + 6, W + 6), new THREE.MeshStandardMaterial({ map: grassTexture(12, '#3cc47c', '#33b36f'), roughness: 1 }));
   grass.rotation.x = -Math.PI / 2;
   grass.receiveShadow = true;
+  grass.userData.grass = true;
   g.add(grass);
 
   // Surround: darker, rougher grass outside the boards.
@@ -78,6 +92,7 @@ export function buildPitch(d: PitchDims): THREE.Group {
   apron.rotation.x = -Math.PI / 2;
   apron.position.y = -0.01;
   apron.receiveShadow = true;
+  apron.userData.grass = 'apron';
   g.add(apron);
   // Daisies dotted about the surround.
   const daisy = new THREE.InstancedMesh(new THREE.CircleGeometry(0.09, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }), 160);
@@ -145,14 +160,23 @@ export function buildPitch(d: PitchDims): THREE.Group {
   board(0, -W / 2 - t / 2, L + t * 2, t);
   board(0, W / 2 + t / 2, L + t * 2, t);
   const sideLen = (W - d.goalWidth) / 2;
-  for (const sx of [-1, 1]) {
+  const nets: GoalNet[] = [];
+  for (const sx of [-1, 1] as const) {
     board(sx * (L / 2 + t / 2), -(d.goalWidth / 2 + sideLen / 2), t, sideLen);
     board(sx * (L / 2 + t / 2), d.goalWidth / 2 + sideLen / 2, t, sideLen);
-    g.add(buildGoal(sx, d));
+    const net = new GoalNet(sx, d);
+    nets.push(net);
+    g.add(buildGoal(sx, d), net.group);
   }
 
   // A small stand full of fans along the far side, benches and cones on the near side.
-  g.add(buildStand(L, W));
+  g.add(buildStand(L, W), buildBunting(L, W));
+  const scoreboard = new Scoreboard();
+  scoreboard.group.position.set(-L / 2 - 7.5, 0, 0);
+  scoreboard.group.rotation.y = Math.PI / 2;
+  g.add(scoreboard.group);
+  for (const [x, y, z] of floodlightPositions(L, W)) g.add(buildFloodlight(x, y, z));
+  g.userData.extras = { nets, scoreboard } satisfies PitchExtras;
   for (const sx of [-1, 1]) g.add(buildBench(sx * L * 0.18, W / 2 + 2.2));
   const coneMat = toonMaterial({ color: 0xff7a00 });
   for (let i = 0; i < 4; i++) {
@@ -172,9 +196,10 @@ export function buildPitch(d: PitchDims): THREE.Group {
     trunk.position.y = 0.5;
     addOutline(trunk, 0.03);
     const size = 1.1 + (i % 3) * 0.3;
-    const top = new THREE.Mesh(new THREE.SphereGeometry(size, 10, 8), leafMats[i % 3]);
+    const top = new THREE.Mesh(new THREE.SphereGeometry(size, 10, 8), leafMats[i % 3].clone());
     top.position.y = 1.0 + size * 0.9;
     top.castShadow = true;
+    top.userData.leaves = true;
     addOutline(top, 0.05);
     const top2 = new THREE.Mesh(new THREE.SphereGeometry(size * 0.7, 9, 7), leafMats[(i + 1) % 3]);
     top2.position.set(size * 0.5, 1.0 + size * 1.3, size * 0.3);
@@ -256,6 +281,24 @@ function buildStand(L: number, W: number): THREE.Group {
   return g;
 }
 
+/** A string of little coloured flags along the front of the stand roof. */
+function buildBunting(L: number, W: number): THREE.InstancedMesh {
+  const len = L * 0.8;
+  const z0 = -W / 2 - 3.2;
+  const count = Math.floor(len / 0.5);
+  const tri = new THREE.Shape();
+  tri.moveTo(-0.18, 0); tri.lineTo(0.18, 0); tri.lineTo(0, -0.32); tri.closePath();
+  const bunting = new THREE.InstancedMesh(new THREE.ShapeGeometry(tri), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), count);
+  const m = new THREE.Matrix4();
+  const c = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    m.makeTranslation(-len / 2 + 0.25 + i * 0.5, 3.1 - Math.abs(Math.sin(i * 0.9)) * 0.08, z0 + 0.95);
+    bunting.setMatrixAt(i, m);
+    bunting.setColorAt(i, c.set(KIT_PALETTE[i % KIT_PALETTE.length]));
+  }
+  return bunting;
+}
+
 function buildBench(x: number, z: number): THREE.Group {
   const g = new THREE.Group();
   const seat = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.08, 0.4), toonMaterial({ color: 0xffd23f }));
@@ -320,46 +363,181 @@ function buildGoal(sx: number, d: PitchDims): THREE.Group {
     side.rotation.z = sx * Math.atan2(gd, gh * 0.5);
     g.add(side);
   }
-  // Net: a woven texture on translucent panels (back, top, sides)
-  const netMat = new THREE.MeshBasicMaterial({ map: netTexture(), transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false });
-  const back = new THREE.Mesh(new THREE.PlaneGeometry(gw, gh * 0.55), netMat);
-  back.position.set(x0 + sx * gd, gh * 0.27, 0);
-  back.rotation.y = Math.PI / 2;
-  g.add(back);
-  const top = new THREE.Mesh(new THREE.PlaneGeometry(Math.hypot(gd, gh * 0.5), gw), netMat);
-  top.position.set(x0 + sx * gd / 2, gh * 0.75, 0);
-  top.rotation.x = Math.PI / 2;
-  top.rotation.y = sx * -Math.atan2(gh * 0.5, gd);
-  g.add(top);
-  for (const z of [-gw / 2, gw / 2]) {
-    const shape = new THREE.Shape();
-    shape.moveTo(0, 0);
-    shape.lineTo(sx * gd, 0);
-    shape.lineTo(sx * gd, gh * 0.5);
-    shape.lineTo(0, gh);
-    shape.closePath();
-    const sideNet = new THREE.Mesh(new THREE.ShapeGeometry(shape), netMat);
-    sideNet.position.set(x0, 0, z);
-    g.add(sideNet);
-  }
   return g;
 }
 
-let netTex: THREE.CanvasTexture | null = null;
-function netTexture(): THREE.CanvasTexture {
-  if (netTex) return netTex;
-  const c = document.createElement('canvas');
-  c.width = 128; c.height = 128;
-  const ctx = c.getContext('2d')!;
-  ctx.clearRect(0, 0, 128, 128);
-  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-  ctx.lineWidth = 3;
-  for (let i = 0; i <= 128; i += 16) {
-    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 128); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(128, i); ctx.stroke();
+/**
+ * A proper goal net: strands of rope hanging from the crossbar over a back
+ * frame to the ground, with a little sag, and side panels. When the ball
+ * hits it the net bulges out and wobbles back.
+ */
+export class GoalNet {
+  readonly group = new THREE.Group();
+  private readonly lines: THREE.LineSegments;
+  private readonly positions: Float32Array;
+  private readonly rest: Float32Array;
+  private readonly params: Float32Array; // t (0 crossbar .. 1 ground) and z for each vertex
+  private bulge = 0;
+  private hitZ = 0;
+  private wobble = 0;
+
+  constructor(private readonly sx: 1 | -1, private readonly d: PitchDims) {
+    const gw = d.goalWidth, gh = d.goalHeight, gd = d.goalDepth;
+    const x0 = sx * d.length / 2;
+    const cols = 16, rows = 12;
+    const segs: number[] = [];
+    const params: number[] = [];
+    const point = (t: number, z: number): [number, number, number] => {
+      // Path from the crossbar back and down to the ground, with sag in the middle.
+      const sag = Math.sin(Math.PI * t) * 0.12;
+      let dx: number, y: number;
+      if (t < 0.45) { const u = t / 0.45; dx = gd * u; y = gh - (gh * 0.5) * u - sag; }
+      else { const u = (t - 0.45) / 0.55; dx = gd + sag; y = gh * 0.5 * (1 - u); }
+      return [x0 + sx * dx, y, z];
+    };
+    const push = (a: [number, number, number], ta: number, za: number, b: [number, number, number], tb: number, zb: number) => { segs.push(...a, ...b); params.push(ta, za, tb, zb); };
+    for (let r = 0; r <= rows; r++) {
+      const t = r / rows;
+      for (let c = 0; c < cols; c++) {
+        const z1 = -gw / 2 + (gw * c) / cols, z2 = -gw / 2 + (gw * (c + 1)) / cols;
+        push(point(t, z1), t, z1, point(t, z2), t, z2);
+      }
+    }
+    for (let c = 0; c <= cols; c++) {
+      const z = -gw / 2 + (gw * c) / cols;
+      for (let r = 0; r < rows; r++) push(point(r / rows, z), r / rows, z, point((r + 1) / rows, z), (r + 1) / rows, z);
+    }
+    // Side panels: strands running back from each post, and up from the ground to the top slope.
+    for (const z of [-gw / 2, gw / 2]) {
+      for (let r = 0; r <= 6; r++) {
+        const y = (gh * r) / 6;
+        const dx = y <= gh * 0.5 ? gd : gd * (gh - y) / (gh * 0.5);
+        push([x0, y, z], -1, z, [x0 + sx * dx, y, z], -1, z);
+      }
+      for (let c = 1; c <= 4; c++) {
+        const u = c / 5;
+        push([x0 + sx * gd * u, 0, z], -1, z, [x0 + sx * gd * u, gh - gh * 0.5 * u, z], -1, z);
+      }
+    }
+    this.positions = new Float32Array(segs);
+    this.rest = new Float32Array(segs);
+    this.params = new Float32Array(params);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }));
+    this.lines.frustumCulled = false;
+    this.group.add(this.lines);
+    // A faint translucent skin so the net reads as a surface from a distance.
+    const skin = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false });
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(gw, gh * 0.5), skin);
+    back.position.set(x0 + sx * gd, gh * 0.25, 0);
+    back.rotation.y = Math.PI / 2;
+    const top = new THREE.Mesh(new THREE.PlaneGeometry(Math.hypot(gd, gh * 0.5), gw), skin);
+    top.position.set(x0 + sx * gd / 2, gh * 0.75, 0);
+    top.rotation.x = Math.PI / 2;
+    top.rotation.y = sx * -Math.atan2(gh * 0.5, gd);
+    this.group.add(back, top);
   }
-  netTex = new THREE.CanvasTexture(c);
-  netTex.wrapS = netTex.wrapT = THREE.RepeatWrapping;
-  netTex.repeat.set(4, 3);
-  return netTex;
+
+  /** The ball has hit the net at z with this speed. */
+  hit(z: number, speed: number): void {
+    this.hitZ = THREE.MathUtils.clamp(z, -this.d.goalWidth / 2, this.d.goalWidth / 2);
+    this.bulge = Math.min(0.6, 0.15 + speed * 0.035);
+    this.wobble = 0;
+  }
+
+  update(dt: number): void {
+    if (this.bulge <= 0.001) return;
+    this.wobble += dt;
+    this.bulge *= Math.pow(0.08, dt);
+    const amount = this.bulge * Math.cos(this.wobble * 9);
+    const p = this.positions, r = this.rest, q = this.params;
+    for (let i = 0; i < q.length; i += 2) {
+      const t = q[i], z = q[i + 1];
+      const v = (i / 2) * 3;
+      if (t < 0) { p[v] = r[v]; p[v + 1] = r[v + 1]; continue; }
+      const shape = Math.sin(Math.PI * Math.min(1, t * 1.1)) * Math.exp(-Math.pow((z - this.hitZ) / 0.7, 2));
+      p[v] = r[v] + this.sx * amount * shape;
+      p[v + 1] = r[v + 1] - Math.abs(amount) * shape * 0.15;
+    }
+    if (this.bulge <= 0.001) p.set(r);
+    (this.lines.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+  }
+}
+
+/** A big scoreboard on two legs behind one goal, drawn on a canvas so it can show the live score. */
+export class Scoreboard {
+  readonly group = new THREE.Group();
+  private readonly canvas = document.createElement('canvas');
+  private readonly tex: THREE.CanvasTexture;
+
+  constructor() {
+    this.canvas.width = 512; this.canvas.height = 224;
+    this.tex = new THREE.CanvasTexture(this.canvas);
+    this.tex.colorSpace = THREE.SRGBColorSpace;
+    const board = new THREE.Mesh(new THREE.BoxGeometry(6, 2.6, 0.25), [
+      toonMaterial({ color: 0x1b2a41 }), toonMaterial({ color: 0x1b2a41 }), toonMaterial({ color: 0x1b2a41 }), toonMaterial({ color: 0x1b2a41 }),
+      new THREE.MeshBasicMaterial({ map: this.tex }), toonMaterial({ color: 0x1b2a41 }),
+    ]);
+    board.position.y = 4.0;
+    board.castShadow = true;
+    addOutline(board, 0.03);
+    const legMat = toonMaterial({ color: 0x1b2a41 });
+    for (const sx of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.8, 8), legMat);
+      leg.position.set(sx * 2.4, 1.4, 0);
+      this.group.add(leg);
+    }
+    const star = new THREE.Mesh(new THREE.CircleGeometry(0.35, 5), new THREE.MeshBasicMaterial({ color: 0xffd23f }));
+    star.position.set(0, 5.65, 0.05);
+    this.group.add(board, star);
+    this.set('HOME', 'AWAY', 0, 0);
+  }
+
+  set(home: string, away: string, h: number, a: number): void {
+    const c = this.canvas.getContext('2d')!;
+    c.fillStyle = '#0f1b30';
+    c.fillRect(0, 0, 512, 224);
+    c.fillStyle = '#1b2a41';
+    c.fillRect(12, 12, 488, 200);
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillStyle = '#ffffff';
+    c.font = 'bold 54px system-ui, sans-serif';
+    c.fillText(home.slice(0, 3).toUpperCase(), 100, 70);
+    c.fillText(away.slice(0, 3).toUpperCase(), 412, 70);
+    c.fillStyle = '#ffd23f';
+    c.font = 'bold 120px system-ui, sans-serif';
+    c.fillText(String(h), 100, 158);
+    c.fillText(String(a), 412, 158);
+    c.fillStyle = '#8d99ae';
+    c.font = 'bold 48px system-ui, sans-serif';
+    c.fillText('-', 256, 150);
+    c.fillStyle = '#3da5f4';
+    c.font = 'bold 26px system-ui, sans-serif';
+    c.fillText('FIVE-A-SIDE STARS', 256, 46);
+    this.tex.needsUpdate = true;
+  }
+}
+
+/** A floodlight tower: a tall pole with a bank of six lamps. Weather turns the lamps on at night. */
+function buildFloodlight(x: number, y: number, z: number): THREE.Group {
+  const g = new THREE.Group();
+  const poleMat = toonMaterial({ color: 0x9aa7b8 });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.16, y, 8), poleMat);
+  pole.position.y = y / 2;
+  pole.castShadow = true;
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.9, 0.3), toonMaterial({ color: 0x1b2a41 }));
+  head.position.y = y;
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0xf6f8ff, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.3 });
+  for (let i = 0; i < 6; i++) {
+    const lamp = new THREE.Mesh(new THREE.CircleGeometry(0.17, 10), lampMat);
+    lamp.position.set(-0.6 + (i % 3) * 0.6, y + (i < 3 ? 0.2 : -0.2), 0.16);
+    lamp.userData.lamp = true;
+    head.add(lamp);
+  }
+  g.add(pole, head);
+  g.position.set(x, 0, z);
+  g.lookAt(0, 0, 0);
+  return g;
 }
