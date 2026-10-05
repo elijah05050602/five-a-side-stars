@@ -478,9 +478,12 @@ export class MatchSim {
       return;
     }
     if (input.switchPlayer && current) {
-      const i = outfield.indexOf(current);
-      this.controlledBy[side] = outfield[(i + 1) % outfield.length];
-      this.switchHolds[side] = 1.0;
+      // Jump to the team-mate nearest the ball (other than the current one) and keep them long
+      // enough to actually use them before the automatic pick takes over again.
+      const others = outfield.filter((p) => p !== current);
+      const target = others.length ? this.nearest(others, b.pos) : current;
+      this.controlledBy[side] = target ?? current;
+      this.switchHolds[side] = 2.5;
       return;
     }
     this.switchHolds[side] = Math.max(0, this.switchHolds[side] - 1 / 60);
