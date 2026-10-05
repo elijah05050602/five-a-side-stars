@@ -10,6 +10,7 @@ Changes made for Five-a-Side Stars (see `tools/build-player-model.mjs`):
 - Rogue body with the Rogue, Mage and Knight heads on the shared rig
 - weapons, capes, hats and the pack texture removed
 - UVs remapped to a simple colour grid so the game can paint kit colours
+- modelled eyes and eyebrows removed; the face is a flat-mapped patch the game paints
 - only the animations the game uses are kept; geometry is quantised
 
 Thank you Kay for making these free for everyone.

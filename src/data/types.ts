@@ -5,9 +5,12 @@ export type Position = 'GK' | 'DEF' | 'ATT';
 export type KitPattern = 'plain' | 'stripes' | 'hoops' | 'halves' | 'sash' | 'chevron';
 export const KIT_PATTERNS: KitPattern[] = ['plain', 'stripes', 'hoops', 'halves', 'sash', 'chevron'];
 
-export type HairStyle = 'short' | 'spiky' | 'long' | 'curly' | 'bald';
-/** 'curly' is kept in the type for old saves; it shows as the short fringe style. */
-export const HAIR_STYLES: HairStyle[] = ['short', 'spiky', 'long', 'bald'];
+export type HairStyle = 'short' | 'spiky' | 'long' | 'curly' | 'afro' | 'buns' | 'bald';
+export const HAIR_STYLES: HairStyle[] = ['short', 'spiky', 'long', 'curly', 'afro', 'buns', 'bald'];
+export const HAIR_STYLE_LABELS: Record<HairStyle, string> = { short: 'Short', spiky: 'Fringe', long: 'Long', curly: 'Curly', afro: 'Afro', buns: 'Buns', bald: 'Bald' };
+/** Body shape: a little variety in height and width (looks only). */
+export type Build = 'small' | 'regular' | 'tall' | 'sturdy';
+export const BUILDS: Build[] = ['small', 'regular', 'tall', 'sturdy'];
 
 /** One small perk per player, kept gentle so nobody is useless. */
 export type Special = 'none' | 'speedy' | 'power' | 'keeper';
@@ -47,6 +50,7 @@ export interface Player {
   skin: string;
   hair: string;
   hairStyle: HairStyle;
+  build?: Build;
   boots: string;
   special: Special;
   /** In the starting five (the rest are subs). */

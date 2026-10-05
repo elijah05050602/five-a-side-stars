@@ -59,37 +59,69 @@ findNode(doc, 'Rogue_Head').setName('Head_long');
 
 // Semantic atlas: every body part gets its own cell so the game can paint kit colours.
 // Cells are (col,row) on an 8x4 grid; the game paints the same grid (see src/game/playerAtlas.ts).
-const CELL = { skin: [0, 0], hair: [1, 0], eyes: [2, 0], brow: [3, 0], shirt: [0, 1], shirt2: [1, 1], shorts: [2, 1], socks: [3, 1], belt: [4, 1], buckle: [5, 1] };
+const CELL = { skin: [0, 0], hair: [1, 0], eyes: [2, 0], brow: [3, 0], shirt: [0, 1], shirt2: [1, 1], shorts: [2, 1], socks: [3, 1] };
 const MAP = {
   Head_long: { '0,0': 'skin', '1,0': 'hair', '2,0': 'eyes', '3,0': 'skin' },
   Head_short: { '0,0': 'skin', '1,0': 'hair', '2,0': 'eyes', '1,1': 'hair' },
   Head_plain: { '0,0': 'skin', '1,0': 'hair', '2,0': 'eyes' },
-  Rogue_Body: { '0,1': 'shirt', '1,1': 'shirt2', '6,0': 'belt', '3,0': 'buckle', '5,0': 'belt', '7,1': 'belt' },
+  // The belt holds the tunic and its hem together, so it stays but is painted as shirt.
+  Rogue_Body: { '0,1': 'shirt', '1,1': 'shirt2', '6,0': 'shirt', '3,0': 'shirt', '5,0': 'shirt', '7,1': 'shirt' },
   Rogue_ArmLeft: { '5,2': 'skin', '0,1': 'shirt', '5,0': 'shirt', '1,1': 'shirt2' },
   Rogue_ArmRight: { '5,2': 'skin', '0,1': 'shirt', '5,0': 'shirt', '1,1': 'shirt2' },
   Rogue_LegLeft: { '3,2': 'shorts', '7,1': 'socks', '0,0': 'skin' },
   Rogue_LegRight: { '3,2': 'shorts', '7,1': 'socks', '0,0': 'skin' },
 };
 if (REMAP) {
+  const faceMat = doc.createMaterial('face').setDoubleSided(false);
   for (const node of root.listNodes()) {
     const m = MAP[node.getName()]; if (!m || !node.getMesh()) continue;
+    const isHead = node.getName().startsWith('Head_');
+    // three.js names loaded meshes after the glTF mesh, so give meshes their node's name.
+    node.getMesh().setName(node.getName());
     for (const prim of node.getMesh().listPrimitives()) {
       const uv = prim.getAttribute('TEXCOORD_0');
       const pos = prim.getAttribute('POSITION').getArray();
-      const arr = Float32Array.from(uv.getArray());
-      for (let i = 0; i < arr.length; i += 2) {
-        const u = arr[i], v = arr[i + 1];
+      const src = uv.getArray();
+      const arr = Float32Array.from(src);
+      const vcount = arr.length / 2;
+      // Per-vertex semantic target; eyes and brows are painted on the face texture instead of modelled.
+      const kind = new Array(vcount);
+      for (let i = 0; i < vcount; i++) {
+        const u = src[i * 2], v = src[i * 2 + 1];
         const c = Math.min(7, Math.floor(u * 8)), r = Math.min(3, Math.floor(v * 4));
         let target = m[`${c},${r}`];
-        if (!target) { console.warn('unmapped cell', node.getName(), c, r); continue; }
-        // Eyebrows share the hair cell; split them off by position (front of the face, eye height).
-        const y = pos[(i / 2) * 3 + 1], z = pos[(i / 2) * 3 + 2];
+        if (!target) { console.warn('unmapped cell', node.getName(), c, r); target = 'skin'; }
+        const y = pos[i * 3 + 1], z = pos[i * 3 + 2];
         if (target === 'hair' && y < 1.78 && z > 0.3) target = 'brow';
-        const [tc, tr] = CELL[target];
-        arr[i] = (tc + (u * 8 - c)) / 8; arr[i + 1] = (tr + (v * 4 - r)) / 4;
+        if (isHead && target === 'skin' && z > 0.25 && y > 1.3 && y < 1.92) target = 'face';
+        kind[i] = target;
+        const t = CELL[target === 'face' ? 'skin' : target];
+        arr[i * 2] = (t[0] + (u * 8 - c)) / 8; arr[i * 2 + 1] = (t[1] + (v * 4 - r)) / 4;
       }
-      const nu = doc.createAccessor().setType('VEC2').setArray(arr).setBuffer(root.listBuffers()[0]);
-      prim.setAttribute('TEXCOORD_0', nu);
+      // Split triangles: dropped (modelled eyes/brows, belt and pouches), face, or body.
+      const idx = Array.from(prim.getIndices().getArray());
+      const keep = [], face = [];
+      const DROP = new Set(isHead ? ['eyes', 'brow'] : []);
+      for (let t = 0; t < idx.length; t += 3) {
+        const ks = [kind[idx[t]], kind[idx[t + 1]], kind[idx[t + 2]]];
+        if (ks.some((k) => DROP.has(k))) continue;
+        if (ks.every((k) => k === 'face')) face.push(idx[t], idx[t + 1], idx[t + 2]);
+        else keep.push(idx[t], idx[t + 1], idx[t + 2]);
+      }
+      const buffer = root.listBuffers()[0];
+      prim.setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint16Array(keep)).setBuffer(buffer));
+      prim.setAttribute('TEXCOORD_0', doc.createAccessor().setType('VEC2').setArray(arr).setBuffer(buffer));
+      if (face.length) {
+        // Planar UVs over the face box so a 2D face texture lands eyes-at-eye-height.
+        const fuv = new Float32Array(vcount * 2);
+        for (let i = 0; i < vcount; i++) { fuv[i * 2] = (pos[i * 3] + 0.36) / 0.72; fuv[i * 2 + 1] = (1.92 - pos[i * 3 + 1]) / 0.62; }
+        const fp = doc.createPrimitive().setMaterial(faceMat).setMode(prim.getMode());
+        for (const sem of prim.listSemantics()) fp.setAttribute(sem, prim.getAttribute(sem));
+        fp.setAttribute('TEXCOORD_0', doc.createAccessor().setType('VEC2').setArray(fuv).setBuffer(buffer));
+        fp.setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint16Array(face)).setBuffer(buffer));
+        node.getMesh().addPrimitive(fp);
+        console.log(node.getName(), 'face tris', face.length / 3, 'kept', keep.length / 3, 'of', idx.length / 3);
+      } else console.log(node.getName(), 'kept', keep.length / 3, 'of', idx.length / 3);
     }
   }
   // The game paints its own atlas, so the pack texture is not shipped.
