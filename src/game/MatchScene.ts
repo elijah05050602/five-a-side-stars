@@ -21,7 +21,7 @@ export interface SceneOptions {
 
 /** One recorded frame of the match, used for the instant replay. */
 interface ReplayFrame {
-  players: { x: number; z: number; facing: number; speed: number; kick: number; dive: number; diveDir: number }[];
+  players: { x: number; z: number; facing: number; speed: number; kick: number; dive: number; diveDir: number; stun: number }[];
   ball: { x: number; y: number; z: number; vx: number; vz: number };
 }
 
@@ -157,7 +157,7 @@ export class MatchScene {
   private record(): void {
     const b = this.sim.ball;
     this.history.push({
-      players: this.sim.players.map((p) => ({ x: p.pos.x, z: p.pos.z, facing: p.facing, speed: Math.hypot(p.vel.x, p.vel.z), kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir })),
+      players: this.sim.players.map((p) => ({ x: p.pos.x, z: p.pos.z, facing: p.facing, speed: Math.hypot(p.vel.x, p.vel.z), kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim })),
       ball: { x: b.pos.x, y: b.y, z: b.pos.z, vx: b.vel.x, vz: b.vel.z },
     });
     if (this.history.length > 170) this.history.shift();
@@ -177,7 +177,7 @@ export class MatchScene {
       const m = this.models.get(p)!, fp = f.players[i];
       m.group.position.set(fp.x, 0, fp.z);
       m.setFacing(fp.facing);
-      m.animate(dt * speed, { speed: fp.speed, kick: fp.kick, dive: fp.dive, diveDir: fp.diveDir, stun: 0, tackle: 0, scale, wobble: 0, mood: 'neutral', gazeX: 0, gazeY: 0, cheer: false });
+      m.animate(dt * speed, { speed: fp.speed, kick: fp.kick, dive: fp.dive, diveDir: fp.diveDir, stun: fp.stun, tackle: 0, scale, wobble: 0, mood: 'focus', gazeX: 0, gazeY: 0, cheer: false });
       m.setSelected(false, 0xffffff);
     });
     this.ball.update(f.ball.x, f.ball.y, f.ball.z, this.sim.ball.radius, f.ball.vx, f.ball.vz, dt * speed);
