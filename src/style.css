@@ -576,3 +576,27 @@ body.reduce-motion .bind.is-listening { animation: none; }
 .psc-skills { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .9rem; }
 .psc-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .85rem; color: #3a4a63; }
 .psc-stats strong { color: var(--navy); }
+
+/* Positions and formations */
+.chip-mid { background: #e5dcff; }
+.chip-wing { background: #d2f4f6; }
+.formation-row { display: grid; grid-template-columns: 1fr minmax(180px, 240px); gap: 12px; align-items: center; }
+.formation-pills .pill { display: inline-flex; gap: 6px; align-items: baseline; }
+.formation-pills .pill small { opacity: 0.7; font-weight: 600; }
+.formation-pitch { width: 100%; height: auto; }
+.fm-grass { fill: #2eb872; stroke: var(--navy); stroke-width: 2.5; }
+.fm-line { fill: none; stroke: rgba(255,255,255,0.75); stroke-width: 2; }
+.fm-dot circle { fill: #ffd0d8; stroke: var(--navy); stroke-width: 2.5; }
+.fm-dot text { font: 700 11px var(--font); fill: var(--navy); }
+.fm-gk circle { fill: #ffe08a; }
+.fm-def circle { fill: #e3f0ff; }
+.fm-mid circle { fill: #e5dcff; }
+.fm-wing circle { fill: #d2f4f6; }
+@media (max-width: 640px) { .formation-row { grid-template-columns: 1fr; } }
+
+/* Kit strip under the builder preview */
+.kit-strip { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
+.kit-strip-btn { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 10px; border-radius: 14px; border: 2.5px solid transparent; background: #eef2ff; font-family: var(--font); font-weight: 700; color: var(--navy); cursor: pointer; }
+.kit-strip-btn.is-active { border-color: var(--navy); background: var(--yellow); box-shadow: 0 3px 0 var(--navy); }
+.team-card .row { flex-wrap: nowrap; }
+.team-delete { margin-left: auto; }

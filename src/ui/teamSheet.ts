@@ -1,5 +1,5 @@
 import { startingFive } from '../data/defaults';
-import type { Team } from '../data/types';
+import { POSITION_LABELS, type Team } from '../data/types';
 import { badgeSvg, kitChip } from './kitPreview';
 
 function svgToImage(svg: string): Promise<HTMLImageElement> {
@@ -68,7 +68,7 @@ export async function renderTeamSheet(team: Team): Promise<Blob> {
     ctx.fillStyle = '#1b2a41'; ctx.font = font(42);
     ctx.fillText(p.name, 220, y + 62, 520);
     ctx.font = font(30, 600); ctx.fillStyle = '#475569';
-    const pos = p.position === 'GK' ? 'Goalkeeper' : p.position === 'DEF' ? 'Defender' : 'Attacker';
+    const pos = p.position === 'GK' ? 'Goalkeeper' : POSITION_LABELS[p.position];
     ctx.fillText(pos, 780, y + 60);
     const special = p.special !== 'none' ? `★ ${p.special}` : '';
     ctx.fillText(special, 1000, y + 60);

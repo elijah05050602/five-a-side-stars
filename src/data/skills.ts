@@ -61,6 +61,8 @@ export const starsText = (n: number, cap = MAX_STARS): string => '★'.repeat(n)
 const WEIGHTS: Record<Position, Partial<Record<SkillKey, number>>> = {
   GK: { speed: 0.8, handling: 2, diving: 2.2, reflexes: 2, positioning: 1.6, passing: 0.9, strength: 0.7 },
   DEF: { speed: 1.3, control: 0.8, passing: 1.3, shooting: 0.5, tackling: 2.5, stamina: 1.2, strength: 1.8 },
+  MID: { speed: 1.2, control: 1.6, passing: 2.4, shooting: 1.1, tackling: 1.3, stamina: 2, strength: 1 },
+  WING: { speed: 2.4, control: 2.1, passing: 1.8, shooting: 1.1, tackling: 0.6, stamina: 1.6, strength: 0.6 },
   ATT: { speed: 1.8, control: 2, passing: 1.2, shooting: 2.5, tackling: 0.5, stamina: 1.1, strength: 0.9 },
 };
 
