@@ -548,7 +548,10 @@ export class MatchSim {
         const goal = v(this.goalX(p.side), 0);
         const dGoal = dist(p.pos, goal);
         const nearestOpp = this.nearest(opps, p.pos);
-        const pressure = nearestOpp ? dist(nearestOpp.pos, p.pos) : 99;
+        const pressureNow = nearestOpp ? dist(nearestOpp.pos, p.pos) : 99;
+        // Look a little ahead: a sprinter 2 m away is a problem in a third of a second.
+        const pressureSoon = nearestOpp ? dist(v(nearestOpp.pos.x + nearestOpp.vel.x * 0.4, nearestOpp.pos.z + nearestOpp.vel.z * 0.4), v(p.pos.x + p.vel.x * 0.4, p.pos.z + p.vel.z * 0.4)) : 99;
+        const pressure = Math.min(pressureNow, pressureSoon);
         const range = this.length * (isCpuTeam ? diff.shootRange : 0.38);
         const angleClear = Math.abs(p.pos.z) < this.width * 0.35;
         if (this.phase === 'kickoff') {
@@ -560,7 +563,7 @@ export class MatchSim {
           this.shoot(p, null, rand(0.85, 1.1));
           return;
         }
-        const tight = pressure < 1.3 * this.stats.scale + 0.45;
+        const tight = pressure < 1.3 * this.stats.scale + 0.7;
         if (tight || p.holdTime > 0.7) {
           const mate = this.bestPassTarget(p, null);
           const forward = mate ? (mate.pos.x - p.pos.x) * (p.side === 0 ? 1 : -1) : -99;
@@ -628,7 +631,8 @@ export class MatchSim {
         p.aiTarget = v(p.home.x, p.home.z);
       }
     }
-    this.moveTowards(p, p.aiTarget, 1);
+    const chaser = oppHasBall && this.nearestOutfield(this.teamOf(p.side), b.pos) === p;
+    this.moveTowards(p, p.aiTarget, chaser ? 1.12 : 1);
   }
 
   private driveKeeper(p: SimPlayer, dt: number): void {
@@ -637,14 +641,16 @@ export class MatchSim {
     const dir = p.side === 0 ? 1 : -1;
     const reach = this.stats.keeperReach;
     if (b.owner === p) {
-      // Hold for a moment, then throw to the most open team-mate.
+      // Hold for a moment, then throw to the most open team-mate. Pressed keepers release at once.
       p.think -= dt;
+      const opps = this.teamOf((1 - p.side) as Side);
+      const presser = this.nearest(opps, p.pos);
+      const pressed = presser !== null && dist(presser.pos, p.pos) < 3.5;
+      if (pressed) p.think = Math.min(p.think, 0.15);
       if (p.think <= 0) {
         const mate = this.bestPassTarget(p, null);
-        const opps = this.teamOf((1 - p.side) as Side);
-        const presser = this.nearest(opps, p.pos);
-        const mateMarked = mate ? dist(this.nearest(opps, mate.pos)?.pos ?? v(99, 99), mate.pos) < 2.5 : true;
-        if (mate && !mateMarked) {
+        const mateMarked = mate ? dist(this.nearest(opps, mate.pos)?.pos ?? v(99, 99), mate.pos) < 3 : true;
+        if (mate && !mateMarked && !pressed) {
           this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z), 1.1);
         } else {
           // Big clearance upfield, away from whoever is closest.
@@ -785,6 +791,19 @@ export class MatchSim {
       p.pos.x = clamp(p.pos.x, -L - extra, L + extra);
       p.pos.z = clamp(p.pos.z, -W, W);
     }
+    if (this.phase === 'kickoff') {
+      // The receiving team waits outside the centre circle until the ball is kicked.
+      const radius = 3 * Math.max(0.8, this.stats.scale) + 0.5;
+      for (const p of this.players) {
+        if (p.side === this.kickoffSide) continue;
+        const d = len(p.pos);
+        if (d < radius) {
+          const n = d > 1e-3 ? norm(p.pos) : v(p.side === 0 ? -1 : 1, 0);
+          const stepOut = Math.min(radius - d, 7 * dt);
+          p.pos.x += n.x * stepOut; p.pos.z += n.z * stepOut;
+        }
+      }
+    }
     if (this.phase === 'setpiece' && this.setPiece) {
       const sp = this.setPiece;
       const centre = sp.kind === 'penalty' ? v(this.goalX(sp.side), 0) : sp.spot;
@@ -882,6 +901,7 @@ export class MatchSim {
     if (this.phase === 'setpiece') return;
     if (b.owner) {
       const o = b.owner;
+      if (o.isKeeper && this.phase !== 'kickoff') return; // a keeper holding the ball cannot be tackled
       // Tackles: an opponent close to the ball may win it.
       for (const p of this.players) {
         if (p.side === o.side || p.kickCooldown > 0) continue;
@@ -893,10 +913,10 @@ export class MatchSim {
           // Tackling head-on is much easier than chasing from behind.
           const toBall = norm(v(b.pos.x - p.pos.x, b.pos.z - p.pos.z));
           const facingDot = toBall.x * Math.cos(o.facing) + toBall.z * Math.sin(o.facing);
-          const angle = facingDot < 0 ? 1 : 0.35; // negative = we are in front of the dribbler
+          const angle = facingDot < 0 ? 1 : isCpu ? 0.35 : 0.22; // negative = we are in front of the dribbler
           const chance = base * angle * (isCpu ? diff.tackle : diff.humanTackle) * (0.6 + this.stats.control * 0.6);
           if (p.tackleTimer <= 0) {
-            p.tackleTimer = 0.45;
+            p.tackleTimer = isCpu ? 0.45 : 0.6;
             const won = Math.random() < chance;
             if (!won && facingDot >= 0 && len(p.vel) > 2.5 && this.phase === 'play' && Math.random() < 0.28) {
               this.awardFoul(p, o);
