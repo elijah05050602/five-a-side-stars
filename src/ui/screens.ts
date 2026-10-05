@@ -1,10 +1,13 @@
 import { AGE_STATS } from '../data/ageGroups';
-import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode, startingFive } from '../data/defaults';
-import { deleteTeam, getLeague, getSettings, getTeam, getTeams, resetAll, saveTeam, setLeague, updateSettings } from '../data/storage';
-import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type Difficulty, type HairStyle, type Kit, type Position, type Special, type Team } from '../data/types';
+import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode } from '../data/defaults';
+import { deleteTeam, getCareer, getLeague, getSettings, getTeam, getTeams, resetAll, saveTeam, setCareer, setLeague, updateSettings } from '../data/storage';
+import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, SKILL_KEYS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type Difficulty, type HairStyle, type Kit, type Position, type SkillKey, type Special, type Team } from '../data/types';
+import { STAR_BUDGET, STAR_CAP, fitSkills, randomSkills, skillLabels, starsLeft, starsText, totalStars } from '../data/skills';
+import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, advanceCareer, applyCareerMatch, careerAge, careerSeasonOutcome, careerSeasonOver, createCareer, playerOfTheMatch, seasonName, statRows, type GrowthEvent } from '../game/career';
 import { kitsClash } from '../game/kitTexture';
 import type { MatchResult, SimMode } from '../game/MatchScene';
-import { STICKERS, getProgress, lockedIcons, recordSeason, recordTrophy, unlockedIcons, type Sticker } from '../data/progress';
+import { WEATHER_CHOICES, type WeatherChoice } from '../game/Weather';
+import { STICKERS, getProgress, lockedIcons, recordCareer, recordSeason, recordTrophy, unlockedIcons, type Sticker } from '../data/progress';
 import { TIERS, applyLeagueResult, computeTable, createLeague, nextFixture, nextSeason, seasonOutcome, seasonOver, tierInfo, yourPosition } from '../game/league';
 import { applyResult, createTournament, currentFixture, humanStillIn, teamById, type Fixture, type TournamentState } from '../game/tournament';
 import { esc } from './hud';
@@ -28,7 +31,11 @@ export interface StartOptions {
   tournament?: TournamentState;
   /** League match: the result feeds the saved league table. */
   league?: boolean;
+  /** Career match: the result feeds the career and grows the players. */
+  career?: boolean;
   cpuLevel?: number;
+  /** Weather and time of day for the match; 'random' or missing picks for you. */
+  weather?: WeatherChoice;
 }
 
 export interface Router {
@@ -36,16 +43,17 @@ export interface Router {
   startMatch(o: StartOptions): void;
 }
 
-export type SetupMode = SimMode | 'tournament' | 'league';
+export type SetupMode = SimMode | 'tournament' | 'league' | 'career';
 
 export type Screen =
   | { name: 'menu' }
   | { name: 'teams' }
   | { name: 'builder'; teamId?: string }
   | { name: 'setup'; homeId?: string; mode?: SetupMode }
-  | { name: 'results'; result: MatchResult; stickers?: Sticker[]; tournament?: TournamentState; league?: boolean }
+  | { name: 'results'; result: MatchResult; stickers?: Sticker[]; tournament?: TournamentState; league?: boolean; career?: boolean }
   | { name: 'tournament'; state: TournamentState }
   | { name: 'league' }
+  | { name: 'career' }
   | { name: 'album' }
   | { name: 'parents' };
 
@@ -63,9 +71,10 @@ export function renderScreen(root: HTMLElement, screen: Screen, router: Router):
     case 'teams': return renderTeams(root, router);
     case 'builder': return renderBuilder(root, router, screen.teamId);
     case 'setup': return renderSetup(root, router, screen.homeId, screen.mode ?? 'match');
-    case 'results': return renderResults(root, router, screen.result, screen.stickers ?? [], screen.tournament, screen.league);
+    case 'results': return renderResults(root, router, screen.result, screen.stickers ?? [], screen.tournament, screen.league, screen.career);
     case 'tournament': return renderTournament(root, router, screen.state);
     case 'league': return renderLeague(root, router);
+    case 'career': return renderCareer(root, router);
     case 'album': return renderAlbum(root, router);
     case 'parents': return renderParents(root, router);
   }
@@ -89,6 +98,7 @@ function wire(root: HTMLElement, back: () => void): void {
 
 function renderMenu(root: HTMLElement, router: Router): void {
   const league = getLeague();
+  const career = getCareer();
   const progress = getProgress();
   const teams = getTeams();
   const hasKeyboard = window.matchMedia('(pointer: fine)').matches;
@@ -115,6 +125,7 @@ function renderMenu(root: HTMLElement, router: Router): void {
           <div class="portal-grid">
             <button class="portal portal-gold" id="m-cup"><span class="portal-icon">🏆</span><span class="portal-text"><small>Four-team cup</small><strong>TOURNAMENT</strong><span>Two semis and a final</span></span></button>
             <button class="portal portal-green" id="m-league"><span class="portal-icon">📋</span><span class="portal-text"><small>${league ? `Tier ${league.tier} · season ${league.season}` : 'Five tiers to climb'}</small><strong>LEAGUE</strong><span>${league ? 'Carry on your season' : 'Start in the Acorn League'}</span></span></button>
+            <button class="portal portal-green" id="m-career"><span class="portal-icon">🌱</span><span class="portal-text"><small>${career ? (career.done ? 'Career finished' : `${careerAge(career)} · ${esc(seasonName(career))}`) : 'U5 to U10'}</small><strong>CAREER</strong><span>${career ? 'Carry on growing your team' : 'Grow your players year by year'}</span></span></button>
             <button class="portal portal-sky" id="m-pens"><span class="portal-icon">🥅</span><span class="portal-text"><small>Shoot-out</small><strong>PENALTIES</strong><span>Best of five, then sudden death</span></span></button>
             <button class="portal portal-sky" id="m-train"><span class="portal-icon">🎯</span><span class="portal-text"><small>Skill challenge</small><strong>TRAINING</strong><span>Score as many as you can</span></span></button>
             <button class="portal portal-white" id="m-teams"><span class="portal-icon">👕</span><span class="portal-text"><small>Locker room</small><strong>MY SQUAD</strong><span>Badges, kits and players</span></span></button>
@@ -130,6 +141,7 @@ function renderMenu(root: HTMLElement, router: Router): void {
   root.querySelector('#m-play')!.addEventListener('click', () => router.go({ name: 'setup' }));
   root.querySelector('#m-cup')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'tournament' }));
   root.querySelector('#m-league')!.addEventListener('click', () => router.go(league ? { name: 'league' } : { name: 'setup', mode: 'league' }));
+  root.querySelector('#m-career')!.addEventListener('click', () => router.go(career ? { name: 'career' } : { name: 'setup', mode: 'career' }));
   root.querySelector('#m-pens')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'shootout' }));
   root.querySelector('#m-train')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'training' }));
   root.querySelector('#m-teams')!.addEventListener('click', () => router.go({ name: 'teams' }));
@@ -149,7 +161,7 @@ function renderTeams(root: HTMLElement, router: Router): void {
       <div class="team-grid">
         ${teams.map((t) => `
           <div class="card team-card" data-id="${t.id}">
-            <div class="team-card-top">${badgeSvg(t.badge, 56)}${kitChip(t.kit, 48)}<span class="chip chip-age">${t.ageGroup}</span></div>
+            <div class="team-card-top">${badgeSvg(t.badge, 56)}${kitChip(t.kit, 48)}<span class="chip chip-age">${t.ageGroup}</span>${t.career ? '<span class="chip chip-career">🌱 Career</span>' : ''}</div>
             <h3>${esc(t.name)}</h3>
             <p class="muted">${t.players.length} players: ${t.players.map((p) => esc(p.name)).join(', ')}</p>
             <div class="row">
@@ -241,6 +253,10 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     const starters = team.players.filter((p) => p.starter);
     if (starters.length !== 5) { alert(`Pick exactly 5 starters (you have ${starters.length}). The rest are subs.`); step = 2; render(); return false; }
     if (!starters.some((p) => p.position === 'GK')) { alert('One of your starters must be the keeper.'); step = 2; render(); return false; }
+    if (!team.career) {
+      const greedy = team.players.find((p) => starsLeft(p.skills, team.ageGroup) < 0);
+      if (greedy) { alert(`${greedy.name} has ${-starsLeft(greedy.skills, team.ageGroup)} too many stars for the ${AGE_STATS[team.ageGroup].label}. Take some off.`); step = 2; render(); return false; }
+    }
     const nums = new Set<number>();
     for (const p of team.players) {
       p.name = p.name.trim() || randomPlayerName();
@@ -281,7 +297,12 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     const name = form.querySelector<HTMLInputElement>('#f-name')!;
     name.addEventListener('input', () => { team.name = name.value; updateCaption(); });
     form.querySelector('#f-dice')!.addEventListener('click', () => { team.name = randomTeamName(); name.value = team.name; updateCaption(); });
-    form.querySelectorAll<HTMLElement>('[data-age]').forEach((b) => b.addEventListener('click', () => { team.ageGroup = b.dataset.age as AgeGroup; render(); }));
+    form.querySelectorAll<HTMLElement>('[data-age]').forEach((b) => b.addEventListener('click', () => {
+      team.ageGroup = b.dataset.age as AgeGroup;
+      // Stars follow the age group: nothing above its cap, nothing over its budget.
+      for (const p of team.players) p.skills = fitSkills(p, team.ageGroup);
+      render();
+    }));
   };
 
   const updateCaption = () => {
@@ -339,6 +360,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
             <span class="pc-number">${pl.number}</span>
             <span class="pc-name">${esc(pl.name)}</span>
             <span class="chip chip-pos chip-${pl.position.toLowerCase()}">${pl.position === 'GK' ? 'Keeper' : pl.position === 'DEF' ? 'Defender' : 'Attacker'}</span>
+            <span class="pc-stars">★ ${totalStars(pl.skills)}</span>
             ${pl.starter ? '' : '<span class="chip chip-sub">Sub</span>'}
           </button>`).join('')}
         ${team.players.length < 8 ? '<button class="player-card player-card-add" id="p-add"><span class="plus">+</span><span>Add player</span></button>' : ''}
@@ -356,6 +378,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
         <div class="field"><span>Position</span>
           <div class="pills">${(['GK', 'DEF', 'ATT'] as Position[]).map((pos) => `<button class="pill ${p.position === pos ? 'is-active' : ''}" data-pos="${pos}">${pos === 'GK' ? 'Keeper' : pos === 'DEF' ? 'Defender' : 'Attacker'}</button>`).join('')}</div>
         </div>
+        ${skillsField(p, team)}
         <div class="field"><span>Special</span>
           <div class="pills">${SPECIALS.map((sp) => `<button class="pill ${p.special === sp.id ? 'is-active' : ''}" data-special="${sp.id}" title="${esc(sp.blurb)}">${sp.label}</button>`).join('')}</div>
         </div>
@@ -369,7 +392,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     form.querySelector('#p-add')?.addEventListener('click', () => {
       const used = new Set(team.players.map((x) => x.number));
       let n = 2; while (used.has(n)) n++;
-      team.players.push(makePlayer(team.players.length % 2 ? 'DEF' : 'ATT', n, randomPlayerName(), false));
+      team.players.push(makePlayer(team.players.length % 2 ? 'DEF' : 'ATT', n, randomPlayerName(), false, team.ageGroup));
       selectedPlayer = team.players.length - 1;
       render();
     });
@@ -380,6 +403,17 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     });
     form.querySelector<HTMLInputElement>('#p-starter')!.addEventListener('change', (e) => { p.starter = (e.target as HTMLInputElement).checked; renderSquad(form); });
     form.querySelectorAll<HTMLElement>('[data-special]').forEach((b) => b.addEventListener('click', () => { p.special = b.dataset.special as Special; renderSquad(form); }));
+    form.querySelectorAll<HTMLElement>('[data-star-up]').forEach((b) => b.addEventListener('click', () => {
+      const k = b.dataset.starUp as SkillKey;
+      if (p.skills[k] < STAR_CAP[team.ageGroup] && starsLeft(p.skills, team.ageGroup) > 0) p.skills[k]++;
+      renderSquad(form);
+    }));
+    form.querySelectorAll<HTMLElement>('[data-star-down]').forEach((b) => b.addEventListener('click', () => {
+      const k = b.dataset.starDown as SkillKey;
+      if (p.skills[k] > 1) p.skills[k]--;
+      renderSquad(form);
+    }));
+    form.querySelector('#p-spread')?.addEventListener('click', () => { p.skills = randomSkills(p.position, team.ageGroup); renderSquad(form); });
     form.querySelectorAll<HTMLElement>('[data-hairstyle]').forEach((b) => b.addEventListener('click', () => { p.hairStyle = b.dataset.hairstyle as HairStyle; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-boots]').forEach((b) => b.addEventListener('click', () => { p.boots = b.dataset.boots!; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-bootstyle]').forEach((b) => b.addEventListener('click', () => { p.bootStyle = b.dataset.bootstyle as BootStyle; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots, p.bootStyle); renderSquad(form); }));
@@ -422,6 +456,31 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
   cleanup = () => { preview?.dispose(); preview = null; };
 }
 
+/** Star ratings for one player: spend the age group's budget, or just read them on a career team. */
+function skillsField(p: Team['players'][number], team: Team): string {
+  const cap = STAR_CAP[team.ageGroup];
+  const left = starsLeft(p.skills, team.ageGroup);
+  const labels = skillLabels(p.position);
+  const rows = SKILL_KEYS.map((k) => `
+    <div class="skill-row">
+      <span class="skill-name" title="${esc(labels[k].blurb)}">${labels[k].emoji} ${labels[k].label}</span>
+      <span class="stars" aria-label="${p.skills[k]} of ${cap} stars">${starsText(p.skills[k], cap)}</span>
+      ${team.career ? `<span class="muted small xp">${Math.round(((p.xp?.[k] ?? 0) * 100))}% to next</span>` : `
+      <span class="row skill-btns">
+        <button class="btn btn-ghost btn-icon" data-star-down="${k}" ${p.skills[k] <= 1 ? 'disabled' : ''} aria-label="Fewer ${labels[k].label} stars">−</button>
+        <button class="btn btn-blue btn-icon" data-star-up="${k}" ${p.skills[k] >= cap || left <= 0 ? 'disabled' : ''} aria-label="More ${labels[k].label} stars">+</button>
+      </span>`}
+    </div>`).join('');
+  const note = team.career
+    ? 'Career players earn stars by playing: goals, passes, tackles and saves all count.'
+    : left > 0 ? `${left} star${left === 1 ? '' : 's'} left to spend.` : left === 0 ? 'All stars spent!' : `${-left} too many stars for this age group.`;
+  return `
+    <div class="field skills-field"><span>Stars <small class="muted">(${AGE_STATS[team.ageGroup].label}: up to ${cap} per skill, ${STAR_BUDGET[team.ageGroup]} in total)</small></span>
+      <div class="skills">${rows}</div>
+      <div class="row space-between"><p class="muted small ${left < 0 ? 'is-over' : ''}">${note}</p>${team.career ? '' : '<button class="btn btn-ghost" id="p-spread">🎲 Spread stars</button>'}</div>
+    </div>`;
+}
+
 // ---------- Match setup ----------
 
 const MODE_INFO: Record<SetupMode, { title: string; go: string; blurb: string }> = {
@@ -429,6 +488,7 @@ const MODE_INFO: Record<SetupMode, { title: string; go: string; blurb: string }>
   tournament: { title: 'Tournament', go: '🏆 Start the cup!', blurb: 'Four teams, two semi-finals and a final. Win both of your games to lift the trophy. Draws go to penalties!' },
   shootout: { title: 'Penalty Shoot-out', go: '🥅 Start the shoot-out!', blurb: 'Best of five penalties each, then sudden death. Hold shoot to power up and aim with the stick. In goal, move to dive!' },
   training: { title: 'Shooting Training', go: '🎯 Start training!', blurb: 'Just you, a keeper and a bag of balls. Score as many as you can before the time runs out. Rocket shots count double!' },
+  career: { title: 'Career', go: '🌱 Start in the Under 5s!', blurb: 'Take a team all the way from the Under 5s to the Under 10s. Every year has four mini seasons of five matches. Your players start tiny and grow by playing: goals, passes, tackles and saves all earn stars. Pick the team whose name, kits and kids you want to take on the journey; a copy starts at U5 so your original is untouched.' },
   league: { title: 'League', go: '📋 Start in Tier 5!', blurb: 'Five leagues, from the Acorn League at Tier 5 up to the Star Premier League at Tier 1. Play five matches a season: finish in the top two to go up, bottom to go down. The teams get tougher every tier. Your league is saved, so you can come back any time.' },
 };
 
@@ -441,7 +501,9 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
   let difficulty: Difficulty = settings.difficulty;
   let halfSeconds = mode === 'training' ? 90 : settings.halfLengthSeconds;
   let twoPlayer = false;
-  const hasKeyboard = window.matchMedia('(pointer: fine)').matches && mode !== 'training' && mode !== 'league';
+  let weather: WeatherChoice = 'random';
+  const solo = mode === 'training' || mode === 'league' || mode === 'career';
+  const hasKeyboard = window.matchMedia('(pointer: fine)').matches && !solo;
   const info = MODE_INFO[mode];
   const lengthLabel = mode === 'training' ? 'Time' : mode === 'shootout' ? '' : 'Half length';
   const lengths = mode === 'training' ? [60, 90, 120, 180] : [60, 120, 180, 300];
@@ -454,7 +516,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
       <div class="screen setup">
         ${topBar(info.title, mode === 'tournament' ? 'cup' : mode === 'league' ? 'league' : 'none')}
         ${info.blurb ? `<p class="mode-blurb">${esc(info.blurb)}</p>` : ''}
-        <div class="vs ${mode === 'training' || mode === 'tournament' || mode === 'league' ? 'vs-solo' : ''}">
+        <div class="vs ${solo || mode === 'tournament' ? 'vs-solo' : ''}">
           <div class="card vs-card">
             <span class="muted">Your team</span>
             <div class="row">${badgeSvg(home.badge, 64)}${kitChip(homeK.kit, 64)}</div>
@@ -462,7 +524,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
             <span class="chip chip-age">${home.ageGroup}</span>
             <select id="s-home">${teams.map((t) => `<option value="${t.id}" ${t.id === home.id ? 'selected' : ''}>${esc(t.name)} (${t.ageGroup})</option>`).join('')}</select>
           </div>
-          ${mode === 'training' || mode === 'league' ? '' : mode === 'tournament' ? `<div class="vs-mid">+</div><div class="card vs-card"><span class="muted">${twoPlayer ? 'Player 2 and two more teams' : 'Three computer teams'}</span><div class="row cup-marks">🛡️ 🛡️ 🛡️</div><h3>${twoPlayer ? `${esc(away.name)} + 2 surprise teams` : 'Surprise opponents'}</h3><span class="chip chip-age">${home.ageGroup}</span>${twoPlayer ? `<select id="s-away">${sameAge.map((t) => `<option value="${t.id}" ${t.id === opponentId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}</div>` : `<div class="vs-mid">VS</div>
+          ${solo ? '' : mode === 'tournament' ? `<div class="vs-mid">+</div><div class="card vs-card"><span class="muted">${twoPlayer ? 'Player 2 and two more teams' : 'Three computer teams'}</span><div class="row cup-marks">🛡️ 🛡️ 🛡️</div><h3>${twoPlayer ? `${esc(away.name)} + 2 surprise teams` : 'Surprise opponents'}</h3><span class="chip chip-age">${home.ageGroup}</span>${twoPlayer ? `<select id="s-away">${sameAge.map((t) => `<option value="${t.id}" ${t.id === opponentId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}</div>` : `<div class="vs-mid">VS</div>
           <div class="card vs-card">
             <span class="muted">${twoPlayer ? 'Player 2' : 'Opponent (computer)'}</span>
             <div class="row">${badgeSvg(away.badge, 64)}${kitChip(awayK.kit, 64)}</div>
@@ -480,14 +542,17 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
             <div class="pills"><button class="pill ${!twoPlayer ? 'is-active' : ''}" data-players="1">1 player</button><button class="pill ${twoPlayer ? 'is-active' : ''}" data-players="2">2 players, one keyboard</button></div>
             ${twoPlayer ? '<p class="muted">Player 1: WASD, Space, Z, left Shift. Player 2: arrows, Enter, /, right Shift.</p>' : ''}
           </div>` : ''}
-          ${mode === 'league' ? `<div class="field"><span>Tiers</span><ol class="tier-list">${TIERS.map((t) => `<li><strong>Tier ${t.tier}</strong> ${esc(t.name)}</li>`).join('')}</ol></div>` : `<div class="field"><span>Computer difficulty</span>
+          ${mode === 'career' ? `<div class="field"><span>The journey</span><div class="age-ladder">${CAREER_AGES.map((a) => `<span class="rung-age">${a}</span>`).join('<span class="rung-arrow">→</span>')}</div><p class="muted small">${SEASONS_PER_YEAR} mini seasons a year · promotion and relegation between tiers carry over · stars grow up to each age group's cap.</p></div>` : mode === 'league' ? `<div class="field"><span>Tiers</span><ol class="tier-list">${TIERS.map((t) => `<li><strong>Tier ${t.tier}</strong> ${esc(t.name)}</li>`).join('')}</ol></div>` : `<div class="field"><span>Computer difficulty</span>
             <div class="pills">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="pill ${d === difficulty ? 'is-active' : ''}" data-diff="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div>
           </div>`}
           ${lengthLabel ? `<div class="field"><span>${lengthLabel}</span>
             <div class="pills">${lengths.map((s) => `<button class="pill ${s === halfSeconds ? 'is-active' : ''}" data-len="${s}">${s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`}</button>`).join('')}</div>
           </div>` : ''}
+          ${mode === 'tournament' || mode === 'league' || mode === 'career' ? '' : `<div class="field"><span>Weather</span>
+            <div class="pills">${WEATHER_CHOICES.map((w) => `<button class="pill ${w.id === weather ? 'is-active' : ''}" data-weather="${w.id}">${w.label}</button>`).join('')}</div>
+          </div>`}
         </div>
-        ${swapped && mode !== 'training' && mode !== 'tournament' && mode !== 'league' ? `<p class="warn">👕 The kits clash, so ${esc(swapped)} will wear their away kit.</p>` : ''}
+        ${swapped && !solo && mode !== 'tournament' ? `<p class="warn">👕 The kits clash, so ${esc(swapped)} will wear their away kit.</p>` : ''}
         <button class="btn btn-primary btn-big btn-kickoff" id="s-go">${info.go}</button>
       </div>`;
     wire(root, () => router.go({ name: 'menu' }));
@@ -509,6 +574,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
       render();
     }));
     root.querySelectorAll<HTMLElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { halfSeconds = Number(b.dataset.len); render(); }));
+    root.querySelectorAll<HTMLElement>('[data-weather]').forEach((b) => b.addEventListener('click', () => { weather = b.dataset.weather as WeatherChoice; render(); }));
     root.querySelector('#s-go')!.addEventListener('click', () => {
       if (mode !== 'training') updateSettings({ difficulty, halfLengthSeconds: halfSeconds });
       const awayTeam = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
@@ -523,8 +589,17 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
         router.go({ name: 'league' });
         return;
       }
+      if (mode === 'career') {
+        if (getCareer() && !confirm('Start a new career? Your current career will be deleted (the team stays in My Teams).')) return;
+        const { career, team } = createCareer(home, halfSeconds);
+        saveTeam(team);
+        setCareer(career);
+        recordCareer({ started: true });
+        router.go({ name: 'career' });
+        return;
+      }
       const [h, a] = resolveKits(home, awayTeam);
-      router.startMatch({ home: h, away: a, difficulty, halfSeconds, twoPlayer, mode: mode === 'training' ? 'training' : mode === 'shootout' ? 'shootout' : 'match' });
+      router.startMatch({ home: h, away: a, difficulty, halfSeconds, twoPlayer, weather, mode: mode === 'training' ? 'training' : mode === 'shootout' ? 'shootout' : 'match' });
     });
   };
   render();
@@ -549,10 +624,25 @@ function stickerBanner(stickers: Sticker[]): string {
   return `<div class="new-stickers">${stickers.map((s) => `<div class="sticker sticker-new"><span class="sticker-emoji">${s.emoji}</span><strong>${esc(s.name)}</strong><small>New sticker!</small></div>`).join('')}</div>`;
 }
 
-function renderResults(root: HTMLElement, router: Router, r: MatchResult, stickers: Sticker[], tournament?: TournamentState, league?: boolean): void {
+function renderResults(root: HTMLElement, router: Router, r: MatchResult, stickers: Sticker[], tournament?: TournamentState, league?: boolean, career?: boolean): void {
   const [h, a] = r.score;
   if (tournament) applyResult(tournament, r);
   let leagueNote = '';
+  let growthNote = '';
+  if (career) {
+    const c = getCareer();
+    const you = c && getTeam(c.teamId);
+    if (c && you && !c.done) {
+      const summary = applyCareerMatch(c, you, r);
+      saveTeam(you);
+      setCareer(c);
+      const motm3 = Object.values(c.careerStats).some((st) => st.motm >= 3);
+      const boot = Object.values(c.seasonStats).some((st) => st.goals >= 8);
+      stickers = [...stickers, ...recordCareer({ starUp: summary.growth.length > 0, fiveStar: summary.fiveStar, motm3, goldenBoot: boot })];
+      leagueNote = `<p class="muted">${esc(careerAge(c))} · ${esc(seasonName(c))} season · match ${Math.min(c.league.round, c.league.rounds.length)} of ${c.league.rounds.length} · you are ${ordinal(yourPosition(c.league, you))}</p>`;
+      growthNote = growthList(summary.growth);
+    }
+  }
   if (league) {
     const ls = getLeague();
     const you = ls && getTeam(ls.teamId);
@@ -566,7 +656,7 @@ function renderResults(root: HTMLElement, router: Router, r: MatchResult, sticke
   if (r.mode === 'training') headline = r.trainingPoints >= 10 ? 'Sharp shooting!' : r.trainingPoints >= 5 ? 'Nice work!' : 'Keep practising!';
   if (r.mode === 'shootout') headline = h > a ? `${r.home.name} win the shoot-out!` : `${r.away.name} win the shoot-out!`;
   if (tournament && h === a && r.mode === 'match') headline = 'All square! Penalties decide it.';
-  const motm = r.mode === 'match' ? pickPlayerOfTheMatch(r) : null;
+  const motm = r.mode === 'match' ? playerOfTheMatch(r) : null;
   const best = getProgress().trainingBest;
   const soLen = r.shootout ? Math.max(5, r.shootout[0].length, r.shootout[1].length) : 0;
   root.innerHTML = `
@@ -589,9 +679,10 @@ function renderResults(root: HTMLElement, router: Router, r: MatchResult, sticke
         </ul>` : ''}
         ${motm ? `<div class="motm">🏆 Player of the match: <strong>${esc(motm.name)}</strong> #${motm.number}</div>` : ''}
         ${leagueNote}
+        ${growthNote}
         ${stickerBanner(stickers)}
         <div class="row">
-          ${tournament ? `<button class="btn btn-primary btn-big" id="r-cup">${tournament.needsShootout ? '🥅 Penalty shoot-out!' : '🏆 Back to the cup'}</button>` : league ? '<button class="btn btn-primary btn-big" id="r-league">📋 Back to the league</button>' : `<button class="btn btn-primary btn-big" id="r-again">Play again</button>`}
+          ${tournament ? `<button class="btn btn-primary btn-big" id="r-cup">${tournament.needsShootout ? '🥅 Penalty shoot-out!' : '🏆 Back to the cup'}</button>` : league ? '<button class="btn btn-primary btn-big" id="r-league">📋 Back to the league</button>' : career ? '<button class="btn btn-primary btn-big" id="r-career">🌱 Back to the career</button>' : `<button class="btn btn-primary btn-big" id="r-again">Play again</button>`}
           <button class="btn btn-ghost btn-big" id="r-menu">Main menu</button>
         </div>
       </div>
@@ -605,7 +696,13 @@ function renderResults(root: HTMLElement, router: Router, r: MatchResult, sticke
     } else router.go({ name: 'tournament', state: tournament! });
   });
   root.querySelector('#r-league')?.addEventListener('click', () => router.go({ name: 'league' }));
+  root.querySelector('#r-career')?.addEventListener('click', () => router.go({ name: 'career' }));
   root.querySelector('#r-menu')!.addEventListener('click', () => router.go({ name: 'menu' }));
+}
+
+function growthList(events: GrowthEvent[]): string {
+  if (!events.length) return '';
+  return `<div class="growth"><h3>⭐ Growing up!</h3><ul class="plain-list">${events.map((g) => `<li><strong>${esc(g.name)}</strong>: ${esc(g.label)} is now <span class="stars">${starsText(g.stars, g.stars)}</span></li>`).join('')}</ul></div>`;
 }
 
 function ordinal(n: number): string {
@@ -673,7 +770,8 @@ function renderLeague(root: HTMLElement, router: Router): void {
   wire(root, () => router.go({ name: 'menu' }));
   wireLogoControls(root, (key) => ls.teams.find((t) => t.id === key)?.badge, () => { setLeague(ls); renderLeague(root, router); });
   root.querySelector('#l-play')?.addEventListener('click', () => {
-    const [h, a] = resolveKits(next!.home, next!.away);
+    // The human always controls the home side of the sim, so put your team there; the table flips the score when you were away.
+    const [h, a] = resolveKits(next!.youAreHome ? next!.home : next!.away, next!.youAreHome ? next!.away : next!.home);
     router.startMatch({ home: h, away: a, difficulty: 'normal', halfSeconds: ls.halfSeconds, mode: 'match', league: true, cpuLevel: info.level });
   });
   root.querySelector('#l-next')?.addEventListener('click', () => { setLeague(nextSeason(ls, you)); renderLeague(root, router); });
@@ -681,6 +779,119 @@ function renderLeague(root: HTMLElement, router: Router): void {
     if (confirm('Leave this league? Your table and tier will be deleted.')) { setLeague(null); router.go({ name: 'menu' }); }
   });
 }
+
+// ---------- Career ----------
+
+function renderCareer(root: HTMLElement, router: Router): void {
+  const c = getCareer();
+  const you = c && getTeam(c.teamId);
+  if (!c || !you) {
+    if (c) setCareer(null); // the team was deleted
+    router.go({ name: 'setup', mode: 'career' });
+    return;
+  }
+  const age = careerAge(c);
+  const tier = tierInfo(c.league.tier);
+  const table = computeTable(c.league, you);
+  const over = !c.done && careerSeasonOver(c);
+  const next = c.done ? null : nextFixture(c.league, you);
+  const outcome = over ? careerSeasonOutcome(c, you) : null;
+  const lastSeason = c.season === SEASONS_PER_YEAR;
+  const lastYear = c.year === CAREER_AGES.length;
+  const pending = c.pendingGrowth;
+  if (pending.length) { c.pendingGrowth = []; setCareer(c); }
+  const outcomeText = outcome
+    ? (outcome.position === 1 ? `🥇 Champions of the ${tier.name}! ` : `You finished ${ordinal(outcome.position)} in the ${tier.name}. `)
+      + (outcome.outcome === 'promoted' ? `Up to Tier ${c.league.tier - 1} next season! ` : outcome.outcome === 'relegated' ? `Down to Tier ${c.league.tier + 1} next season, you will bounce back. ` : '')
+      + (outcome.topScorer ? `Top scorer: ${outcome.topScorer.name} with ${outcome.topScorer.goals}. ` : '')
+      + (lastSeason ? (lastYear ? 'That was the last season of the Under 10s: the career is complete!' : `That was the last season of the year: next up, the ${AGE_STATS[CAREER_AGES[c.year]].label}!`) : '')
+    : '';
+  const sum = Object.values(c.careerStats);
+  const totals = { played: Math.max(0, ...sum.map((x) => x.played)), goals: sum.reduce((n, x) => n + x.goals, 0) };
+  let scope: 'season' | 'career' = 'season';
+  const cards = () => statRows(c, you, scope).map(({ player: p, stats: st }) => {
+    const labels = skillLabels(p.position);
+    return `<div class="card player-stat-card ${p.starter ? '' : 'is-sub'}">
+      <div class="psc-top">${kitChip(p.position === 'GK' ? you.keeperKit : you.kit, 36)}<div><strong>${esc(p.name)}</strong> <span class="muted">#${p.number}</span><br/><span class="chip chip-pos chip-${p.position.toLowerCase()}">${p.position === 'GK' ? 'Keeper' : p.position === 'DEF' ? 'Defender' : 'Attacker'}</span></div></div>
+      <div class="psc-skills">${SKILL_KEYS.map((k) => `<span title="${esc(labels[k].label)}">${labels[k].emoji} <span class="stars">${starsText(p.skills[k], STAR_CAP[age])}</span></span>`).join('')}</div>
+      <div class="psc-stats">
+        <span><strong>${st.played}</strong> played</span>
+        ${p.position === 'GK' ? `<span><strong>${st.saves}</strong> saves</span><span><strong>${st.cleanSheets}</strong> clean sheets</span>` : `<span><strong>${st.goals}</strong> goals</span><span><strong>${st.assists}</strong> assists</span>`}
+        <span><strong>${p.position === 'GK' ? st.passes : st.tackles}</strong> ${p.position === 'GK' ? 'kicks' : 'tackles'}</span>
+        <span><strong>${st.motm}</strong> 🏆</span>
+      </div>
+    </div>`;
+  }).join('');
+  root.innerHTML = `
+    <div class="screen career">
+      ${topBar('Career')}
+      <div class="tier-banner career-banner">
+        <span class="tier-num">Year ${c.year} · ${esc(AGE_STATS[age].label)}</span>
+        <h2>${esc(you.name)}</h2>
+        <p>${c.done ? 'Career complete! 🎓' : `${esc(seasonName(c))} season (${c.season} of ${SEASONS_PER_YEAR}) · ${esc(tier.name)} (Tier ${c.league.tier})`}</p>
+        <div class="tier-ladder">${CAREER_AGES.map((a, i) => `<span class="rung rung-wide ${a === age && !c.done ? 'is-here' : ''} ${i < c.year - 1 || c.done ? 'is-reached' : ''}">${a}</span>`).join('')}</div>
+      </div>
+      ${pending.length ? `<div class="card outcome-card"><h3>🎒 Moving up to the ${esc(AGE_STATS[age].label)}!</h3><p class="muted">Bigger pitch, longer matches and a higher star cap. Saved-up progress turns into stars:</p>${growthList(pending)}</div>` : ''}
+      ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p></div>` : ''}
+      ${c.done ? `<div class="card trophy-card"><div class="trophy">🎓</div><h2>All grown up!</h2><p class="muted">${esc(you.name)} played ${totals.played} matches from the Under 5s to the Under 10s, scored ${totals.goals} goals and won ${c.titles} mini-season title${c.titles === 1 ? '' : 's'}. What a journey.</p></div>` : ''}
+      <div class="league-body">
+        ${c.done ? '' : `<div class="card table-card">
+          <table class="league-table">
+            <thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead>
+            <tbody>
+              ${table.map((row, i) => `<tr class="${row.isYou ? 'is-you' : ''} ${i < 2 && c.league.tier > 1 ? 'is-up' : ''} ${i === table.length - 1 && c.league.tier < 5 ? 'is-down' : ''}">
+                <td>${i + 1}</td><td class="t-name">${badgeSvg(row.team.badge, 22)} ${esc(row.team.name)}</td><td>${row.played}</td><td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.gf - row.ga > 0 ? '+' : ''}${row.gf - row.ga}</td><td><strong>${row.points}</strong></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+          <p class="muted small">${c.league.tier > 1 ? 'Top two go up a tier.' : 'Top of the tree!'} ${c.league.tier < 5 ? 'Bottom team goes down.' : ''}</p>
+        </div>`}
+        <div class="card next-card">
+          ${next ? `
+            <span class="muted">Match ${c.league.round + 1} of ${c.league.rounds.length}</span>
+            <div class="fx-team ${next.youAreHome ? 'is-you' : ''}">${badgeSvg(next.home.badge, 40)}<span class="fx-name">${esc(next.home.name)}</span></div>
+            <div class="vs-mid">VS</div>
+            <div class="fx-team ${!next.youAreHome ? 'is-you' : ''}">${badgeSvg(next.away.badge, 40)}<span class="fx-name">${esc(next.away.name)}</span></div>
+            <button class="btn btn-primary btn-big" id="k-play">⚽ Play next match</button>` : c.done ? '<button class="btn btn-primary btn-big" id="k-new">🌱 Start a new career</button>' : `
+            <button class="btn btn-primary btn-big" id="k-next">${lastSeason ? (lastYear ? '🎓 Finish the career' : `🎒 Move up to ${CAREER_AGES[c.year]}`) : '▶️ Next mini season'}</button>`}
+          <button class="btn btn-blue" id="k-edit">👕 Team looks</button>
+          ${c.history.length ? `<details class="history"><summary>Past seasons</summary><ul class="plain-list muted">${c.history.map((h) => `<li>${esc(h.age)} ${esc(SEASON_NAMES[(h.miniSeason - 1) % SEASONS_PER_YEAR])}: ${ordinal(h.position)} in ${esc(tierInfo(h.tier).name)}${h.topScorer ? ` · top scorer ${esc(h.topScorer.name)} (${h.topScorer.goals})` : ''}</li>`).join('')}</ul></details>` : ''}
+          <button class="btn btn-ghost" id="k-quit">Leave this career</button>
+        </div>
+      </div>
+      <div class="card stat-cards-wrap">
+        <div class="row space-between">
+          <h3>Player cards</h3>
+          <div class="pills"><button class="pill is-active" data-scope="season">This season</button><button class="pill" data-scope="career">Whole career</button></div>
+        </div>
+        <div class="stat-cards" id="k-cards">${cards()}</div>
+      </div>
+    </div>`;
+  wire(root, () => router.go({ name: 'menu' }));
+  root.querySelectorAll<HTMLElement>('[data-scope]').forEach((b) => b.addEventListener('click', () => {
+    scope = b.dataset.scope as 'season' | 'career';
+    root.querySelectorAll('[data-scope]').forEach((x) => x.classList.toggle('is-active', x === b));
+    root.querySelector('#k-cards')!.innerHTML = cards();
+  }));
+  root.querySelector('#k-play')?.addEventListener('click', () => {
+    // The human always controls the home side of the sim, so put your team there; the table flips the score when you were away.
+    const [h, a] = resolveKits(next!.youAreHome ? next!.home : next!.away, next!.youAreHome ? next!.away : next!.home);
+    router.startMatch({ home: h, away: a, difficulty: 'normal', halfSeconds: c.halfSeconds, mode: 'match', career: true, cpuLevel: tier.level });
+  });
+  root.querySelector('#k-next')?.addEventListener('click', () => {
+    const adv = advanceCareer(c, you);
+    saveTeam(you);
+    setCareer(c);
+    recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0 });
+    renderCareer(root, router);
+  });
+  root.querySelector('#k-edit')?.addEventListener('click', () => router.go({ name: 'builder', teamId: you.id }));
+  root.querySelector('#k-new')?.addEventListener('click', () => router.go({ name: 'setup', homeId: you.id, mode: 'career' }));
+  root.querySelector('#k-quit')?.addEventListener('click', () => {
+    if (confirm('Leave this career? Your seasons and stats will be deleted. The team stays in My Teams.')) { setCareer(null); router.go({ name: 'menu' }); }
+  });
+}
+
 
 // ---------- Tournament ----------
 
@@ -770,21 +981,6 @@ function renderAlbum(root: HTMLElement, router: Router): void {
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
-}
-
-function pickPlayerOfTheMatch(r: MatchResult) {
-  const counts = new Map<string, { n: number; p: MatchResult['goals'][number]['scorer'] }>();
-  for (const g of r.goals) {
-    if (g.ownGoal) continue;
-    const e = counts.get(g.scorer.id) ?? { n: 0, p: g.scorer };
-    e.n++;
-    counts.set(g.scorer.id, e);
-  }
-  let best: { n: number; p: MatchResult['goals'][number]['scorer'] } | null = null;
-  for (const e of counts.values()) if (!best || e.n > best.n) best = e;
-  if (best) return best.p;
-  // No goals: the home keeper kept a clean sheet.
-  return startingFive(r.home).find((p) => p.position === 'GK') ?? null;
 }
 
 // ---------- Parents ----------

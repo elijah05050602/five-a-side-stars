@@ -16,8 +16,8 @@ const NAVY = '#1b2a41';
  * when they face you). gazeY: -1 up .. 1 down. Callers quantise both so the
  * cache stays small.
  */
-export function faceTexture(skin: string, expr: Expression, gazeX = 0, gazeY = 0): THREE.CanvasTexture {
-  const key = `${skin}|${expr}|${gazeX}|${gazeY}`;
+export function faceTexture(skin: string, expr: Expression, gazeX = 0, gazeY = 0, hair = '#3b2314'): THREE.CanvasTexture {
+  const key = `${skin}|${expr}|${gazeX}|${gazeY}|${hair}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const c = document.createElement('canvas');
@@ -30,12 +30,14 @@ export function faceTexture(skin: string, expr: Expression, gazeX = 0, gazeY = 0
   const eyeY = 0.49 * SIZE;
   const mouthY = 0.8 * SIZE;
   const px = gazeX * 5, py = gazeY * 4;
+  // Brows take the hair colour, a touch darker so they still read on light hair.
+  const browColour = `#${new THREE.Color(hair).multiplyScalar(0.72).getHexString()}`;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
 
   const brow = (x: number, tilt: number, lift: number) => {
     // tilt > 0 raises the inner end (sad/worried), < 0 lowers it (focus/anger).
     const inner = x < SIZE / 2 ? 1 : -1;
-    ctx.strokeStyle = 'rgba(55,32,14,0.85)'; ctx.lineWidth = 5;
+    ctx.strokeStyle = browColour; ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.moveTo(x - 11 * inner, eyeY - 21 - lift - tilt * 4);
     ctx.quadraticCurveTo(x, eyeY - 27 - lift, x + 11 * inner, eyeY - 21 - lift + tilt * 4);
