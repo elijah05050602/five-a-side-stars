@@ -1,7 +1,7 @@
 /** Remappable controls: keyboard keys per player, gamepad buttons and the on-screen touch layout, saved per browser. */
 
-export type Action = 'up' | 'down' | 'left' | 'right' | 'shoot' | 'pass' | 'sprint' | 'switch' | 'trick' | 'pause';
-export const ACTIONS: Action[] = ['up', 'down', 'left', 'right', 'shoot', 'pass', 'sprint', 'switch', 'trick', 'pause'];
+export type Action = 'up' | 'down' | 'left' | 'right' | 'shoot' | 'pass' | 'lob' | 'sprint' | 'switch' | 'trick' | 'pause';
+export const ACTIONS: Action[] = ['up', 'down', 'left', 'right', 'shoot', 'pass', 'lob', 'sprint', 'switch', 'trick', 'pause'];
 
 /** Which physical keys (KeyboardEvent.code) drive each action. */
 export type KeyMap = Record<Action, string[]>;
@@ -31,7 +31,7 @@ export const PAD_SLOTS = 2;
 
 export const ACTION_LABELS: Record<Action, string> = {
   up: 'Move up', down: 'Move down', left: 'Move left', right: 'Move right',
-  shoot: 'Shoot (hold to power up)', pass: 'Pass', sprint: 'Sprint', switch: 'Switch player', trick: 'Trick', pause: 'Pause',
+  shoot: 'Shoot (hold to power up)', pass: 'Pass', lob: 'Lob pass / cross', sprint: 'Sprint', switch: 'Switch player', trick: 'Trick', pause: 'Pause',
 };
 
 export function defaultControls(): ControlsConfig {
@@ -40,24 +40,24 @@ export function defaultControls(): ControlsConfig {
       // Single player: arrows and WASD both work, with several shoot and pass keys.
       solo: {
         up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
-        shoot: ['Space', 'KeyX', 'KeyK'], pass: ['KeyZ', 'Enter', 'KeyJ'], sprint: ['ShiftLeft', 'ShiftRight', 'KeyL'],
+        shoot: ['Space', 'KeyX', 'KeyK'], pass: ['KeyZ', 'Enter', 'KeyJ'], lob: ['KeyV', 'KeyI'], sprint: ['ShiftLeft', 'ShiftRight', 'KeyL'],
         switch: ['KeyQ', 'KeyE'], trick: ['KeyC', 'KeyU'], pause: ['Escape', 'KeyP'],
       },
       // Two players on one keyboard: player 1 on the left-hand side...
       p1: {
         up: ['KeyW'], down: ['KeyS'], left: ['KeyA'], right: ['KeyD'],
-        shoot: ['Space', 'KeyF'], pass: ['KeyZ', 'KeyG'], sprint: ['ShiftLeft'], switch: ['KeyQ'], trick: ['KeyC', 'KeyH'], pause: ['Escape', 'KeyP'],
+        shoot: ['Space', 'KeyF'], pass: ['KeyZ', 'KeyG'], lob: ['KeyV', 'KeyR'], sprint: ['ShiftLeft'], switch: ['KeyQ'], trick: ['KeyC', 'KeyH'], pause: ['Escape', 'KeyP'],
       },
       // ...and player 2 on the arrow keys.
       p2: {
         up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'],
-        shoot: ['Enter', 'Numpad0'], pass: ['Slash', 'NumpadDecimal'], sprint: ['ShiftRight', 'ControlRight'], switch: ['Period', 'NumpadEnter'], trick: ['Quote', 'Numpad1'], pause: ['Escape'],
+        shoot: ['Enter', 'Numpad0'], pass: ['Slash', 'NumpadDecimal'], lob: ['Semicolon', 'Numpad2'], sprint: ['ShiftRight', 'ControlRight'], switch: ['Period', 'NumpadEnter'], trick: ['Quote', 'Numpad1'], pause: ['Escape'],
       },
     },
     // Standard mapping: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 9 Start, 12-15 d-pad.
     pad: {
       up: [12], down: [13], left: [14], right: [15],
-      shoot: [1], pass: [0], sprint: [7, 5], switch: [4], trick: [2], pause: [9],
+      shoot: [1], pass: [0], lob: [3], sprint: [7, 5], switch: [4], trick: [2], pause: [9],
     },
     touch: { size: 1, leftHanded: false, opacity: 1 },
   };
@@ -81,6 +81,19 @@ function sanitise(raw: unknown): ControlsConfig {
     for (const a of ACTIONS) d.keys[p][a] = cleanList(r.keys?.[p]?.[a], isStr, KEY_SLOTS, d.keys[p][a]);
   }
   for (const a of ACTIONS) d.pad[a] = cleanList(r.pad?.[a], isBtn, PAD_SLOTS, d.pad[a]);
+  // An action added since the file was saved (like Lob) takes only default keys and buttons nothing else uses.
+  for (const p of ['solo', 'p1', 'p2'] as KeyProfile[]) {
+    for (const a of ACTIONS) {
+      if (Array.isArray(r.keys?.[p]?.[a]) || !r.keys?.[p]) continue;
+      const used = new Set(sharingProfiles(p).flatMap((q) => ACTIONS.filter((b) => !(q === p && b === a)).flatMap((b) => d.keys[q][b])));
+      d.keys[p][a] = d.keys[p][a].filter((k) => !used.has(k));
+    }
+  }
+  for (const a of ACTIONS) {
+    if (Array.isArray(r.pad?.[a]) || !r.pad) continue;
+    const used = new Set(ACTIONS.filter((b) => b !== a).flatMap((b) => d.pad[b]));
+    d.pad[a] = d.pad[a].filter((b) => !used.has(b));
+  }
   const t = r.touch;
   if (t) {
     if (typeof t.size === 'number') d.touch.size = Math.min(1.4, Math.max(0.8, t.size));
@@ -199,5 +212,5 @@ export function moveKeysLabel(profile: KeyProfile): string {
 /** One plain sentence of a profile's main keys, e.g. "W A S D to move, hold Space to shoot, Z to pass...". */
 export function controlsSentence(profile: KeyProfile): string {
   const k = (a: Action) => firstKey(profile, a);
-  return `${moveKeysLabel(profile)} to move, hold ${k('shoot')} to shoot, ${k('pass')} to pass, ${k('sprint')} to sprint, ${k('switch')} to switch, ${k('trick')} for a trick`;
+  return `${moveKeysLabel(profile)} to move, hold ${k('shoot')} to shoot, ${k('pass')} to pass, ${k('lob')} to lob a cross, ${k('sprint')} to sprint, ${k('switch')} to switch, ${k('trick')} for a trick`;
 }

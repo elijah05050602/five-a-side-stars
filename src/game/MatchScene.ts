@@ -171,6 +171,7 @@ export class MatchScene {
     this.input.attachButton(this.hud.btnSprint, 'sprint');
     this.input.attachButton(this.hud.btnSwitch, 'switch');
     this.input.attachButton(this.hud.btnTrick, 'trick');
+    this.input.attachButton(this.hud.btnLob, 'lob');
 
     window.addEventListener('resize', this.onResize);
     this.resize();
@@ -263,7 +264,7 @@ export class MatchScene {
     const step = 1 / 60;
     let steps = 0;
     while (!replaying && this.acc >= step && steps < 8) {
-      const once = { shoot: false, pass: false, switchPlayer: false, pause: false, trick: false };
+      const once = { shoot: false, pass: false, lob: false, switchPlayer: false, pause: false, trick: false };
       this.sim.step(step, steps === 0 ? input : { ...input, ...once }, input2 ? (steps === 0 ? input2 : { ...input2, ...once }) : undefined);
       if (this.sim.phase === 'play' || this.sim.phase === 'setpiece' || this.sim.phase === 'kickoff') this.record();
       this.acc -= step;

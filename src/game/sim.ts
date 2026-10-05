@@ -94,7 +94,7 @@ export interface SimPlayer {
   /** Seconds before a dribbler can take their next touch. */
   touchTimer: number;
   /** A pass or trick pressed while the ball was out of reach, played as soon as it is back. */
-  queued: 'pass' | 'trick' | null;
+  queued: 'pass' | 'lob' | 'trick' | null;
   /** Which way the player is trying to run (the stick, or the AI's target); dribbling touches go this way. */
   runDir: V2;
   /** 0..1 sprint energy (human-controlled player only). */
@@ -140,6 +140,8 @@ export interface SimBall {
   penaltyShot: boolean;
   /** The last kick was a pass (so a team-mate collecting it completes it). */
   wasPass: boolean;
+  /** Team-mate the current pass or lob is meant for, who runs to meet it. */
+  receiver: SimPlayer | null;
   /** Team-mate whose completed pass set up the current possession; credited with an assist on a goal. */
   assist: SimPlayer | null;
 }
@@ -204,16 +206,16 @@ export interface Shootout {
   kicked: boolean;
 }
 
-export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootHeld: false, pass: false, sprint: false, switchPlayer: false, pause: false, trick: false };
+export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootHeld: false, pass: false, lob: false, sprint: false, switchPlayer: false, pause: false, trick: false };
 
 /** Grass between the lines and the boards, so the ball can go out for throw-ins, corners and goal kicks. */
 export const RUNOFF_SIDE = 1.2;
 export const RUNOFF_END = 1.6;
 
 const DIFF = {
-  easy: { speed: 0.85, think: 0.55, accuracy: 0.6, tackle: 0.6, humanTackle: 1.3, shootRange: 0.3 },
-  normal: { speed: 1.0, think: 0.35, accuracy: 0.8, tackle: 0.9, humanTackle: 0.85, shootRange: 0.38 },
-  hard: { speed: 1.08, think: 0.2, accuracy: 1.0, tackle: 1.2, humanTackle: 0.6, shootRange: 0.45 },
+  easy: { speed: 0.85, think: 0.55, accuracy: 0.6, tackle: 0.6, humanTackle: 1.3, shootRange: 0.34 },
+  normal: { speed: 1.0, think: 0.35, accuracy: 0.8, tackle: 0.9, humanTackle: 0.85, shootRange: 0.43 },
+  hard: { speed: 1.08, think: 0.2, accuracy: 1.0, tackle: 1.2, humanTackle: 0.6, shootRange: 0.5 },
 } as const;
 
 type DiffSettings = { speed: number; think: number; accuracy: number; tackle: number; humanTackle: number; shootRange: number };
@@ -294,7 +296,7 @@ export class MatchSim {
     this.goalWidth = this.stats.goalWidth;
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
-    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, assist: null };
+    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, assist: null };
     this.diff = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.difficulty];
     const diff = this.diff;
     ([0, 1] as Side[]).forEach((side) => {
@@ -668,6 +670,7 @@ export class MatchSim {
       if (input.shootHeld) p.charge = Math.min(1, p.charge + _dt / 0.7);
       else if (p.charge > 0) { this.takeSetPiece(p, sp.kind, aim, true, p.charge); p.charge = 0; }
       else if (input.pass && sp.kind !== 'penalty') this.takeSetPiece(p, sp.kind, aim, false, 0);
+      else if (input.lob && sp.kind !== 'penalty') this.takeSetPieceLob(p, sp.kind, aim);
       return;
     }
     // Everyone else can move about while a set piece is lined up (the ball is out of bounds to them).
@@ -689,13 +692,16 @@ export class MatchSim {
         p.charge = Math.min(1, p.charge + _dt / 0.7);
       } else if (!inReach) {
         if (input.pass) p.queued = 'pass';
+        else if (input.lob) p.queued = 'lob';
         else if (input.trick) p.queued = 'trick';
       } else if (p.charge > 0) {
         // Released: a tap is a quick medium shot, a full hold is a rocket.
-        this.shoot(p, l > 0.05 ? want : null, 0.7 + 0.45 * p.charge);
+        this.shoot(p, l > 0.05 ? want : null, 0.85 + 0.45 * p.charge);
         p.charge = 0;
       } else if (input.pass || p.queued === 'pass') {
         this.pass(p, l > 0.05 ? want : null);
+      } else if (input.lob || p.queued === 'lob') {
+        this.lob(p, l > 0.05 ? want : null);
       } else if (input.trick || p.queued === 'trick') {
         this.trick(p, l > 0.05 ? want : null);
       }
@@ -779,6 +785,14 @@ export class MatchSim {
           return;
         }
         const tight = pressure < 1.3 * this.stats.scale + 0.7;
+        // Out wide near the box: lob a cross in to a team-mate making a run.
+        if (!angleClear && dGoal < this.length * 0.45 && Math.random() < (tight ? 0.6 : 0.3)) {
+          const spot = v(goal.x - Math.sign(goal.x) * (this.width * 0.26 + 0.6), 0);
+          if (Math.abs(p.pos.z) > this.width * 0.25 && this.crossTarget(p, spot, null)) {
+            this.lob(p, null);
+            return;
+          }
+        }
         // Now and then a cornered dribbler tries a step-over or a nutmeg instead of passing.
         if (tight && p.trickCooldown <= 0 && Math.random() < (isCpuTeam ? 0.02 + 0.025 * diff.accuracy : 0.03)) {
           this.trick(p, null);
@@ -812,7 +826,10 @@ export class MatchSim {
       p.think = isCpuTeam ? diff.think : 0.25;
       const chaser = this.nearestOutfield(mates, b.pos);
       const ballLoose = b.owner === null;
-      if ((ballLoose || oppHasBall) && chaser === p && this.phase !== 'kickoff') {
+      if (ballLoose && b.wasPass && b.receiver === p) {
+        // The pass is meant for us: go and meet it.
+        p.aiTarget = this.interceptPoint(p);
+      } else if ((ballLoose || oppHasBall) && chaser === p && this.phase !== 'kickoff') {
         // Chase the ball: run to the point where we can meet it.
         p.aiTarget = oppHasBall ? v(b.pos.x + b.vel.x * 0.6, b.pos.z + b.vel.z * 0.6) : this.interceptPoint(p);
       } else if (teamHasBall) {
@@ -904,6 +921,7 @@ export class MatchSim {
     // Positioning: a good keeper follows the ball across the goal and narrows the angle.
     let targetZ = clamp(b.pos.z * clamp(0.6 * p.mul.angle, 0.3, 0.85), -this.goalWidth / 2 + 0.3, this.goalWidth / 2 - 0.3);
     let targetX = own + dir * 0.7;
+    let rush = false;
     const t = toGoal ? Math.abs((p.pos.x - b.pos.x) / (b.vel.x || 1e-6)) : 99;
     if (b.penaltyShot && toGoal) {
       // Penalty: commit to a side at the kick and dive that way (usually the right one).
@@ -929,13 +947,15 @@ export class MatchSim {
         const out = clamp(Math.abs(b.owner.pos.x - own) * 0.45 * p.mul.angle, 0.7, 2.6 * p.mul.angle);
         targetX = own + dir * out;
         targetZ = clamp(b.owner.pos.z * 0.5, -this.goalWidth / 2, this.goalWidth / 2);
+        // Close in: rush out and smother a ball knocked too far ahead, so walking it in is hard.
+        if (dist(b.pos, p.pos) < 2.6 * this.stats.scale + 1.5 && Math.abs(b.pos.x - own) < 5) { targetX = b.pos.x; targetZ = b.pos.z; rush = true; }
       }
     } else if (this.mode !== 'tutorial' && b.owner === null && len(b.vel) < 4 && dist(b.pos, p.pos) < 3 * this.stats.scale && Math.abs(b.pos.x - own) < 4.5) {
       // Come and collect a slow loose ball near the goal if we are closest to it.
       const opp = this.nearest(this.teamOf((1 - p.side) as Side), b.pos);
       if (!opp || dist(opp.pos, b.pos) > dist(p.pos, b.pos)) { targetX = b.pos.x; targetZ = b.pos.z; }
     }
-    const speed = p.diveAnim > 0 ? 1.6 : 1.1;
+    const speed = p.diveAnim > 0 ? 1.6 : rush ? 1.35 : 1.1;
     this.moveTowards(p, v(targetX, targetZ), speed);
     p.facing = Math.atan2(b.pos.z - p.pos.z, b.pos.x - p.pos.x);
   }
@@ -945,6 +965,11 @@ export class MatchSim {
     const b = this.ball;
     const speed = len(b.vel);
     if (speed < 0.5) return v(b.pos.x, b.pos.z);
+    if (b.y > 0.3 || b.vy > 1) {
+      // In the air (a lob or a cross): run to where it will come down.
+      const t = (b.vy + Math.sqrt(b.vy * b.vy + 2 * 9.81 * b.y)) / 9.81;
+      return v(b.pos.x + b.vel.x * t * 0.95, b.pos.z + b.vel.z * t * 0.95);
+    }
     const dir = norm(b.vel);
     const run = this.stats.speed * p.speedMul;
     const decel = 3.2;
@@ -968,14 +993,14 @@ export class MatchSim {
   }
 
   /** Team-mate who is most open and furthest forward, within passing distance. */
-  private bestPassTarget(from: SimPlayer, aim: V2 | null): SimPlayer | null {
+  private bestPassTarget(from: SimPlayer, aim: V2 | null, lofted = false): SimPlayer | null {
     const mates = this.teamOf(from.side).filter((m) => m !== from && !m.isKeeper);
     const opps = this.teamOf((1 - from.side) as Side);
     const dir = from.side === 0 ? 1 : -1;
     let best: SimPlayer | null = null, bestScore = -Infinity;
     for (const m of mates) {
       const d = dist(m.pos, from.pos);
-      if (d < 1.5 || d > this.length * 0.6) continue;
+      if (d < (lofted ? 3.5 : 1.5) || d > this.length * (lofted ? 0.75 : 0.6)) continue;
       const lane = norm(v(m.pos.x - from.pos.x, m.pos.z - from.pos.z));
       let blocked = 0;
       for (const o of opps) {
@@ -987,7 +1012,8 @@ export class MatchSim {
         }
       }
       const openness = opps.reduce((acc, o) => acc + Math.min(dist(o.pos, m.pos), 6), 0);
-      let score = openness - blocked * 12 - d * 0.3 + (m.pos.x - from.pos.x) * dir * 0.6;
+      // A lofted ball sails over anyone in the lane, so only the receiver's space matters.
+      let score = openness - (lofted ? 0 : blocked * 12) - d * 0.3 + (m.pos.x - from.pos.x) * dir * (lofted ? 1 : 0.6);
       if (aim) {
         const dot = lane.x * aim.x + lane.z * aim.z;
         score += dot * 15; // strongly prefer the direction the human is pointing
@@ -1051,7 +1077,7 @@ export class MatchSim {
     const sprintF = clamp(1 + (speed / base - 0.88) * 2.5, 0.55, 1.6);
     // A stretch to steer a ball that is already out in front is a gentler nudge.
     const already = Math.max(0, dist(o.pos, b.pos) - this.touchRange(o));
-    const gap = Math.max(0.08, (0.3 + 0.35 * this.stats.scale) * (1.35 - 0.5 * this.stats.control) * sprintF * o.mul.touchDist - already);
+    const gap = Math.max(0.1, (0.45 + 0.55 * this.stats.scale) * (1.4 - 0.5 * this.stats.control) * sprintF * o.mul.touchDist - already);
     const decel = 3.2 + 0.06 * speed;
     const kickSpeed = speed + Math.sqrt(2 * decel * gap);
     const wobble = (1 - this.stats.control) * 0.3 * o.mul.touchDist;
@@ -1162,8 +1188,11 @@ export class MatchSim {
       const ballSpeed = len(b.vel);
       const offLine = ballSpeed > 0.3 && along < ballSpeed * 0.85; // rolling a different way from the run
       // A touch when the run catches the ball up, or a longer stretch to steer it round a turn.
-      const catchUp = d < this.touchRange(o) && along < speed * 1.05;
-      const turn = offLine && d < this.touchRange(o) + 0.35 * this.stats.scale + 0.15;
+      const stretch = this.touchRange(o) + 0.35 * this.stats.scale + 0.15;
+      // A ball that drifted off to one side is reached for as the run draws level with it.
+      const aheadOf = (b.pos.x - o.pos.x) * want.x + (b.pos.z - o.pos.z) * want.z;
+      const catchUp = (d < this.touchRange(o) || (d < stretch && aheadOf < this.touchRange(o) * 0.6)) && along < speed * 1.05;
+      const turn = offLine && d < stretch;
       if (o.touchTimer <= 0 && b.y < 0.3 && (catchUp || turn)) {
         this.dribbleTouch(o, want, speed);
       } else if (d > 1.6 + 1.6 * this.stats.scale) {
@@ -1176,7 +1205,11 @@ export class MatchSim {
     b.y += b.vy * dt;
     if (b.y <= 0) {
       b.y = 0;
-      if (b.vy < -0.5) b.vy = -b.vy * 0.55; else b.vy = 0;
+      if (b.vy < -0.5) {
+        // A dropping ball checks up as it lands, so a lob sits up for the receiver.
+        if (b.vy < -2.5) { b.vel.x *= 0.7; b.vel.z *= 0.7; }
+        b.vy = -b.vy * 0.55;
+      } else b.vy = 0;
     }
     const speed = len(b.vel);
     const onGround = b.y < 0.01;
@@ -1230,7 +1263,7 @@ export class MatchSim {
         const d = dist(p.pos, b.pos);
         if (exposed && p.tackleTimer <= 0) {
           const kr = this.stats.keeperReach * (p.info.special === 'keeper' ? 1.25 : 1) * p.mul.reach;
-          const reach = p.isKeeper ? kr * 0.55 : controlR;
+          const reach = p.isKeeper ? kr * 0.75 : controlR;
           if (d < reach && b.y < 0.6 * this.stats.scale + 0.2) {
             const isCpu = !this.isHuman(p.side);
             p.tackleTimer = isCpu ? 0.3 : 0.4;
@@ -1338,7 +1371,9 @@ export class MatchSim {
       } else {
         // Fast balls are harder to bring under control.
         const skill = clamp(this.stats.control + best.mul.touch, 0.05, 0.98); // Dribbling: a soft first touch
-        const hard = ballSpeed > 7 * (0.5 + skill);
+        // A team-mate's pass is weighted to be taken, so it can come in firmer than a loose ball.
+        const meant = b.wasPass && b.lastKick?.side === best.side;
+        const hard = ballSpeed > 7 * (0.5 + skill) * (meant ? 1.4 : 1);
         if (hard && Math.random() < (1 - skill) * 0.6) {
           // Fluffed touch: ball deflects.
           b.vel = v(b.vel.x * 0.45 + rand(-1.5, 1.5), b.vel.z * 0.45 + rand(-1.5, 1.5));
@@ -1353,6 +1388,7 @@ export class MatchSim {
       if (from && from.side === best.side && from !== best && b.wasPass) { from.match.passes++; b.assist = from; }
       else if (!from || from.side !== best.side) b.assist = null;
       b.wasPass = false;
+      b.receiver = null;
       b.owner = best;
       b.lastTouch = best;
       b.vy = 0; b.y = 0;
@@ -1376,6 +1412,7 @@ export class MatchSim {
     b.flightId++;
     b.penaltyShot = false;
     b.wasPass = false;
+    b.receiver = null;
     p.kickCooldown = 0.35;
     p.kickAnim = 1;
     p.facing = Math.atan2(n.z, n.x);
@@ -1562,7 +1599,7 @@ export class MatchSim {
     switch (kind) {
       case 'penalty':
       case 'freekick':
-        if (shot) this.shoot(p, aim, 0.7 + 0.45 * charge); else this.pass(p, aim);
+        if (shot) this.shoot(p, aim, 0.85 + 0.45 * charge); else this.pass(p, aim);
         return;
       case 'throwin': this.throwIn(p, aim, shot ? charge : -1); return;
       case 'corner':
@@ -1721,7 +1758,7 @@ export class MatchSim {
       dir = norm(v(g.x * 0.55 + a.x * 0.45, g.z * 0.55 + a.z * 0.45));
     }
     const d = dist(p.pos, goal);
-    const power = this.stats.power * clamp(0.75 + d / this.length, 0.8, 1.15) * powerMul * (p.info.special === 'power' ? 1.18 : 1) * p.mul.power;
+    const power = this.stats.power * clamp(0.85 + d / this.length, 0.95, 1.25) * powerMul * (p.info.special === 'power' ? 1.18 : 1) * p.mul.power;
     const loft = power * rand(0.06, 0.2) * (powerMul > 1 ? 1.3 : 1);
     this.kick(p, dir, power, loft);
     p.match.shots++;
@@ -1745,9 +1782,71 @@ export class MatchSim {
     const wobble = (1 - this.stats.control) * 0.35 * p.mul.passWobble;
     const a = Math.atan2(dir.z, dir.x) + rand(-wobble, wobble);
     dir = v(Math.cos(a), Math.sin(a));
-    const speed = clamp(3.5 + d * 0.65, 4.5, this.stats.power * 0.72) * speedMul;
+    // Friction slows a rolling ball by about 3.4 m/s each second: kick it hard enough to reach the receiver still moving briskly.
+    const arrive = this.stats.power * 0.45;
+    const speed = clamp(Math.sqrt(arrive * arrive + 2 * 3.4 * d), this.stats.power * 0.6, this.stats.power * 0.95) * speedMul;
     this.kick(p, dir, speed, 0);
     this.ball.wasPass = true;
+    this.ball.receiver = mate;
+  }
+
+  /**
+   * Lob pass or cross: a lofted ball over the defenders' heads that drops at a
+   * team-mate (forward runners first), or where the stick points. Nobody can
+   * cut it out in the air, but it is slower to arrive and less exact than a pass.
+   */
+  lob(p: SimPlayer, aim: V2 | null): void {
+    const goal = v(this.goalX(p.side), 0);
+    // Out wide in the final third it is a cross into the box; anywhere else a lofted pass.
+    const crossing = Math.abs(p.pos.z) > this.width * 0.25 && Math.abs(p.pos.x - goal.x) < this.length * 0.4;
+    const spot = v(goal.x - Math.sign(goal.x) * (this.width * 0.26 + 0.6), 0);
+    let mate = crossing ? this.crossTarget(p, spot, aim) : null;
+    if (!crossing) mate = this.bestPassTarget(p, aim, true);
+    let to: V2;
+    if (crossing && !mate && !aim) {
+      to = v(spot.x - p.pos.x, spot.z - p.pos.z); // nobody there yet: put it on the penalty spot for a runner
+    } else if (mate) {
+      // Aim where the receiver will be when it drops.
+      const t0 = this.lobFlightTime(dist(p.pos, mate.pos));
+      to = v(mate.pos.x + mate.vel.x * t0 * 0.8 - p.pos.x, mate.pos.z + mate.vel.z * t0 * 0.8 - p.pos.z);
+    } else {
+      const dir = aim ? norm(aim) : v(Math.cos(p.facing), Math.sin(p.facing));
+      const d = 6 + 6 * this.stats.scale;
+      to = v(dir.x * d, dir.z * d);
+    }
+    const d = Math.max(2, len(to));
+    const t = this.lobFlightTime(d);
+    // Land a little short so it bounces on to the receiver. In the air it only loses about 0.4 m/s each second plus drag.
+    const carry = d * 0.9;
+    const speed = Math.min((carry + 0.2 * t * t) / (t - 0.03 * t * t), this.stats.power * 0.85);
+    const wobble = (1 - this.stats.control) * 0.3 * p.mul.passWobble;
+    const a = Math.atan2(to.z, to.x) + rand(-wobble, wobble);
+    this.kick(p, v(Math.cos(a), Math.sin(a)), speed, (9.81 * t) / 2);
+    this.ball.wasPass = true;
+    this.ball.receiver = mate;
+  }
+
+  /** For a cross: the team-mate best placed to attack the ball around the penalty spot (and roughly where the stick points). */
+  private crossTarget(p: SimPlayer, spot: V2, aim: V2 | null): SimPlayer | null {
+    let best: SimPlayer | null = null, bestD = this.width * 0.45;
+    for (const m of this.teamOf(p.side)) {
+      if (m === p || m.isKeeper) continue;
+      const lane = norm(v(m.pos.x - p.pos.x, m.pos.z - p.pos.z));
+      if (aim && lane.x * aim.x + lane.z * aim.z < 0.2) continue;
+      const d = dist(m.pos, spot);
+      if (d < bestD) { bestD = d; best = m; }
+    }
+    return best;
+  }
+
+  /** Seconds a lob spends in the air: longer balls go higher. */
+  private lobFlightTime(d: number): number { return clamp(0.55 + d * 0.035, 0.65, 1.25); }
+
+  /** A human taker pressed lob at a set piece. */
+  private takeSetPieceLob(p: SimPlayer, kind: SetPieceKind, aim: V2 | null): void {
+    if (kind === 'throwin') this.throwIn(p, aim, 0.5);
+    else if (kind === 'corner') this.cross(p, aim, 1);
+    else this.lob(p, aim);
   }
 
   private checkGoal(): void {

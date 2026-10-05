@@ -241,7 +241,9 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .abtn-pass { background: var(--blue); color: var(--white); }
 .abtn-sprint { background: var(--green); color: var(--white); }
 .abtn-switch { background: var(--white); }
-.abtn-trick { grid-column: 2; justify-self: center; width: calc(68px * var(--tc-size)); height: calc(68px * var(--tc-size)); font-size: calc(14px * var(--tc-size)); background: #9b5de5; color: var(--white); }
+.abtn-trick, .abtn-lob { justify-self: center; width: calc(68px * var(--tc-size)); height: calc(68px * var(--tc-size)); font-size: calc(14px * var(--tc-size)); color: var(--white); }
+.abtn-trick { background: #9b5de5; }
+.abtn-lob { background: #f4a261; }
 /* Left-handed: joystick on the right, buttons mirrored on the left. */
 .touch-controls.is-lefty .joystick { left: auto; right: 24px; }
 .touch-controls.is-lefty .action-buttons { right: auto; left: 20px; direction: rtl; }
