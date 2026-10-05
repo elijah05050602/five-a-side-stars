@@ -1,10 +1,12 @@
 import { AGE_STATS } from '../data/ageGroups';
 import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode } from '../data/defaults';
 import { deleteTeam, getCareer, getLeague, getSettings, getTeam, getTeams, resetAll, saveTeam, setCareer, setLeague, updateSettings } from '../data/storage';
-import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type Difficulty, type HairStyle, type Kit, type Position, type SkillKey, type Special, type Team } from '../data/types';
+import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, POSITIONS, POSITION_LABELS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type Difficulty, type FormationId, type HairStyle, type Kit, type Position, type SkillKey, type Special, type Team } from '../data/types';
 import { STAR_BUDGET, STAR_CAP, fitSkills, randomSkills, skillKeys, skillLabel, starsLeft, starsText, totalStars } from '../data/skills';
 import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, advanceCareer, applyCareerMatch, careerAge, careerSeasonOutcome, careerSeasonOver, createCareer, playerOfTheMatch, seasonName, statRows, type GrowthEvent } from '../game/career';
 import { kitsClash } from '../game/kitTexture';
+import { FORMATIONS, applyFormation, assignSlots, formationById, formationFor } from '../data/formations';
+import { contrastColour } from '../game/playerAtlas';
 import type { MatchResult, SimMode } from '../game/MatchScene';
 import { WEATHER_CHOICES, type WeatherChoice } from '../game/Weather';
 import { STICKERS, getProgress, lockedIcons, recordCareer, recordSeason, recordTrophy, unlockedIcons, type Sticker } from '../data/progress';
@@ -174,6 +176,7 @@ function renderTeams(root: HTMLElement, router: Router): void {
             <div class="row">
               <button class="btn btn-primary" data-play="${t.id}">Play</button>
               <button class="btn btn-blue" data-edit="${t.id}">Edit</button>
+              <button class="btn btn-ghost btn-icon team-delete" data-delete="${t.id}" title="Delete ${esc(t.name)}" aria-label="Delete ${esc(t.name)}">🗑️</button>
             </div>
           </div>`).join('')}
         <button class="card team-card team-card-new" id="t-new"><span class="plus">+</span><span>Create Team</span></button>
@@ -183,6 +186,18 @@ function renderTeams(root: HTMLElement, router: Router): void {
   root.querySelectorAll<HTMLElement>('[data-edit]').forEach((b) => b.addEventListener('click', () => router.go({ name: 'builder', teamId: b.dataset.edit })));
   root.querySelectorAll<HTMLElement>('[data-play]').forEach((b) => b.addEventListener('click', () => router.go({ name: 'setup', homeId: b.dataset.play })));
   root.querySelector('#t-new')!.addEventListener('click', () => router.go({ name: 'builder' }));
+  root.querySelectorAll<HTMLElement>('[data-delete]').forEach((b) => b.addEventListener('click', () => {
+    const t = getTeam(b.dataset.delete!);
+    if (!t) return;
+    const inLeague = getLeague()?.teamId === t.id;
+    const inCareer = getCareer()?.teamId === t.id;
+    const extra = inLeague ? ' Your league with this team will end too.' : inCareer ? ' Your career with this team will end too.' : '';
+    if (!confirm(`Delete ${t.name}? This cannot be undone.${extra}`)) return;
+    if (inLeague) setLeague(null);
+    if (inCareer) setCareer(null);
+    deleteTeam(t.id);
+    renderTeams(root, router);
+  }));
 }
 
 // ---------- Team builder ----------
@@ -193,6 +208,8 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
   for (const p of team.players) p.skills = fitSkills(p, team.ageGroup, !team.career);
   let step: 0 | 1 | 2 = 0;
   let kitTab: 'kit' | 'awayKit' | 'keeperKit' = 'kit';
+  /** Which outfield kit the squad step's preview wears. */
+  let squadKit: 'kit' | 'awayKit' = 'kit';
   let selectedPlayer = 0;
   let preview: KitPreview3D | null = null;
 
@@ -210,6 +227,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
           <div class="builder-form" id="form"></div>
           <div class="builder-preview card">
             <canvas id="preview" class="preview-canvas"></canvas>
+            ${kitStrip()}
             <div class="preview-caption">
               <div id="preview-badge">${badgeSvg(team.badge, 64)}</div>
               <strong>${esc(team.name)}</strong>
@@ -249,8 +267,43 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     else renderSquad(form);
     const canvas = root.querySelector<HTMLCanvasElement>('#preview')!;
     const shownPlayer = step === 2 ? team.players[Math.min(selectedPlayer, team.players.length - 1)] : team.players.find((p) => p.position !== 'GK')!;
-    const shownKit = step === 1 ? team[kitTab] : shownPlayer.position === 'GK' ? team.keeperKit : team.kit;
-    preview = new KitPreview3D(canvas, shownPlayer, shownKit, stats.scale);
+    preview = new KitPreview3D(canvas, shownPlayer, shownKitFor(shownPlayer), stats.scale);
+    wireKitStrip();
+  };
+
+  /** The kit the preview wears: the one being edited on the kits step, otherwise the player's own. */
+  const shownKitFor = (pl: Team['players'][number]): Kit => step === 1 ? team[kitTab] : pl.position === 'GK' ? team.keeperKit : team[squadKit];
+  const kitSlot = (): 'kit' | 'awayKit' | 'keeperKit' => {
+    if (step === 1) return kitTab;
+    const pl = team.players[Math.min(selectedPlayer, team.players.length - 1)];
+    return step === 2 && pl.position === 'GK' ? 'keeperKit' : squadKit;
+  };
+
+  /** All three kits side by side under the preview; tap one to see it on the player. */
+  const kitStrip = (): string => {
+    const on = kitSlot();
+    const kits: ['kit' | 'awayKit' | 'keeperKit', string][] = [['kit', 'Home'], ['awayKit', 'Away'], ['keeperKit', 'Keeper']];
+    return `<div class="kit-strip" role="group" aria-label="Kits">${kits.map(([k, label]) => `<button class="kit-strip-btn ${on === k ? 'is-active' : ''}" data-kitshow="${k}" title="${label} kit">${kitChip(team[k], 40)}<small>${label}</small></button>`).join('')}</div>`;
+  };
+  const wireKitStrip = () => {
+    root.querySelectorAll<HTMLElement>('[data-kitshow]').forEach((b) => b.addEventListener('click', () => {
+      const k = b.dataset.kitshow as 'kit' | 'awayKit' | 'keeperKit';
+      if (step === 1) { kitTab = k; render(); return; }
+      if (k === 'keeperKit') {
+        // Show the keeper kit on the keeper.
+        const gk = team.players.findIndex((x) => x.position === 'GK');
+        if (gk >= 0) { selectedPlayer = gk; step = 2; render(); }
+        return;
+      }
+      squadKit = k;
+      const pl = team.players[Math.min(selectedPlayer, team.players.length - 1)];
+      if (step === 2 && pl.position === 'GK') selectedPlayer = Math.max(0, team.players.findIndex((x) => x.position !== 'GK'));
+      render();
+    }));
+  };
+  const refreshKitStrip = () => {
+    const el = root.querySelector('.kit-strip');
+    if (el) { el.outerHTML = kitStrip(); wireKitStrip(); }
   };
 
   const validate = (): boolean => {
@@ -324,8 +377,10 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
       <div class="field"><span>${label}</span>
         <div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${kit[key] === c ? 'is-active' : ''}" style="background:${c}" data-key="${key}" data-colour="${c}" aria-label="${c}"></button>`).join('')}</div>
       </div>`;
-    const clashGk = kitsClash(team.kit, team.keeperKit);
-    const clashAway = kitsClash(team.kit, team.awayKit);
+    const clashGk = kitTab !== 'awayKit' && kitsClash(team.kit, team.keeperKit);
+    const clashAway = kitTab !== 'keeperKit' && kitsClash(team.kit, team.awayKit);
+    // With both shirt colours the same a pattern is invisible, so the tiles borrow a contrasting colour to show what each one looks like.
+    const tileKit = (p: Kit['pattern']): Kit => ({ ...kit, pattern: p, shirt2: kit.shirt2 === kit.shirt ? contrastColour(kit.shirt) : kit.shirt2 });
     form.innerHTML = `
       <div class="tabs">
         <button class="tab ${kitTab === 'kit' ? 'is-active' : ''}" data-tab="kit">Home kit</button>
@@ -333,16 +388,21 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
         <button class="tab ${kitTab === 'keeperKit' ? 'is-active' : ''}" data-tab="keeperKit">Keeper kit</button>
       </div>
       <div class="field"><span>Pattern</span>
-        <div class="patterns">${KIT_PATTERNS.map((p) => `<button class="pattern-tile ${kit.pattern === p ? 'is-active' : ''}" data-pattern="${p}">${kitChip({ ...kit, pattern: p }, 44)}<small>${p}</small></button>`).join('')}</div>
+        <div class="patterns">${KIT_PATTERNS.map((p) => `<button class="pattern-tile ${kit.pattern === p ? 'is-active' : ''}" data-pattern="${p}">${kitChip(tileKit(p), 44)}<small>${p}</small></button>`).join('')}</div>
       </div>
       ${swatches('shirt', 'Shirt')}
-      ${swatches('shirt2', 'Second colour')}
+      ${swatches('shirt2', kit.pattern === 'plain' ? 'Second colour (collar and cuffs)' : 'Second colour (collar and pattern)')}
       ${swatches('shorts', 'Shorts')}
       ${swatches('socks', 'Socks')}
       ${clashGk ? '<p class="warn">⚠️ The keeper kit looks a lot like the home kit. Pick a different shirt colour so the keeper stands out.</p>' : ''}
       ${clashAway ? '<p class="warn">⚠️ The away kit looks a lot like the home kit. The away kit is used when two teams clash, so make it different.</p>' : ''}`;
     form.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => { kitTab = b.dataset.tab as 'kit' | 'awayKit' | 'keeperKit'; render(); }));
-    form.querySelectorAll<HTMLElement>('[data-pattern]').forEach((b) => b.addEventListener('click', () => { kit.pattern = b.dataset.pattern as Kit['pattern']; refreshKit(form); }));
+    form.querySelectorAll<HTMLElement>('[data-pattern]').forEach((b) => b.addEventListener('click', () => {
+      kit.pattern = b.dataset.pattern as Kit['pattern'];
+      // A pattern needs a second colour to show up.
+      if (kit.pattern !== 'plain' && kit.shirt2 === kit.shirt) kit.shirt2 = contrastColour(kit.shirt) === '#ffffff' ? '#ffffff' : '#1b2a41';
+      refreshKit(form);
+    }));
     form.querySelectorAll<HTMLElement>('[data-colour]').forEach((b) => b.addEventListener('click', () => { (kit as unknown as Record<string, string>)[b.dataset.key!] = b.dataset.colour!; refreshKit(form); }));
   };
 
@@ -352,6 +412,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     preview?.setKit(kit, num);
     // Re-render just the form so the active states update without rebuilding the 3D view.
     renderKits(form);
+    refreshKitStrip();
   };
 
   const renderSquad = (form: HTMLElement) => {
@@ -360,14 +421,15 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     const taken = new Set(team.players.filter((x) => x !== p).map((x) => x.number));
     const starters = team.players.filter((x) => x.starter).length;
     form.innerHTML = `
+      ${formationField()}
       <p class="muted">Squad of ${team.players.length} (5 to 8). Starters: ${starters} of 5. Tap a player to edit them.</p>
       <div class="squad-row squad-row-${team.players.length > 5 ? 'wide' : 'five'}">
         ${team.players.map((pl, i) => `
           <button class="player-card ${i === selectedPlayer ? 'is-active' : ''} ${pl.starter ? '' : 'is-sub'}" data-player="${i}">
-            ${kitChip(pl.position === 'GK' ? team.keeperKit : team.kit, 40)}
+            ${kitChip(pl.position === 'GK' ? team.keeperKit : team[squadKit], 40)}
             <span class="pc-number">${pl.number}</span>
             <span class="pc-name">${esc(pl.name)}</span>
-            <span class="chip chip-pos chip-${pl.position.toLowerCase()}">${pl.position === 'GK' ? 'Keeper' : pl.position === 'DEF' ? 'Defender' : 'Attacker'}</span>
+            <span class="chip chip-pos chip-${pl.position.toLowerCase()}">${POSITION_LABELS[pl.position]}</span>
             <span class="pc-stars">★ ${totalStars(pl.skills, pl.position)}</span>
             ${pl.starter ? '' : '<span class="chip chip-sub">Sub</span>'}
           </button>`).join('')}
@@ -384,7 +446,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
           <p class="muted">Taken: ${[...taken].sort((a, b) => a - b).join(', ')}</p>
         </div>
         <div class="field"><span>Position</span>
-          <div class="pills">${(['GK', 'DEF', 'ATT'] as Position[]).map((pos) => `<button class="pill ${p.position === pos ? 'is-active' : ''}" data-pos="${pos}">${pos === 'GK' ? 'Keeper' : pos === 'DEF' ? 'Defender' : 'Attacker'}</button>`).join('')}</div>
+          <div class="pills">${POSITIONS.map((pos) => `<button class="pill ${p.position === pos ? 'is-active' : ''}" data-pos="${pos}">${POSITION_LABELS[pos]}</button>`).join('')}</div>
         </div>
         ${skillsField(p, team)}
         <div class="field"><span>Special</span>
@@ -437,7 +499,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
       numEl.value = String(n);
       form.querySelectorAll('.pc-number')[selectedPlayer].textContent = String(n);
       numEl.classList.toggle('is-invalid', taken.has(n));
-      preview?.setKit(p.position === 'GK' ? team.keeperKit : team.kit, n);
+      preview?.setKit(shownKitFor(p), n);
     };
     numEl.addEventListener('input', () => setNum(Number(numEl.value)));
     form.querySelector('#p-num-down')!.addEventListener('click', () => setNum(p.number - 1));
@@ -454,12 +516,48 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
         other.position = 'GK';
       }
       p.position = pos;
+      // If the starters now fit a formation, switch to it so the pitch matches what they picked.
+      const fits = formationFor(team);
+      if (fits) team.formation = fits;
       // A new position rates different things: keep everyone inside the budget for theirs.
+      for (const x of team.players) x.skills = fitSkills(x, team.ageGroup, !team.career);
+      render();
+    }));
+    form.querySelectorAll<HTMLElement>('[data-formation]').forEach((b) => b.addEventListener('click', () => {
+      applyFormation(team, b.dataset.formation as FormationId);
       for (const x of team.players) x.skills = fitSkills(x, team.ageGroup, !team.career);
       render();
     }));
     form.querySelectorAll<HTMLElement>('[data-skin]').forEach((b) => b.addEventListener('click', () => { p.skin = b.dataset.skin!; preview?.setLook(p.skin, p.hair); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-hair]').forEach((b) => b.addEventListener('click', () => { p.hair = b.dataset.hair!; preview?.setLook(p.skin, p.hair); renderSquad(form); }));
+  };
+
+  /** Formation picker with a little pitch showing who stands where. */
+  const formationField = (): string => {
+    const f = formationById(team.formation);
+    const five = team.players.filter((x) => x.starter);
+    const slots = assignSlots(five.filter((x) => x.position !== 'GK'), f);
+    const gk = five.find((x) => x.position === 'GK');
+    // The pitch is drawn sideways: our goal on the left, attacking to the right.
+    const dot = (x: number, z: number, label: string, cls: string, title: string) =>
+      `<g class="fm-dot ${cls}" transform="translate(${(x * 2 * 200).toFixed(1)} ${((z + 0.5) * 110).toFixed(1)})"><title>${esc(title)}</title><circle r="11"/><text y="4" text-anchor="middle">${esc(label)}</text></g>`;
+    const dots = [
+      ...(gk ? [dot(0.04, 0, String(gk.number), 'fm-gk', `${gk.name}: Keeper`)] : []),
+      ...[...slots].map(([pl, sl]) => dot(sl.x, sl.z, String(pl.number), `fm-${sl.pos.toLowerCase()}`, `${pl.name}: ${POSITION_LABELS[sl.pos]}`)),
+    ].join('');
+    return `
+      <div class="field formation-field"><span>Formation <small class="muted">${esc(f.shape)} · ${esc(f.blurb)}</small></span>
+        <div class="formation-row">
+          <div class="pills formation-pills">${FORMATIONS.map((x) => `<button class="pill ${x.id === f.id ? 'is-active' : ''}" data-formation="${x.id}" title="${esc(x.blurb)}"><strong>${esc(x.name)}</strong> <small>${x.shape}</small></button>`).join('')}</div>
+          <svg class="formation-pitch" viewBox="-14 -8 228 126" aria-label="${esc(f.name)} formation">
+            <rect x="-8" y="0" width="216" height="110" rx="6" class="fm-grass"/>
+            <line x1="200" y1="0" x2="200" y2="110" class="fm-line"/><circle cx="200" cy="55" r="16" class="fm-line"/>
+            <rect x="-8" y="30" width="34" height="50" class="fm-line"/>
+            ${dots}
+          </svg>
+        </div>
+        <p class="muted small">Picking a formation moves your starters into its positions. Strikers attack, wingers run the wings, midfielders link up and defenders guard the goal.</p>
+      </div>`;
   };
 
   render();
@@ -823,7 +921,7 @@ function renderCareer(root: HTMLElement, router: Router): void {
   let scope: 'season' | 'career' = 'season';
   const cards = () => statRows(c, you, scope).map(({ player: p, stats: st }) => {
     return `<div class="card player-stat-card ${p.starter ? '' : 'is-sub'}">
-      <div class="psc-top">${kitChip(p.position === 'GK' ? you.keeperKit : you.kit, 36)}<div><strong>${esc(p.name)}</strong> <span class="muted">#${p.number}</span><br/><span class="chip chip-pos chip-${p.position.toLowerCase()}">${p.position === 'GK' ? 'Keeper' : p.position === 'DEF' ? 'Defender' : 'Attacker'}</span></div></div>
+      <div class="psc-top">${kitChip(p.position === 'GK' ? you.keeperKit : you.kit, 36)}<div><strong>${esc(p.name)}</strong> <span class="muted">#${p.number}</span><br/><span class="chip chip-pos chip-${p.position.toLowerCase()}">${POSITION_LABELS[p.position]}</span></div></div>
       <div class="psc-skills">${skillKeys(p.position).map((k) => { const l = skillLabel(p.position, k); return `<span title="${esc(l.label)}">${l.emoji} <span class="stars">${starsText(p.skills[k], STAR_CAP[age])}</span></span>`; }).join('')}</div>
       <div class="psc-stats">
         <span><strong>${st.played}</strong> played</span>

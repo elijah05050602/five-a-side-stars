@@ -1,5 +1,6 @@
 import { BADGE_ICONS, type AgeGroup, type Badge, type Kit, type Player, type Position, type Team } from './types';
 import { randomSkills } from './skills';
+import { FORMATIONS, applyFormation } from './formations';
 
 export const SKIN_TONES = ['#f6d7c3', '#eab98f', '#d49a6a', '#a86b3c', '#7a4a26', '#4a2d17'];
 export const HAIR_COLOURS = ['#2b1b0e', '#5a3a1a', '#a0522d', '#d9a441', '#f2e2a0', '#1b1b1b', '#c0392b'];
@@ -139,11 +140,15 @@ export function generateOpponent(ageGroup: AgeGroup, avoidKit: Kit): Team {
   const palette = KIT_COLOURS.filter((c) => c !== avoidKit.shirt && c !== avoidKit.shirt2 && c !== '#ffffff' && c !== '#111111');
   const shirt = pick(palette);
   const shirt2 = pick(['#ffffff', '#111111', '#ffd23f'].filter((c) => c !== shirt));
-  return makeTeam({
+  const team = makeTeam({
     name: randomTeamName(),
     ageGroup,
     kit: makeKit(shirt, shirt2, pick(['#ffffff', '#111111', '#1b2a41']), shirt, pick(['plain', 'stripes', 'hoops', 'halves', 'sash', 'chevron'])),
     badge: makeBadge(shirt, shirt2),
     keeperKit: makeKit(pick(['#2eb872', '#ffd23f', '#6a4c93', '#00c2cb']), '#111111', '#111111', '#111111', 'plain'),
   });
+  // Computer teams line up in all sorts of ways.
+  applyFormation(team, pick(FORMATIONS).id);
+  for (const p of team.players) p.skills = randomSkills(p.position, ageGroup);
+  return team;
 }
