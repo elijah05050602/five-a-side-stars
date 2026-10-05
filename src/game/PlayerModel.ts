@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { Kit, Player } from '../data/types';
 import { kitTexture } from './kitTexture';
 
+/** Models are drawn bigger than their physical size so the kids read clearly from the camera. */
+export const MODEL_SCALE = 1.35;
 const shadowGeo = new THREE.CircleGeometry(0.42, 20);
 const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false });
 
@@ -30,7 +32,7 @@ export class PlayerModel {
   private walk = 0;
 
   constructor(player: Player, kit: Kit, scale: number) {
-    const s = scale;
+    const s = scale * MODEL_SCALE;
     this.shirtMat = new THREE.MeshStandardMaterial({ map: kitTexture(kit, player.number), roughness: 0.85 });
     this.sleeveMat = new THREE.MeshStandardMaterial({ color: kit.shirt, roughness: 0.85 });
     this.shortsMat = new THREE.MeshStandardMaterial({ color: kit.shorts, roughness: 0.9 });

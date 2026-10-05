@@ -110,8 +110,8 @@ export class MatchScene {
   /** Camera sits above and "south" of the focus point, looking down at a tilt. */
   private cameraGoal(target: THREE.Vector3): THREE.Vector3 {
     const aspect = this.camera.aspect;
-    const height = (this.sim.width * 1.05) / Math.min(1.9, Math.max(1.0, aspect)) + 6;
-    return new THREE.Vector3(target.x, height, target.z + height * 0.55);
+    const height = (this.sim.width * 0.9) / Math.min(1.9, Math.max(1.0, aspect)) + 4.5;
+    return new THREE.Vector3(target.x, height, target.z + height * 0.6);
   }
 
   private frame = (now: number): void => {
@@ -151,8 +151,8 @@ export class MatchScene {
     const focus = this.sim.controlled && this.sim.phase !== 'goal'
       ? new THREE.Vector3((b.pos.x * 0.65 + this.sim.controlled.pos.x * 0.35), 0, (b.pos.z * 0.65 + this.sim.controlled.pos.z * 0.35))
       : new THREE.Vector3(b.pos.x, 0, b.pos.z);
-    focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.28, this.sim.length * 0.28);
-    focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.15, this.sim.width * 0.15);
+    focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.32, this.sim.length * 0.32);
+    focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.2, this.sim.width * 0.2);
     this.camTarget.lerp(focus, 1 - Math.pow(0.02, dt));
     const goal = this.cameraGoal(this.camTarget);
     this.camPos.lerp(goal, 1 - Math.pow(0.02, dt));

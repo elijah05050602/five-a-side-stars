@@ -132,7 +132,7 @@ export class MatchSim {
     this.goalWidth = this.stats.goalWidth;
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
-    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.08 + 0.04 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1 };
+    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1 };
     const diff = DIFF[config.difficulty];
     ([0, 1] as Side[]).forEach((side) => {
       const team = this.teams[side];

@@ -54,7 +54,7 @@ export class KitPreview3D {
     if (!this.dragging) this.t += this.spin * dt;
     this.model.setFacing(-this.t + Math.PI / 2);
     this.model.animate(0, 0, 0, 1, dt, this.scale);
-    const h = 1.45 * this.scale;
+    const h = 1.45 * this.scale * 1.35;
     this.camera.position.set(0, h * 0.75, h * 2.4);
     this.camera.lookAt(0, h * 0.5, 0);
     if (this.canvas.clientWidth && (this.canvas.width !== Math.floor(this.canvas.clientWidth * this.renderer.getPixelRatio()))) this.resize();
