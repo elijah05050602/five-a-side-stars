@@ -17,13 +17,13 @@ const router: Router = {
     document.body.classList.remove('in-match');
     renderScreen(ui, screen, router);
   },
-  startMatch(home: Team, away: Team, difficulty: Difficulty, halfSeconds: number) {
+  startMatch(home: Team, away: Team, difficulty: Difficulty, halfSeconds: number, twoPlayer = false) {
     if (match) match.dispose();
     ui.innerHTML = '';
     ui.className = 'match-ui';
     canvas.classList.add('is-live');
     document.body.classList.add('in-match');
-    match = new MatchScene(canvas, ui, { home, away, difficulty, halfSeconds, humanSide: 0 },
+    match = new MatchScene(canvas, ui, { home, away, difficulty, halfSeconds, humanSide: 0, humanSide2: twoPlayer ? 1 : null },
       (result) => { match = null; router.go({ name: 'results', result }); },
       () => { match = null; router.go({ name: 'menu' }); });
   },

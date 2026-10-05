@@ -88,9 +88,13 @@ export interface SimConfig {
   away: Team;
   difficulty: Difficulty;
   halfSeconds: number;
-  /** Which side the human controls; null = watch the computer play itself. */
+  /** Which side player 1 controls; null = watch the computer play itself. */
   humanSide: Side | null;
+  /** Second player on the same keyboard, if any. */
+  humanSide2?: Side | null;
 }
+
+const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootHeld: false, pass: false, sprint: false, switchPlayer: false, pause: false };
 
 const DIFF = {
   easy: { speed: 0.85, think: 0.55, accuracy: 0.6, tackle: 0.6, humanTackle: 1.3, shootRange: 0.3 },
@@ -116,11 +120,12 @@ export class MatchSim {
   half: 1 | 2 = 1;
   phaseTimer = 0;
   kickoffSide: Side = 0;
-  controlled: SimPlayer | null = null;
+  /** The player each side's human is controlling (null for computer sides). */
+  controlledBy: [SimPlayer | null, SimPlayer | null] = [null, null];
   events: SimEvent[] = [];
+  private switchHolds: [number, number] = [0, 0];
   setPiece: SetPiece | null = null;
   fouls: [number, number] = [0, 0];
-  private switchHold = 0;
   private lastPhase: Phase = 'kickoff';
   private pressureTimer = 0;
 
@@ -136,7 +141,7 @@ export class MatchSim {
     const diff = DIFF[config.difficulty];
     ([0, 1] as Side[]).forEach((side) => {
       const team = this.teams[side];
-      const isCpu = config.humanSide !== side;
+      const isCpu = !this.isHuman(side);
       startingFive(team).forEach((info) => {
         const p: SimPlayer = {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
@@ -150,7 +155,10 @@ export class MatchSim {
     this.setupKickoff(0);
   }
 
-  get humanTeam(): SimPlayer[] { return this.players.filter((p) => p.side === this.config.humanSide); }
+  isHuman(side: Side): boolean { return this.config.humanSide === side || this.config.humanSide2 === side; }
+  /** Player 1's controlled player (what the main HUD shows). */
+  get controlled(): SimPlayer | null { return this.config.humanSide === null ? null : this.controlledBy[this.config.humanSide]; }
+  get controlled2(): SimPlayer | null { return this.config.humanSide2 == null ? null : this.controlledBy[this.config.humanSide2]; }
   teamOf(side: Side): SimPlayer[] { return this.players.filter((p) => p.side === side); }
   goalX(side: Side): number { return side === 0 ? this.length / 2 : -this.length / 2; } // the goal this side attacks
   ownGoalX(side: Side): number { return -this.goalX(side); }
@@ -191,12 +199,11 @@ export class MatchSim {
     this.phase = 'kickoff';
     this.phaseTimer = 0;
     this.setPiece = null;
-    if (this.config.humanSide !== null) {
-      const human = this.humanTeam;
+    for (const hs of [0, 1] as Side[]) {
+      if (!this.isHuman(hs)) { this.controlledBy[hs] = null; continue; }
+      const human = this.teamOf(hs);
       const owner = this.ball.owner as SimPlayer | null;
-      this.controlled = owner && owner.side === this.config.humanSide
-        ? owner
-        : human.find((p) => p.info.position === 'ATT') ?? human[0];
+      this.controlledBy[hs] = owner && owner.side === hs ? owner : human.find((p) => p.info.position === 'ATT') ?? human[0];
     }
     this.events.push({ type: 'kickoff', side });
   }
@@ -207,7 +214,7 @@ export class MatchSim {
   }
 
   /** Advance the simulation. dt is seconds (call with a fixed step). */
-  step(dt: number, input: InputState): void {
+  step(dt: number, input: InputState, input2?: InputState): void {
     if (this.phase === 'paused' || this.phase === 'fulltime') return;
     if (this.phase === 'goal') {
       this.phaseTimer += dt;
@@ -242,15 +249,19 @@ export class MatchSim {
       else { this.phase = 'fulltime'; this.events.push({ type: 'fulltime' }); }
       return;
     }
-    this.updateControlledSelection(input);
+    const inputs: [InputState | null, InputState | null] = [null, null];
+    if (this.config.humanSide !== null) inputs[this.config.humanSide] = input;
+    if (this.config.humanSide2 != null) inputs[this.config.humanSide2] = input2 ?? IDLE_INPUT;
+    for (const hs of [0, 1] as Side[]) if (inputs[hs]) this.updateControlledSelection(inputs[hs]!, hs);
     for (const p of this.players) {
       p.kickCooldown = Math.max(0, p.kickCooldown - dt);
       p.tackleTimer = Math.max(0, p.tackleTimer - dt);
       p.holdTime = this.ball.owner === p ? p.holdTime + dt : 0;
-      if (p !== this.controlled) p.stamina = Math.min(1, p.stamina + dt / 4);
+      if (this.controlledBy[p.side] !== p) p.stamina = Math.min(1, p.stamina + dt / 4);
       p.kickAnim = Math.max(0, p.kickAnim - dt * 4);
       p.diveAnim = Math.max(0, p.diveAnim - dt * 1.4);
-      if (p === this.controlled) this.driveHuman(p, input, dt);
+      const inp = inputs[p.side];
+      if (inp && this.controlledBy[p.side] === p) this.driveHuman(p, inp, dt);
       else this.driveAI(p, dt);
     }
     this.integratePlayers(dt);
@@ -266,32 +277,32 @@ export class MatchSim {
 
   // ---------- human ----------
 
-  private updateControlledSelection(input: InputState): void {
-    if (this.config.humanSide === null) return;
-    const team = this.humanTeam;
+  private updateControlledSelection(input: InputState, side: Side): void {
+    const team = this.teamOf(side);
     const outfield = team.filter((p) => !p.isKeeper);
     const b = this.ball;
-    if (b.owner && b.owner.side === this.config.humanSide) {
-      this.controlled = b.owner; // always control the player on the ball (keeper included)
+    const current = this.controlledBy[side];
+    if (b.owner && b.owner.side === side) {
+      this.controlledBy[side] = b.owner; // always control the player on the ball (keeper included)
       return;
     }
-    if (input.switchPlayer && this.controlled) {
-      const i = outfield.indexOf(this.controlled);
-      this.controlled = outfield[(i + 1) % outfield.length];
-      this.switchHold = 1.0;
+    if (input.switchPlayer && current) {
+      const i = outfield.indexOf(current);
+      this.controlledBy[side] = outfield[(i + 1) % outfield.length];
+      this.switchHolds[side] = 1.0;
       return;
     }
-    this.switchHold = Math.max(0, this.switchHold - 1 / 60);
-    if (this.switchHold > 0) return;
+    this.switchHolds[side] = Math.max(0, this.switchHolds[side] - 1 / 60);
+    if (this.switchHolds[side] > 0) return;
     // Auto-select the outfield player closest to where the ball is heading.
     const ahead = v(b.pos.x + b.vel.x * 0.4, b.pos.z + b.vel.z * 0.4);
-    let best = this.controlled && !this.controlled.isKeeper ? this.controlled : outfield[0];
+    let best = current && !current.isKeeper ? current : outfield[0];
     let bestD = best ? dist(best.pos, ahead) - 0.8 : Infinity; // hysteresis favours current
     for (const p of outfield) {
       const d = dist(p.pos, ahead);
       if (d < bestD) { best = p; bestD = d; }
     }
-    this.controlled = best;
+    this.controlledBy[side] = best;
   }
 
   private driveHuman(p: SimPlayer, input: InputState, _dt: number): void {
@@ -335,7 +346,7 @@ export class MatchSim {
 
   private driveAI(p: SimPlayer, dt: number): void {
     const diff = DIFF[this.config.difficulty];
-    const isCpuTeam = p.side !== this.config.humanSide;
+    const isCpuTeam = !this.isHuman(p.side);
     p.think -= dt;
     const b = this.ball;
     const dir = p.side === 0 ? 1 : -1;
@@ -701,7 +712,7 @@ export class MatchSim {
         if (p.side === o.side || p.kickCooldown > 0) continue;
         const d = dist(p.pos, b.pos);
         if (d < controlR * 0.95) {
-          const isCpu = p.side !== this.config.humanSide;
+          const isCpu = !this.isHuman(p.side);
           const diff = DIFF[this.config.difficulty];
           const base = p.isKeeper ? 0.95 : 0.5;
           // Tackling head-on is much easier than chasing from behind.
@@ -830,13 +841,13 @@ export class MatchSim {
     for (const q of this.players) q.think = 0.2;
     this.setPiece = { kind: penalty ? 'penalty' : 'freekick', side, taker, spot, timer: 0 };
     this.phase = 'setpiece';
-    if (this.config.humanSide === side) this.controlled = taker;
+    if (this.isHuman(side)) this.controlledBy[side] = taker;
     this.events.push({ type: 'foul', side: offender.side, player: offender.info, kind: penalty ? 'penalty' : 'freekick' });
   }
 
   shoot(p: SimPlayer, aim: V2 | null, powerMul = 1): void {
     const goal = v(this.goalX(p.side), 0);
-    const isCpu = p.side !== this.config.humanSide;
+    const isCpu = !this.isHuman(p.side);
     const acc = isCpu ? DIFF[this.config.difficulty].accuracy : 1;
     // Aim at a corner, with a wobble that shrinks with control.
     const spread = (1 - this.stats.control) * 0.9 + (isCpu ? (1 - acc) * 0.8 : 0.15);

@@ -21,11 +21,15 @@ npm run preview  # serve the built game
 | Action | Keyboard | Touch |
 | --- | --- | --- |
 | Move | Arrow keys or WASD | Left joystick |
-| Shoot | Space or X | Shoot button |
+| Shoot | Hold Space or X, release to shoot | Shoot button (hold for power) |
 | Pass | Z or Enter | Pass button |
 | Sprint | Shift | Sprint button |
 | Switch player | Q | Switch button |
 | Pause | Esc or P | Pause button |
+
+Two players on one keyboard: player 1 uses WASD, Space (shoot), Z (pass), left
+Shift (sprint) and Q (switch); player 2 uses the arrow keys, Enter, `/`, right
+Shift and `.`.
 
 ## Age groups
 

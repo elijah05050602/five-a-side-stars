@@ -218,3 +218,5 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .chip-sub { background: #e9ecef; font-size: 11px; padding: 1px 6px; }
 .space-between { justify-content: space-between; }
 .team-card-top .badge { margin-right: 4px; }
+.hud-player-box-p2 { left: auto; right: 80px; align-items: flex-end; }
+.hud-player-p2 { background: #00e5ff; align-self: flex-end; }

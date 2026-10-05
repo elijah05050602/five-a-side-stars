@@ -10,6 +10,29 @@ export interface InputState {
   pause: boolean; // pressed this frame
 }
 
+/** Which physical keys (KeyboardEvent.code) drive each action. */
+export interface KeyMap {
+  up: string[]; down: string[]; left: string[]; right: string[];
+  shoot: string[]; pass: string[]; sprint: string[]; switch: string[]; pause: string[];
+}
+
+/** Single player: arrows and WASD both work, with several shoot and pass keys. */
+export const SOLO_KEYS: KeyMap = {
+  up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
+  shoot: ['Space', 'KeyX', 'KeyK'], pass: ['KeyZ', 'Enter', 'KeyJ'], sprint: ['ShiftLeft', 'ShiftRight', 'KeyL'],
+  switch: ['KeyQ', 'KeyE'], pause: ['Escape', 'KeyP'],
+};
+/** Two players on one keyboard: player 1 on the left-hand side. */
+export const P1_KEYS: KeyMap = {
+  up: ['KeyW'], down: ['KeyS'], left: ['KeyA'], right: ['KeyD'],
+  shoot: ['Space', 'KeyF'], pass: ['KeyZ', 'KeyG'], sprint: ['ShiftLeft'], switch: ['KeyQ'], pause: ['Escape', 'KeyP'],
+};
+/** Two players on one keyboard: player 2 on the arrow keys. */
+export const P2_KEYS: KeyMap = {
+  up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'],
+  shoot: ['Enter', 'Numpad0'], pass: ['Slash', 'NumpadDecimal'], sprint: ['ShiftRight', 'ControlRight'], switch: ['Period', 'NumpadEnter'], pause: ['Escape'],
+};
+
 export class Input {
   private keys = new Set<string>();
   private pressed = new Set<string>();
@@ -18,15 +41,15 @@ export class Input {
   private touchHeld = new Set<string>();
   private cleanup: (() => void)[] = [];
 
-  constructor() {
+  constructor(private readonly map: KeyMap = SOLO_KEYS) {
     const down = (e: KeyboardEvent) => {
       if (e.repeat) return;
-      const k = e.key.toLowerCase();
+      const k = e.code;
       this.keys.add(k);
       this.pressed.add(k);
-      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Slash'].includes(k)) e.preventDefault();
     };
-    const up = (e: KeyboardEvent) => this.keys.delete(e.key.toLowerCase());
+    const up = (e: KeyboardEvent) => this.keys.delete(e.code);
     const blur = () => this.keys.clear();
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -113,13 +136,15 @@ export class Input {
 
   /** Read this frame's input, then clear one-shot presses. */
   poll(): InputState {
-    const k = this.keys;
+    const m = this.map;
+    const held = (codes: string[]) => codes.some((c) => this.keys.has(c));
+    const hit = (codes: string[]) => codes.some((c) => this.pressed.has(c));
     let x = 0;
     let z = 0;
-    if (k.has('arrowleft') || k.has('a')) x -= 1;
-    if (k.has('arrowright') || k.has('d')) x += 1;
-    if (k.has('arrowup') || k.has('w')) z -= 1;
-    if (k.has('arrowdown') || k.has('s')) z += 1;
+    if (held(m.left)) x -= 1;
+    if (held(m.right)) x += 1;
+    if (held(m.up)) z -= 1;
+    if (held(m.down)) z += 1;
     if (this.touchMove.active) {
       x = this.touchMove.x;
       z = this.touchMove.z;
@@ -132,12 +157,12 @@ export class Input {
     const state: InputState = {
       moveX: x,
       moveZ: z,
-      shoot: this.pressed.has(' ') || this.pressed.has('x') || this.pressed.has('k') || this.touchPressed.has('shoot'),
-      shootHeld: k.has(' ') || k.has('x') || k.has('k') || this.touchHeld.has('shoot'),
-      pass: this.pressed.has('z') || this.pressed.has('shift') || this.pressed.has('j') || this.pressed.has('enter') || this.touchPressed.has('pass'),
-      sprint: k.has('shift') || k.has('l') || this.touchHeld.has('sprint'),
-      switchPlayer: this.pressed.has('q') || this.pressed.has('e') || this.touchPressed.has('switch'),
-      pause: this.pressed.has('escape') || this.pressed.has('p'),
+      shoot: hit(m.shoot) || this.touchPressed.has('shoot'),
+      shootHeld: held(m.shoot) || this.touchHeld.has('shoot'),
+      pass: hit(m.pass) || this.touchPressed.has('pass'),
+      sprint: held(m.sprint) || this.touchHeld.has('sprint'),
+      switchPlayer: hit(m.switch) || this.touchPressed.has('switch'),
+      pause: hit(m.pause),
     };
     this.pressed.clear();
     this.touchPressed.clear();

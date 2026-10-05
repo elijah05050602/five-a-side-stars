@@ -32,6 +32,11 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         <div class="sb-clock"><span id="sb-clock">00:00</span><span class="sb-half" id="sb-half">1st half</span></div>
       </div>
       <button class="hud-pause" id="hud-pause" aria-label="Pause">❚❚</button>
+      <div class="hud-player-box hud-player-box-p2" id="hud-player-box-2" style="display:none">
+        <div class="hud-player hud-player-p2" id="hud-player-2"></div>
+        <div class="bar"><span class="bar-label">Sprint</span><div class="bar-track"><div class="bar-fill bar-stamina" id="bar-stamina-2"></div></div></div>
+        <div class="bar"><span class="bar-label">Power</span><div class="bar-track"><div class="bar-fill bar-power" id="bar-power-2"></div></div></div>
+      </div>
       <div class="hud-player-box" id="hud-player-box">
         <div class="hud-player" id="hud-player"></div>
         <div class="bar"><span class="bar-label">Sprint</span><div class="bar-track"><div class="bar-fill bar-stamina" id="bar-stamina"></div></div></div>
@@ -57,6 +62,10 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   const playerBox = q('hud-player-box');
   const barStamina = q('bar-stamina');
   const barPower = q('bar-power');
+  const playerBox2 = q('hud-player-box-2');
+  const playerLabel2 = q('hud-player-2');
+  const barStamina2 = q('bar-stamina-2');
+  const barPower2 = q('bar-power-2');
   const pauseBtn = q<HTMLButtonElement>('hud-pause');
   let bannerTimer = 0;
   let lastPhase = '';
@@ -75,7 +84,9 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       overlay.innerHTML = `
         <div class="card overlay-card">
           <h2>Paused</h2>
-          <p class="muted">Arrow keys or WASD to move. Hold Space to power up a shot and release to shoot, Z to pass, Shift to sprint, Q to switch player.</p>
+          ${s.config.humanSide2 != null
+            ? '<p class="muted"><strong>Player 1:</strong> WASD to move, hold Space to shoot, Z to pass, left Shift to sprint, Q to switch.<br/><strong>Player 2:</strong> arrows to move, hold Enter to shoot, / to pass, right Shift to sprint, . to switch.</p>'
+            : '<p class="muted">Arrow keys or WASD to move. Hold Space to power up a shot and release to shoot, Z to pass, Shift to sprint, Q to switch player.</p>'}
           <div class="row">
             <button class="btn btn-primary" id="ov-resume">Keep playing</button>
             <button class="btn btn-ghost" id="ov-quit">Quit match</button>
@@ -120,6 +131,12 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         barPower.style.width = `${Math.round(s.controlled.charge * 100)}%`;
         barPower.parentElement!.parentElement!.classList.toggle('is-charging', s.controlled.charge > 0);
       } else playerBox.style.display = 'none';
+      if (s.controlled2) {
+        playerLabel2.textContent = `P2 · #${s.controlled2.info.number} ${s.controlled2.info.name}`;
+        playerBox2.style.display = '';
+        barStamina2.style.width = `${Math.round(s.controlled2.stamina * 100)}%`;
+        barPower2.style.width = `${Math.round(s.controlled2.charge * 100)}%`;
+      } else playerBox2.style.display = 'none';
       for (const ev of events) {
         if (ev.type === 'goal' && ev.player) {
           const team = s.teams[ev.side!];

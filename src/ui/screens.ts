@@ -10,7 +10,7 @@ import { KitPreview3D } from './preview3d';
 
 export interface Router {
   go(screen: Screen): void;
-  startMatch(home: Team, away: Team, difficulty: Difficulty, halfSeconds: number): void;
+  startMatch(home: Team, away: Team, difficulty: Difficulty, halfSeconds: number, twoPlayer?: boolean): void;
 }
 
 export type Screen =
@@ -337,6 +337,8 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
   let cpu = generateOpponent(home.ageGroup, home.kit);
   let difficulty: Difficulty = settings.difficulty;
   let halfSeconds = settings.halfLengthSeconds;
+  let twoPlayer = false;
+  const hasKeyboard = window.matchMedia('(pointer: fine)').matches;
 
   const render = () => {
     const away = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
@@ -355,7 +357,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
           </div>
           <div class="vs-mid">VS</div>
           <div class="card vs-card">
-            <span class="muted">Opponent (computer)</span>
+            <span class="muted">${twoPlayer ? 'Player 2' : 'Opponent (computer)'}</span>
             <div class="row">${badgeSvg(away.badge, 64)}${kitChip(awayK.kit, 64)}</div>
             <h3>${esc(away.name)}</h3>
             <span class="chip chip-age">${away.ageGroup}</span>
@@ -367,6 +369,10 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
           </div>
         </div>
         <div class="card options">
+          ${hasKeyboard ? `<div class="field"><span>Players</span>
+            <div class="pills"><button class="pill ${!twoPlayer ? 'is-active' : ''}" data-players="1">1 player</button><button class="pill ${twoPlayer ? 'is-active' : ''}" data-players="2">2 players, one keyboard</button></div>
+            ${twoPlayer ? '<p class="muted">Player 1: WASD, Space, Z, left Shift. Player 2: arrows, Enter, /, right Shift.</p>' : ''}
+          </div>` : ''}
           <div class="field"><span>Computer difficulty</span>
             <div class="pills">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="pill ${d === difficulty ? 'is-active' : ''}" data-diff="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div>
           </div>
@@ -387,12 +393,13 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string): void {
     root.querySelector<HTMLSelectElement>('#s-away')!.addEventListener('change', (e) => { opponentId = (e.target as HTMLSelectElement).value; render(); });
     root.querySelector('#s-reroll')!.addEventListener('click', () => { cpu = generateOpponent(home.ageGroup, home.kit); opponentId = 'cpu'; render(); });
     root.querySelectorAll<HTMLElement>('[data-diff]').forEach((b) => b.addEventListener('click', () => { difficulty = b.dataset.diff as Difficulty; render(); }));
+    root.querySelectorAll<HTMLElement>('[data-players]').forEach((b) => b.addEventListener('click', () => { twoPlayer = b.dataset.players === '2'; render(); }));
     root.querySelectorAll<HTMLElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { halfSeconds = Number(b.dataset.len); render(); }));
     root.querySelector('#s-go')!.addEventListener('click', () => {
       updateSettings({ difficulty, halfLengthSeconds: halfSeconds });
       const awayTeam = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
       const [h, a] = resolveKits(home, awayTeam);
-      router.startMatch(h, a, difficulty, halfSeconds);
+      router.startMatch(h, a, difficulty, halfSeconds, twoPlayer);
     });
   };
   render();

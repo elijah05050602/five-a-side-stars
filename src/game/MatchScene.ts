@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BallModel } from './BallModel';
-import { Input } from './input';
+import { Input, P1_KEYS, P2_KEYS, SOLO_KEYS } from './input';
 import { buildPitch } from './Pitch';
 import { PlayerModel } from './PlayerModel';
 import { MatchSim, type SimConfig, type SimPlayer, type Side } from './sim';
@@ -27,7 +27,8 @@ export class MatchScene {
   private readonly camera: THREE.PerspectiveCamera;
   private readonly models = new Map<SimPlayer, PlayerModel>();
   private readonly ball: BallModel;
-  private readonly input = new Input();
+  private readonly input: Input;
+  private readonly input2: Input | null;
   private readonly hud: HudRefs;
   private readonly sfx = new Sfx();
   private raf = 0;
@@ -40,6 +41,9 @@ export class MatchScene {
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, config: SimConfig, private readonly onFinish: (r: MatchResult) => void, private readonly onQuit: () => void) {
     this.sim = new MatchSim(config);
+    const twoPlayer = config.humanSide2 != null;
+    this.input = new Input(twoPlayer ? P1_KEYS : SOLO_KEYS);
+    this.input2 = twoPlayer ? new Input(P2_KEYS) : null;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
@@ -120,13 +124,15 @@ export class MatchScene {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     const input = this.input.poll();
-    if (input.pause) this.sim.togglePause();
+    const input2 = this.input2?.poll();
+    if (input.pause || input2?.pause) this.sim.togglePause();
     // Fixed 60 Hz simulation steps for stable physics.
     this.acc += dt;
     const step = 1 / 60;
     let steps = 0;
     while (this.acc >= step && steps < 8) {
-      this.sim.step(step, steps === 0 ? input : { ...input, shoot: false, pass: false, switchPlayer: false, pause: false });
+      const once = { shoot: false, pass: false, switchPlayer: false, pause: false };
+      this.sim.step(step, steps === 0 ? input : { ...input, ...once }, input2 ? (steps === 0 ? input2 : { ...input2, ...once }) : undefined);
       this.acc -= step;
       steps++;
     }
@@ -141,15 +147,19 @@ export class MatchScene {
       m.group.position.set(p.pos.x, 0, p.pos.z);
       m.setFacing(p.facing);
       m.animate(Math.hypot(p.vel.x, p.vel.z), p.kickAnim, p.diveAnim, p.diveDir, dt, scale, Math.max(0, 0.75 - this.sim.stats.control) * 2);
-      const isControlled = p === this.sim.controlled;
-      m.setSelected(isControlled || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isControlled ? 0xffd23f : 0xffffff);
+      const isP1 = p === this.sim.controlled;
+      const isP2 = p === this.sim.controlled2;
+      m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? 0xffd23f : isP2 ? 0x00e5ff : 0xffffff);
     }
     const b = this.sim.ball;
     this.ball.update(b.pos.x, b.y, b.pos.z, b.radius, b.vel.x, b.vel.z, dt);
 
     // Camera follows a blend of the ball and the controlled player, clamped to the pitch.
-    const focus = this.sim.controlled && this.sim.phase !== 'goal'
-      ? new THREE.Vector3((b.pos.x * 0.65 + this.sim.controlled.pos.x * 0.35), 0, (b.pos.z * 0.65 + this.sim.controlled.pos.z * 0.35))
+    const c1 = this.sim.controlled, c2 = this.sim.controlled2;
+    const focus = c1 && this.sim.phase !== 'goal'
+      ? (c2
+        ? new THREE.Vector3(b.pos.x * 0.6 + c1.pos.x * 0.2 + c2.pos.x * 0.2, 0, b.pos.z * 0.6 + c1.pos.z * 0.2 + c2.pos.z * 0.2)
+        : new THREE.Vector3(b.pos.x * 0.65 + c1.pos.x * 0.35, 0, b.pos.z * 0.65 + c1.pos.z * 0.35))
       : new THREE.Vector3(b.pos.x, 0, b.pos.z);
     focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.32, this.sim.length * 0.32);
     focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.2, this.sim.width * 0.2);
@@ -168,6 +178,7 @@ export class MatchScene {
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.onResize);
     this.input.dispose();
+    this.input2?.dispose();
     this.hud.destroy();
     this.models.forEach((m) => m.dispose());
     this.renderer.dispose();
