@@ -61,8 +61,10 @@ export class MatchScene {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.scene.background = new THREE.Color('#9ad8ff');
-    this.scene.fog = new THREE.Fog('#9ad8ff', 60, 120);
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
+    this.scene.background = new THREE.Color('#8fd3ff');
+    this.scene.fog = new THREE.Fog('#8fd3ff', 70, 130);
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
 
     const sun = new THREE.DirectionalLight(0xffffff, 2.2);
@@ -74,7 +76,7 @@ export class MatchScene {
     sc.top = this.sim.width / 2 + 6; sc.bottom = -this.sim.width / 2 - 6;
     sc.near = 1; sc.far = 80;
     sun.shadow.bias = -0.0005;
-    this.scene.add(sun, new THREE.HemisphereLight(0xcfe9ff, 0x3b7f4e, 1.1));
+    this.scene.add(sun, new THREE.HemisphereLight(0xdff3ff, 0x3b7f4e, 1.25));
 
     this.scene.add(buildPitch({ length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth }));
 
@@ -136,8 +138,9 @@ export class MatchScene {
   /** Camera sits above and "south" of the focus point, looking down at a tilt. */
   private cameraGoal(target: THREE.Vector3): THREE.Vector3 {
     const aspect = this.camera.aspect;
-    const height = (this.sim.width * 0.9) / Math.min(1.9, Math.max(1.0, aspect)) + 4.5;
-    return new THREE.Vector3(target.x, height, target.z + height * 0.6);
+    // A little more tilt than straight down, so faces, kits and the stand show.
+    const height = (this.sim.width * 0.84) / Math.min(1.9, Math.max(1.0, aspect)) + 4.2;
+    return new THREE.Vector3(target.x, height, target.z + height * 0.8);
   }
 
   private frame = (now: number): void => {

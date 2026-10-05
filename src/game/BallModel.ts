@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { addOutline, toonMaterial } from './toon';
 
 let ballTex: THREE.CanvasTexture | null = null;
 
@@ -30,8 +31,9 @@ export class BallModel {
   private readonly shadow: THREE.Mesh;
 
   constructor(radius: number) {
-    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 20, 14), new THREE.MeshStandardMaterial({ map: texture(), roughness: 0.5 }));
+    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 20, 14), toonMaterial({ map: texture() }));
     this.mesh.castShadow = true;
+    addOutline(this.mesh, 0.02);
     this.shadow = new THREE.Mesh(new THREE.CircleGeometry(radius * 1.1, 16), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false }));
     this.shadow.rotation.x = -Math.PI / 2;
     this.shadow.position.y = 0.012;
