@@ -1,7 +1,7 @@
 {
   "name": "five-a-side-stars",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A top-down 3D 5-a-side football browser game for kids, with U5 to U10 youth teams you build yourself.",
   "type": "module",
   "scripts": {

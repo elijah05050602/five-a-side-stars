@@ -25,6 +25,15 @@ npm run preview  # serve the built game
 - **Sticker album**: finish matches, win cups and hit milestones to collect stickers; some unlock extra badge icons.
 - **Team sheet**: from the squad step of the team builder, download a printable PNG team sheet.
 
+## Parents and privacy
+
+Everything stays on the device: no accounts, no chat, no adverts, no purchases
+and no tracking. Teams, settings and stickers live in the browser's
+localStorage. A small word filter keeps rude words out of team and player
+names. The Parents screen (behind a quick multiplication sum) has toggles for
+sound, music and reduce motion, and a reset button. Once loaded, the game
+works offline and can be added to a phone or tablet home screen.
+
 ## Controls
 
 | Action | Keyboard | Touch |

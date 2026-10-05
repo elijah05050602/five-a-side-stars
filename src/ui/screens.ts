@@ -10,6 +10,10 @@ import { esc } from './hud';
 import { badgeSvg, kitChip } from './kitPreview';
 import { KitPreview3D } from './preview3d';
 import { downloadTeamSheet } from './teamSheet';
+import { isNameOk } from '../data/wordFilter';
+import { music } from '../game/music';
+import { applyMotionSetting } from './motion';
+import pkg from '../../package.json';
 
 export interface StartOptions {
   home: Team;
@@ -85,6 +89,7 @@ function renderMenu(root: HTMLElement, router: Router): void {
         <button class="btn btn-ghost" id="m-parents">🛡️ Parents</button>
       </div>
       <p class="hint">Keyboard: arrows or WASD to run · hold Space to shoot · Z pass · Shift sprint · Q switch</p>
+      <p class="version">v${pkg.version} · works offline once loaded · no accounts, no adverts</p>
     </div>`;
   root.querySelector('#m-play')!.addEventListener('click', () => router.go({ name: 'setup' }));
   root.querySelector('#m-cup')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'tournament' }));
@@ -191,6 +196,9 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
 
   const validate = (): boolean => {
     team.name = team.name.trim() || randomTeamName();
+    if (!isNameOk(team.name)) { alert("Let's pick a different team name, that one is not allowed."); step = 0; render(); return false; }
+    const rude = team.players.find((p) => !isNameOk(p.name));
+    if (rude) { alert(`Let's pick a different name for player #${rude.number}, that one is not allowed.`); step = 2; render(); return false; }
     const starters = team.players.filter((p) => p.starter);
     if (starters.length !== 5) { alert(`Pick exactly 5 starters (you have ${starters.length}). The rest are subs.`); step = 2; render(); return false; }
     if (!starters.some((p) => p.position === 'GK')) { alert('One of your starters must be the keeper.'); step = 2; render(); return false; }
@@ -640,20 +648,66 @@ function pickPlayerOfTheMatch(r: MatchResult) {
 // ---------- Parents ----------
 
 function renderParents(root: HTMLElement, router: Router): void {
+  // A tiny sum keeps little ones out of the grown-up settings.
+  const a = 3 + Math.floor(Math.random() * 6), b = 2 + Math.floor(Math.random() * 7);
+  root.innerHTML = `
+    <div class="screen parents">
+      ${topBar('Parents')}
+      <div class="card gate-card">
+        <h2>Grown-ups only</h2>
+        <p class="muted">To open the settings, answer this: what is <strong>${a} × ${b}</strong>?</p>
+        <form class="row" id="gate">
+          <input type="number" inputmode="numeric" id="gate-answer" placeholder="?" autocomplete="off" />
+          <button class="btn btn-primary" type="submit">Open</button>
+        </form>
+        <p class="warn" id="gate-wrong" hidden>Not quite. Ask a grown-up to help!</p>
+      </div>
+    </div>`;
+  wire(root, () => router.go({ name: 'menu' }));
+  const input = root.querySelector<HTMLInputElement>('#gate-answer')!;
+  input.focus();
+  root.querySelector('#gate')!.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (Number(input.value) === a * b) renderParentSettings(root, router);
+    else { root.querySelector<HTMLElement>('#gate-wrong')!.hidden = false; input.value = ''; input.focus(); }
+  });
+}
+
+function renderParentSettings(root: HTMLElement, router: Router): void {
   const s = getSettings();
+  const p = getProgress();
   root.innerHTML = `
     <div class="screen parents">
       ${topBar('Parents')}
       <div class="card">
+        <h2>Settings</h2>
         <label class="toggle"><input type="checkbox" id="pa-sound" ${s.sound ? 'checked' : ''}/> Sound effects</label>
-        <p class="muted">Everything in this game stays on this device. There are no accounts, no chat, no adverts and nothing to buy. Teams are saved in this browser only.</p>
-        <button class="btn btn-ghost" id="pa-reset">Reset all teams and settings</button>
+        <label class="toggle"><input type="checkbox" id="pa-music" ${s.music ? 'checked' : ''}/> Music</label>
+        <label class="toggle"><input type="checkbox" id="pa-motion" ${s.reduceMotion ? 'checked' : ''}/> Reduce motion (no confetti or wobbling, calmer animations)</label>
+      </div>
+      <div class="card">
+        <h2>About this game</h2>
+        <p class="muted">Five-a-Side Stars is a football game for children aged 7 and up. Players build a team and play short matches against the computer, or against a friend on the same keyboard.</p>
+        <ul class="muted plain-list">
+          <li><strong>Privacy:</strong> nothing leaves this device. There are no accounts, no chat, no adverts, no in-app purchases and no tracking. Teams, settings and stickers are saved in this browser's local storage only.</li>
+          <li><strong>Names:</strong> children type their own team and player names. A small word filter blocks the obvious rude words; nothing is shared with anyone.</li>
+          <li><strong>Offline:</strong> once loaded, the game keeps working without an internet connection. On a phone or tablet you can add it to the home screen.</li>
+          <li><strong>Play time:</strong> a match lasts two to ten minutes depending on the half length chosen on the setup screen.</li>
+        </ul>
+        <p class="muted">Played so far: ${p.played} matches, ${p.won} wins, ${p.stickers.length} stickers.</p>
+      </div>
+      <div class="card">
+        <h2>Start again</h2>
+        <p class="muted">This deletes every team, the sticker album and the settings on this device. It cannot be undone.</p>
+        <button class="btn btn-ghost" id="pa-reset">Reset everything</button>
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
   root.querySelector<HTMLInputElement>('#pa-sound')!.addEventListener('change', (e) => updateSettings({ sound: (e.target as HTMLInputElement).checked }));
+  root.querySelector<HTMLInputElement>('#pa-music')!.addEventListener('change', (e) => { updateSettings({ music: (e.target as HTMLInputElement).checked }); music.refresh(); });
+  root.querySelector<HTMLInputElement>('#pa-motion')!.addEventListener('change', (e) => { updateSettings({ reduceMotion: (e.target as HTMLInputElement).checked }); applyMotionSetting(); });
   root.querySelector('#pa-reset')!.addEventListener('click', () => {
-    if (confirm('Delete every team you have made and start again?')) { resetAll(); router.go({ name: 'menu' }); }
+    if (confirm('Delete every team, sticker and setting on this device and start again?')) { resetAll(); music.refresh(); router.go({ name: 'menu' }); }
   });
   void deleteTeam;
 }

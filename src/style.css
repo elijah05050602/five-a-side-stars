@@ -275,3 +275,15 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .trophy { font-size: 5rem; line-height: 1; animation: pop .6s ease-out; }
 .is-champion .trophy-card { background: linear-gradient(160deg, #fff8dc, #fff); border: 3px solid var(--yellow); }
 .tournament .row, .results .row { justify-content: center; }
+
+/* ---------- Phase 5: parents, motion, polish ---------- */
+.version { font-size: .75rem; opacity: .7; text-align: center; margin-top: 4px; color: #fff; }
+.commentary { font-size: 1rem; font-weight: 600; opacity: .9; margin-top: 2px; }
+.gate-card { max-width: 480px; margin: 0 auto; text-align: center; }
+.gate-card form { justify-content: center; margin-top: 8px; }
+.gate-card input { width: 110px; font-size: 1.4rem; text-align: center; padding: 8px; border-radius: 12px; border: 3px solid var(--navy); font-family: inherit; }
+.parents .card { max-width: 640px; margin: 0 auto 14px; }
+.parents .toggle { display: flex; gap: 10px; align-items: center; padding: 6px 0; font-size: 1.05rem; }
+.plain-list { padding-left: 18px; line-height: 1.45; }
+.plain-list li { margin-bottom: 6px; }
+body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

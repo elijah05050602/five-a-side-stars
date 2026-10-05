@@ -1,4 +1,5 @@
 import type { MatchSim, SimEvent } from '../game/sim';
+import { getSettings } from '../data/storage';
 import { badgeSvg } from './kitPreview';
 
 export interface HudRefs {
@@ -182,12 +183,12 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         if (ev.type === 'goal' && ev.player) {
           const team = s.teams[ev.side!];
           const own = s.goals[s.goals.length - 1]?.ownGoal;
-          showBanner(`<div class="goal-text">GOAL!</div><div class="goal-sub">${esc(ev.player.name)} #${ev.player.number}${own ? ' (own goal)' : ''} · ${esc(team.name)}</div>`, 3000);
+          showBanner(`<div class="goal-text">GOAL!</div><div class="goal-sub">${esc(ev.player.name)} #${ev.player.number}${own ? ' (own goal)' : ''} · ${esc(team.name)}</div><div class="commentary">${own ? 'Oh no, into their own net!' : pickLine(GOAL_LINES)}</div>`, 3000);
           confetti(root, team.kit.shirt, team.kit.shirt2);
         } else if (ev.type === 'save') {
-          showBanner(`<div class="save-text">Great save, ${esc(ev.player?.name ?? 'keeper')}!</div>`, 1200);
+          showBanner(`<div class="save-text">${pickLine(SAVE_LINES)} Great save, ${esc(ev.player?.name ?? 'keeper')}!</div>`, 1200);
         } else if (ev.type === 'miss') {
-          showBanner(`<div class="save-text">Missed!</div>`, 1200);
+          showBanner(`<div class="save-text">${pickLine(MISS_LINES)}</div>`, 1200);
         } else if (ev.type === 'foul') {
           const victimTeam = s.teams[1 - ev.side!];
           showBanner(ev.kind === 'penalty'
@@ -209,7 +210,13 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   };
 }
 
+const GOAL_LINES = ['What a strike!', 'Top corner!', 'The keeper had no chance!', 'Cool as you like!', 'Smashed it!', 'Into the net!', 'Goal of the season?', 'Brilliant finish!'];
+const SAVE_LINES = ['What a stop!', 'Fingertips!', 'Safe hands!', 'Denied!'];
+const MISS_LINES = ['Over the bar!', 'Just wide!', 'Unlucky!', 'Next time!'];
+const pickLine = (lines: string[]) => lines[Math.floor(Math.random() * lines.length)];
+
 function confetti(root: HTMLElement, c1: string, c2: string): void {
+  if (getSettings().reduceMotion) return;
   const layer = document.createElement('div');
   layer.className = 'confetti';
   for (let i = 0; i < 40; i++) {

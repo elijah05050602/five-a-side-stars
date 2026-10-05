@@ -2,6 +2,8 @@ import './style.css';
 import { MatchScene } from './game/MatchScene';
 import { recordResult } from './data/progress';
 import { loadSave } from './data/storage';
+import { applyMotionSetting } from './ui/motion';
+import { music } from './game/music';
 import { renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -9,12 +11,21 @@ const ui = document.getElementById('ui') as HTMLElement;
 let match: MatchScene | null = null;
 
 loadSave();
+applyMotionSetting();
+// Music can only start after a tap or key press.
+const startMusic = () => { music.start(); window.removeEventListener('pointerdown', startMusic); window.removeEventListener('keydown', startMusic); };
+window.addEventListener('pointerdown', startMusic);
+window.addEventListener('keydown', startMusic);
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => { /* offline play is a bonus, not a requirement */ }); });
+}
 
 const router: Router = {
   go(screen: Screen) {
     if (match) { match.dispose(); match = null; }
     canvas.classList.remove('is-live');
     document.body.classList.remove('in-match');
+    music.setQuiet(false);
     renderScreen(ui, screen, router);
   },
   startMatch(o: StartOptions) {
@@ -23,6 +34,7 @@ const router: Router = {
     ui.className = 'match-ui';
     canvas.classList.add('is-live');
     document.body.classList.add('in-match');
+    music.setQuiet(true);
     const mode = o.mode ?? 'match';
     match = new MatchScene(canvas, ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode },
       (result) => {

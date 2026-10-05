@@ -6,6 +6,7 @@ import { PlayerModel } from './PlayerModel';
 import { MatchSim, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
+import { getSettings } from '../data/storage';
 
 export type SimMode = NonNullable<SimConfig['mode']>;
 
@@ -54,7 +55,9 @@ export class MatchScene {
     this.input = new Input(twoPlayer ? P1_KEYS : SOLO_KEYS);
     this.input2 = twoPlayer ? new Input(P2_KEYS) : null;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Tablets and phones get a lower pixel ratio and a smaller shadow map so the game stays smooth.
+    const touch = window.matchMedia('(pointer: coarse)').matches;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, touch ? 1.5 : 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -65,7 +68,7 @@ export class MatchScene {
     const sun = new THREE.DirectionalLight(0xffffff, 2.2);
     sun.position.set(-12, 30, 18);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(touch ? 1024 : 2048, touch ? 1024 : 2048);
     const sc = sun.shadow.camera;
     sc.left = -this.sim.length / 2 - 6; sc.right = this.sim.length / 2 + 6;
     sc.top = this.sim.width / 2 + 6; sc.bottom = -this.sim.width / 2 - 6;
@@ -161,11 +164,12 @@ export class MatchScene {
 
     // Sync models
     const scale = this.sim.stats.scale;
+    const wobble = getSettings().reduceMotion ? 0 : Math.max(0, 0.75 - this.sim.stats.control) * 2;
     for (const p of this.sim.players) {
       const m = this.models.get(p)!;
       m.group.position.set(p.pos.x, 0, p.pos.z);
       m.setFacing(p.facing);
-      m.animate(Math.hypot(p.vel.x, p.vel.z), p.kickAnim, p.diveAnim, p.diveDir, dt, scale, Math.max(0, 0.75 - this.sim.stats.control) * 2);
+      m.animate(Math.hypot(p.vel.x, p.vel.z), p.kickAnim, p.diveAnim, p.diveDir, dt, scale, wobble);
       const isP1 = p === this.sim.controlled;
       const isP2 = p === this.sim.controlled2;
       m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? 0xffd23f : isP2 ? 0x00e5ff : 0xffffff);

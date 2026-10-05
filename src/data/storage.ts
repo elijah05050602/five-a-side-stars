@@ -6,14 +6,15 @@ const KEY = 'five-a-side-stars:v1';
 
 interface SaveFile {
   teams: Team[];
-  settings: { sound: boolean; halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard' };
+  settings: { sound: boolean; music: boolean; reduceMotion: boolean; halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard' };
   progress?: Progress;
 }
 
 let cache: SaveFile | null = null;
 
 function fresh(): SaveFile {
-  return { teams: starterTeams(), settings: { sound: true, halfLengthSeconds: 120, difficulty: 'normal' } };
+  const prefersLess = typeof window !== 'undefined' && 'matchMedia' in window && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return { teams: starterTeams(), settings: { sound: true, music: true, reduceMotion: prefersLess, halfLengthSeconds: 120, difficulty: 'normal' } };
 }
 
 export function loadSave(): SaveFile {
