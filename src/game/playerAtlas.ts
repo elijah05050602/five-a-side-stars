@@ -38,8 +38,8 @@ export function playerAtlas(kit: Kit, look: LookColours): THREE.CanvasTexture {
   fill('leg', look.skin);
   {
     const [x, y] = CELL.leg;
-    ctx.fillStyle = kit.shorts; ctx.fillRect(x * C, y * C, C, C * 0.6);
-    ctx.fillStyle = shade(kit.shorts, 0.8); ctx.fillRect(x * C, y * C + C * 0.56, C, C * 0.04);
+    ctx.fillStyle = kit.shorts; ctx.fillRect(x * C, y * C, C, C * 0.66);
+    ctx.fillStyle = shade(kit.shorts, 0.8); ctx.fillRect(x * C, y * C + C * 0.62, C, C * 0.04);
   }
   // Foot strip: sock with a white top band, then the boot and its sole. u runs heel..toe.
   {
@@ -77,22 +77,23 @@ export function playerAtlas(kit: Kit, look: LookColours): THREE.CanvasTexture {
     ctx.restore();
   }
 
-  // Kit pattern inside the shirt cell. In the model's UVs, v runs down the chest: the top 56% of
-  // the cell is the shirt, the rest is the tunic ring under the waistband, painted as shorts so the
-  // shirt reads as tucked in.
+  // Kit pattern inside the shirt cell. In the model's UVs, v runs down the chest: the top 22% is
+  // the rolled collar (painted in the second colour), the middle is the shirt, and the bottom 44%
+  // is the tunic ring under the waistband, painted as shorts so the shirt reads as tucked in.
   const [sx, sy] = CELL.shirt;
-  const H = C * 0.56;
+  const T = C * 0.22, H = C * 0.56;
   ctx.save();
   ctx.translate(sx * C, sy * C);
   ctx.fillStyle = kit.shorts; ctx.fillRect(0, H, C, C - H);
-  ctx.beginPath(); ctx.rect(0, 0, C, H); ctx.clip();
+  ctx.fillStyle = kit.shirt2; ctx.fillRect(0, 0, C, T);
+  ctx.beginPath(); ctx.rect(0, T, C, H - T); ctx.clip();
   ctx.fillStyle = kit.shirt2;
   switch (kit.pattern) {
-    case 'stripes': for (let i = 0; i < 4; i++) ctx.fillRect(i * (C / 4), 0, C / 8, H); break;
-    case 'hoops': for (let i = 0; i < 3; i++) ctx.fillRect(0, H * 0.2 + i * (H / 4), C, H / 8); break;
-    case 'halves': ctx.fillRect(0, 0, C / 2, H); break;
-    case 'sash': ctx.beginPath(); ctx.moveTo(C * 0.45, 0); ctx.lineTo(C * 0.8, 0); ctx.lineTo(C * 0.35, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill(); break;
-    case 'chevron': ctx.beginPath(); ctx.moveTo(0, H * 0.15); ctx.lineTo(C / 2, H * 0.55); ctx.lineTo(C, H * 0.15); ctx.lineTo(C, H * 0.4); ctx.lineTo(C / 2, H * 0.8); ctx.lineTo(0, H * 0.4); ctx.closePath(); ctx.fill(); break;
+    case 'stripes': for (let i = 0; i < 4; i++) ctx.fillRect(i * (C / 4), T, C / 8, H - T); break;
+    case 'hoops': for (let i = 0; i < 3; i++) ctx.fillRect(0, T + (H - T) * 0.12 + i * ((H - T) / 3), C, (H - T) / 6); break;
+    case 'halves': ctx.fillRect(0, T, C / 2, H - T); break;
+    case 'sash': ctx.beginPath(); ctx.moveTo(C * 0.45, T); ctx.lineTo(C * 0.8, T); ctx.lineTo(C * 0.35, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill(); break;
+    case 'chevron': ctx.beginPath(); ctx.moveTo(0, T + (H - T) * 0.15); ctx.lineTo(C / 2, T + (H - T) * 0.55); ctx.lineTo(C, T + (H - T) * 0.15); ctx.lineTo(C, T + (H - T) * 0.4); ctx.lineTo(C / 2, T + (H - T) * 0.8); ctx.lineTo(0, T + (H - T) * 0.4); ctx.closePath(); ctx.fill(); break;
     default: break;
   }
   ctx.restore();

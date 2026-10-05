@@ -68,14 +68,16 @@ const headMap = (extra) => (key, [, y, z]) => {
   if (t === 'skin' && z > 0.25 && y > 1.3 && y < 1.92) return 'face';
   return t;
 };
-// Body: tunic above the hem is the shirt; the belt ring and hem become the shorts (the ring reads
-// as a waistband); hip pouches and the buckle are cut away. The small chest pocket is an inset in
-// the tunic surface, so it is painted as shirt rather than cut.
+// Body: the tunic is the shirt; the belt ring becomes the shorts' waistband, and the legs below it
+// are painted as shorts, so the ragged tunic hem (y < 0.5 and its underside) is cut away along
+// with the scarf, hip pouches and buckle. The small chest pocket is an inset in the tunic surface,
+// so it is painted as shirt rather than cut.
 const bodyMap = (key, [x, y, z]) => ({
-  '0,1': y < 0.5 ? 'shorts' : 'shirt', '1,1': 'shirt2', '5,0': 'shorts', '7,1': 'shorts', '3,0': 'drop',
+  '0,1': y < 0.5 ? 'drop' : 'shirt', '1,1': 'drop', '5,0': 'shorts', '7,1': 'drop', '3,0': 'drop',
   '6,0': Math.abs(x) < 0.14 && y > 0.74 && y < 0.9 && z > 0.24 ? 'shirt' : 'drop',
 })[key];
-const armMap = (key) => ({ '5,2': 'skin', '0,1': 'shirt', '5,0': 'shirt', '1,1': 'shirt2' })[key];
+// Arms: the wrist cuff is bare skin so the sleeve ends cleanly.
+const armMap = (key) => ({ '5,2': 'skin', '0,1': 'shirt', '5,0': 'shirt', '1,1': 'skin' })[key];
 // Legs: upper leg (y 0.53..0.28) becomes a vertical strip; the foot block (y 0.22..0) too, with u heel..toe.
 const legMap = (key, [, y, z]) => key === '7,1' ? { t: 'leg', u: 0.5, v: (0.53 - y) / 0.25 }
   : key === '3,2' ? { t: 'boot', u: (z + 0.13) / 0.39, v: (0.22 - y) / 0.22 }
