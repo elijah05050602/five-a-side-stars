@@ -154,7 +154,15 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .sb-dash { color: #8d99ae; }
 .sb-clock { grid-column: 1 / -1; display: flex; justify-content: center; gap: 10px; font-size: 15px; font-weight: 600; color: #3a4a63; }
 .hud-pause { position: absolute; top: 12px; right: 12px; width: 56px; height: 56px; border-radius: 16px; border: 3px solid var(--navy); background: var(--card); font-size: 20px; font-weight: 700; color: var(--navy); cursor: pointer; box-shadow: 0 4px 0 var(--navy); }
-.hud-player { position: absolute; top: 12px; left: 12px; background: var(--yellow); border: 3px solid var(--navy); border-radius: 14px; padding: 6px 12px; font-weight: 700; font-size: 17px; }
+.hud-player-box { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 6px; }
+.hud-player { background: var(--yellow); border: 3px solid var(--navy); border-radius: 14px; padding: 6px 12px; font-weight: 700; font-size: 17px; align-self: flex-start; }
+.bar { display: flex; align-items: center; gap: 8px; background: var(--card); border: 2px solid var(--navy); border-radius: 10px; padding: 3px 8px; width: 170px; }
+.bar-label { font-size: 12px; font-weight: 700; width: 44px; }
+.bar-track { flex: 1; height: 10px; background: #dfe7f1; border-radius: 6px; overflow: hidden; }
+.bar-fill { height: 100%; width: 100%; border-radius: 6px; transition: width 0.08s linear; }
+.bar-stamina { background: var(--green); }
+.bar-power { background: #e63946; }
+.bar.is-charging { border-color: #e63946; }
 .hud-banner { position: absolute; top: 28%; left: 50%; transform: translate(-50%, -50%) scale(0.6); opacity: 0; transition: all 0.25s cubic-bezier(.2,1.6,.4,1); text-align: center; pointer-events: none; }
 .hud-banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 .goal-text { font-size: clamp(60px, 14vw, 140px); font-weight: 700; color: var(--yellow); -webkit-text-stroke: 4px var(--navy); text-shadow: 0 8px 0 var(--navy); line-height: 1; }
@@ -193,4 +201,5 @@ input[type='number'] { max-width: 120px; text-align: center; }
   .sb-team { font-size: 16px; }
   .sb-score { font-size: 24px; }
   .hud-player { display: none; }
+  .bar { width: 130px; }
 }

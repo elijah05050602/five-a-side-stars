@@ -3,6 +3,7 @@ export interface InputState {
   moveX: number; // -1..1, world x (towards the right goal)
   moveZ: number; // -1..1, world z (down the screen)
   shoot: boolean; // pressed this frame
+  shootHeld: boolean; // still held (hold to power up a shot)
   pass: boolean; // pressed this frame
   sprint: boolean;
   switchPlayer: boolean; // pressed this frame
@@ -132,6 +133,7 @@ export class Input {
       moveX: x,
       moveZ: z,
       shoot: this.pressed.has(' ') || this.pressed.has('x') || this.pressed.has('k') || this.touchPressed.has('shoot'),
+      shootHeld: k.has(' ') || k.has('x') || k.has('k') || this.touchHeld.has('shoot'),
       pass: this.pressed.has('z') || this.pressed.has('shift') || this.pressed.has('j') || this.pressed.has('enter') || this.touchPressed.has('pass'),
       sprint: k.has('shift') || k.has('l') || this.touchHeld.has('sprint'),
       switchPlayer: this.pressed.has('q') || this.pressed.has('e') || this.touchPressed.has('switch'),

@@ -40,6 +40,8 @@ export interface SimPlayer {
   holdTime: number;
   /** 0..1 sprint energy (human-controlled player only). */
   stamina: number;
+  /** 0..1 shot power being charged while the shoot button is held. */
+  charge: number;
 }
 
 export interface SimBall {
@@ -127,7 +129,7 @@ export class MatchSim {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, diveDir: 1, distanceRun: 0, isKeeper: info.position === 'GK',
-          speedMul: isCpu ? diff.speed : 1, tackleTimer: 0, holdTime: 0, stamina: 1,
+          speedMul: isCpu ? diff.speed : 1, tackleTimer: 0, holdTime: 0, stamina: 1, charge: 0,
         };
         this.players.push(p);
       });
@@ -283,8 +285,17 @@ export class MatchSim {
     this.steer(p, target, 22);
     if (l > 0.05) p.facing = Math.atan2(want.z, want.x);
     if (this.ball.owner === p) {
-      if (input.shoot) this.shoot(p, l > 0.05 ? want : null);
-      else if (input.pass) this.pass(p, l > 0.05 ? want : null);
+      if (input.shootHeld) {
+        p.charge = Math.min(1, p.charge + _dt / 0.7);
+      } else if (p.charge > 0) {
+        // Released: a tap is a quick medium shot, a full hold is a rocket.
+        this.shoot(p, l > 0.05 ? want : null, 0.7 + 0.45 * p.charge);
+        p.charge = 0;
+      } else if (input.pass) {
+        this.pass(p, l > 0.05 ? want : null);
+      }
+    } else {
+      p.charge = 0;
     }
   }
 
@@ -324,7 +335,7 @@ export class MatchSim {
           return;
         }
         if (dGoal < range && angleClear && (pressure < 1.6 || dGoal < range * 0.6 || p.holdTime > 1.5)) {
-          this.shoot(p, null);
+          this.shoot(p, null, rand(0.85, 1.1));
           return;
         }
         const tight = pressure < 1.3 * this.stats.scale + 0.45;
@@ -726,7 +737,7 @@ export class MatchSim {
     this.events.push({ type: 'kick', side: p.side, player: p.info });
   }
 
-  shoot(p: SimPlayer, aim: V2 | null): void {
+  shoot(p: SimPlayer, aim: V2 | null, powerMul = 1): void {
     const goal = v(this.goalX(p.side), 0);
     const isCpu = p.side !== this.config.humanSide;
     const acc = isCpu ? DIFF[this.config.difficulty].accuracy : 1;
@@ -741,8 +752,8 @@ export class MatchSim {
       dir = norm(v(g.x * 0.55 + a.x * 0.45, g.z * 0.55 + a.z * 0.45));
     }
     const d = dist(p.pos, goal);
-    const power = this.stats.power * clamp(0.75 + d / this.length, 0.8, 1.15);
-    const loft = power * rand(0.06, 0.2);
+    const power = this.stats.power * clamp(0.75 + d / this.length, 0.8, 1.15) * powerMul;
+    const loft = power * rand(0.06, 0.2) * (powerMul > 1 ? 1.3 : 1);
     this.kick(p, dir, power, loft);
     this.events.push({ type: 'shot', side: p.side, player: p.info });
   }
