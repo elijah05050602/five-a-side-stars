@@ -5,6 +5,7 @@ import { buildPitch } from './Pitch';
 import { toonMaterial } from './toon';
 import { PlayerModel, type AnimState } from './PlayerModel';
 import type { Expression } from './playerFace';
+import type { Kit } from '../data/types';
 import { MatchSim, RUNOFF_END, RUNOFF_SIDE, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
@@ -90,10 +91,12 @@ export class MatchScene {
     const runoff = this.sim.mode === 'match';
     this.scene.add(buildPitch({ length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth, runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0 }));
 
+    const ringColours = teamRingColours(this.sim.teams[0].kit, this.sim.teams[1].kit);
     for (const p of this.sim.players) {
       const team = this.sim.teams[p.side];
       const kit = p.isKeeper ? team.keeperKit : team.kit;
       const m = new PlayerModel(p.info, kit, this.sim.stats.scale);
+      m.setTeamColour(ringColours[p.side]);
       this.models.set(p, m);
       this.scene.add(m.group);
     }
@@ -226,7 +229,7 @@ export class MatchScene {
       m.animate(dt, st);
       const isP1 = p === this.sim.controlled;
       const isP2 = p === this.sim.controlled2;
-      m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? 0xffd23f : isP2 ? 0x00e5ff : 0xffffff);
+      m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? 0xff8a00 : isP2 ? 0x00e5ff : 0xffffff);
     }
     this.ball.update(b.pos.x, b.y, b.pos.z, b.radius, b.vel.x, b.vel.z, dt);
 
@@ -265,3 +268,15 @@ export class MatchScene {
 }
 
 export type { Side };
+
+/**
+ * One identifying colour per team for the rings under the feet: the shirt colour, unless the two
+ * shirts are too alike, in which case the away side falls back to its shorts or second colour.
+ */
+function teamRingColours(home: Kit, away: Kit): [THREE.Color, THREE.Color] {
+  const far = (a: THREE.Color, b: THREE.Color) => Math.hypot(a.r - b.r, a.g - b.g, a.b - b.b) > 0.45;
+  const h = new THREE.Color(home.shirt);
+  const candidates = [away.shirt, away.shorts, away.shirt2, '#ffffff', '#1b2a41'].map((c) => new THREE.Color(c));
+  const a = candidates.find((c) => far(c, h)) ?? candidates[0];
+  return [h, a];
+}
