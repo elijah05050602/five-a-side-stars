@@ -1,5 +1,7 @@
 import { awayKitFor, makeBadge, starterTeams } from './defaults';
 import type { LeagueState } from '../game/league';
+import type { CareerState } from '../game/career';
+import { ensureSkills } from './skills';
 import type { Progress } from './progress';
 import type { Team } from './types';
 
@@ -10,6 +12,7 @@ interface SaveFile {
   settings: { sound: boolean; music: boolean; reduceMotion: boolean; halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard'; tutorialDone: boolean };
   progress?: Progress;
   league?: LeagueState | null;
+  career?: CareerState | null;
 }
 
 let cache: SaveFile | null = null;
@@ -46,9 +49,15 @@ function migrateTeam(t: Team): Team {
   if (!team.badge) team.badge = makeBadge(team.kit.shirt, team.kit.shirt2);
   team.players = team.players.map((p, i) => {
     const old = p as Partial<Team['players'][number]>;
-    return { ...p, hairStyle: old.hairStyle ?? 'short', boots: old.boots ?? '#222222', special: old.special ?? 'none', starter: old.starter ?? i < 5 };
+    return ensureSkills({ ...p, hairStyle: old.hairStyle ?? 'short', boots: old.boots ?? '#222222', special: old.special ?? 'none', starter: old.starter ?? i < 5 }, team.ageGroup);
   });
   return team;
+}
+
+/** Drop the in-memory copy and read the save again (a fresh page load, or another tab changed it). */
+export function reloadSave(): SaveFile {
+  cache = null;
+  return loadSave();
 }
 
 export function persist(): void {
@@ -99,6 +108,15 @@ export function getLeague(): LeagueState | null {
 
 export function setLeague(league: LeagueState | null): void {
   loadSave().league = league;
+  persist();
+}
+
+export function getCareer(): CareerState | null {
+  return loadSave().career ?? null;
+}
+
+export function setCareer(career: CareerState | null): void {
+  loadSave().career = career;
   persist();
 }
 

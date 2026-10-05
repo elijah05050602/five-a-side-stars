@@ -11,7 +11,12 @@ export interface HudRefs {
   btnSprint: HTMLElement;
   btnSwitch: HTMLElement;
   btnTrick: HTMLElement;
-  update(sim: MatchSim, events: SimEvent[]): void;
+  /** `lines[i]` is the commentator's line for `events[i]`, or null. */
+  update(sim: MatchSim, events: SimEvent[], lines?: (string | null)[]): void;
+  /** Show a commentary line in the ticker. */
+  say(line: string): void;
+  /** Show or hide the instant replay frame. */
+  setReplay(on: boolean): void;
   destroy(): void;
 }
 
@@ -68,6 +73,8 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         <div class="bar"><span class="bar-label">Power</span><div class="bar-track"><div class="bar-fill bar-power" id="bar-power"></div></div></div>
       </div>
       <div class="hud-banner" id="hud-banner"></div>
+      <div class="replay-frame" id="replay-frame" hidden><span class="replay-label">▶ REPLAY</span></div>
+      <div class="hud-comm" id="hud-comm"><span class="hud-comm-mic">🎙️</span><span id="hud-comm-text"></span></div>
       <div class="touch-controls">
         <div class="joystick" id="joy"><div class="joy-knob" id="joy-knob"></div></div>
         <div class="action-buttons">
@@ -94,6 +101,18 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   const barPower2 = q('bar-power-2');
   const pauseBtn = q<HTMLButtonElement>('hud-pause');
   const tip = q('hud-tip');
+  const comm = q('hud-comm');
+  const commText = q('hud-comm-text');
+  const replayFrame = q('replay-frame');
+  let commTimer = 0;
+  const say = (text: string) => {
+    commText.textContent = text;
+    comm.classList.remove('show');
+    void comm.offsetWidth; // restart the pop-in animation
+    comm.classList.add('show');
+    window.clearTimeout(commTimer);
+    commTimer = window.setTimeout(() => comm.classList.remove('show'), Math.min(7000, 2500 + text.length * 60));
+  };
   const pensH = root.querySelector<HTMLElement>('#pens-h');
   const pensA = root.querySelector<HTMLElement>('#pens-a');
   let bannerTimer = 0;
@@ -187,7 +206,9 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     btnSprint: q('btn-sprint'),
     btnSwitch: q('btn-switch'),
     btnTrick: q('btn-trick'),
-    update(s, events) {
+    say,
+    setReplay(on) { replayFrame.hidden = !on; },
+    update(s, events, lines) {
       sbH.textContent = String(s.score[0]);
       if (mode !== 'training') sbA.textContent = String(s.score[1]);
       clock.textContent = fmtClock(s);
@@ -216,33 +237,40 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         barStamina2.style.width = `${Math.round(s.controlled2.stamina * 100)}%`;
         barPower2.style.width = `${Math.round(s.controlled2.charge * 100)}%`;
       } else playerBox2.style.display = 'none';
-      for (const ev of events) {
+      events.forEach((ev, i) => {
+        const said = lines?.[i] ?? null;
         if (ev.type === 'goal' && ev.player) {
           const team = s.teams[ev.side!];
           const own = s.goals[s.goals.length - 1]?.ownGoal;
-          showBanner(`<div class="goal-text">GOAL!</div><div class="goal-sub">${esc(ev.player.name)} #${ev.player.number}${own ? ' (own goal)' : ''} · ${esc(team.name)}</div><div class="commentary">${own ? 'Oh no, into their own net!' : pickLine(GOAL_LINES)}</div>`, 3000);
+          showBanner(`<div class="goal-text">GOAL!</div><div class="goal-sub">${esc(ev.player.name)} #${ev.player.number}${own ? ' (own goal)' : ''} · ${esc(team.name)}</div><div class="commentary">${esc(said ?? (own ? 'Oh no, into their own net!' : pickLine(GOAL_LINES)))}</div>`, 3000);
           confetti(root, team.kit.shirt, team.kit.shirt2);
         } else if (ev.type === 'save') {
           showBanner(`<div class="save-text">${pickLine(SAVE_LINES)} Great save, ${esc(ev.player?.name ?? 'keeper')}!</div>`, 1200);
+          if (said) say(said);
         } else if (ev.type === 'miss') {
           showBanner(`<div class="save-text">${pickLine(MISS_LINES)}</div>`, 1200);
+          if (said) say(said);
         } else if (ev.type === 'foul') {
           const victimTeam = s.teams[1 - ev.side!];
           showBanner(ev.kind === 'penalty'
             ? `<div class="goal-text goal-text-small">PENALTY!</div><div class="goal-sub">${esc(victimTeam.name)} to take it</div>`
             : `<div class="save-text">Foul! Free kick to ${esc(victimTeam.name)}</div>`, 1800);
+          if (said) say(said);
         } else if (ev.type === 'kickoff' && s.clock > 0.1) {
           showBanner(`<div class="save-text">Kick off!</div>`, 900);
+          if (said) say(said);
         } else if (ev.type === 'restart') {
           const team = s.teams[ev.side!];
           const what = ev.kind === 'corner' ? 'Corner' : ev.kind === 'goalkick' ? 'Goal kick' : 'Throw-in';
           showBanner(`<div class="save-text">${what} to ${esc(team.name)}</div>`, 1400);
+          if (said) say(said);
         } else if (ev.type === 'trick' && ev.ok) {
           showBanner(ev.kind === 'nutmeg'
             ? `<div class="goal-text goal-text-small">NUTMEG!</div><div class="goal-sub">${esc(ev.player?.name ?? '')} through the legs!</div>`
             : `<div class="save-text">Step-over! ${esc(ev.player?.name ?? '')} sends them the wrong way!</div>`, 1300);
-        }
-      }
+          if (said) say(said);
+        } else if (said) say(said);
+      });
       if (mode === 'match') {
         // Coach the human taker through their own set pieces.
         const sp = s.phase === 'setpiece' ? s.setPiece : null;
@@ -263,6 +291,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     },
     destroy() {
       window.clearTimeout(bannerTimer);
+      window.clearTimeout(commTimer);
       root.innerHTML = '';
     },
   };
