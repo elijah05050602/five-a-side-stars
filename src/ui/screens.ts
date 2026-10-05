@@ -11,6 +11,7 @@ import { esc } from './hud';
 import { badgeSvg, kitChip } from './kitPreview';
 import { KitPreview3D } from './preview3d';
 import { downloadTeamSheet } from './teamSheet';
+import { logoControls, wireLogoControls } from './logoUpload';
 import { isNameOk } from '../data/wordFilter';
 import { music } from '../game/music';
 import { applyMotionSetting } from './motion';
@@ -234,15 +235,17 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
         <div class="badge-row">
           <div class="pills">${BADGE_SHAPES.map((sh) => `<button class="pill pill-badge ${team.badge.shape === sh ? 'is-active' : ''}" data-shape="${sh}">${badgeSvg({ ...team.badge, shape: sh }, 36)}</button>`).join('')}</div>
         </div>
-        <div class="icon-grid">${[...BADGE_ICONS, ...unlockedIcons()].map((ic) => `<button class="icon-tile ${team.badge.icon === ic ? 'is-active' : ''}" data-icon="${ic}">${ic}</button>`).join('')}${lockedIcons().map((l) => `<button class="icon-tile is-locked" disabled title="Unlock with the ${esc(l.sticker.name)} sticker: ${esc(l.sticker.how)}">${l.icon}<small>🔒</small></button>`).join('')}</div>
+        <div class="row logo-row">${logoControls(team.badge)}<span class="muted small">${team.badge.image ? 'Your logo fills the badge shape.' : 'Got a real club logo? Upload a picture and it fills the badge. It stays on this device.'}</span></div>
+        ${team.badge.image ? '' : `<div class="icon-grid">${[...BADGE_ICONS, ...unlockedIcons()].map((ic) => `<button class="icon-tile ${team.badge.icon === ic ? 'is-active' : ''}" data-icon="${ic}">${ic}</button>`).join('')}${lockedIcons().map((l) => `<button class="icon-tile is-locked" disabled title="Unlock with the ${esc(l.sticker.name)} sticker: ${esc(l.sticker.how)}">${l.icon}<small>🔒</small></button>`).join('')}</div>
         <p class="muted small">🔒 icons unlock when you earn stickers.</p>
         <div class="row">
           <div class="field"><span>Badge colour 1</span><div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${team.badge.colour1 === c ? 'is-active' : ''}" style="background:${c}" data-badge="colour1" data-colour="${c}"></button>`).join('')}</div></div>
         </div>
         <div class="row">
           <div class="field"><span>Badge colour 2</span><div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${team.badge.colour2 === c ? 'is-active' : ''}" style="background:${c}" data-badge="colour2" data-colour="${c}"></button>`).join('')}</div></div>
-        </div>
+        </div>`}
       </div>`;
+    wireLogoControls(form, () => team.badge, () => { renderClub(form); const el = root.querySelector('#preview-badge'); if (el) el.innerHTML = badgeSvg(team.badge, 64); });
     const refreshBadge = () => { renderClub(form); const el = root.querySelector('#preview-badge'); if (el) el.innerHTML = badgeSvg(team.badge, 64); const n = form.querySelector<HTMLInputElement>('#f-name'); if (n) n.focus({ preventScroll: true }); };
     form.querySelectorAll<HTMLElement>('[data-shape]').forEach((b) => b.addEventListener('click', () => { team.badge.shape = b.dataset.shape as BadgeShape; refreshBadge(); }));
     form.querySelectorAll<HTMLElement>('[data-icon]').forEach((b) => b.addEventListener('click', () => { team.badge.icon = b.dataset.icon!; refreshBadge(); }));
@@ -437,7 +440,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
               <option value="cpu" ${opponentId === 'cpu' ? 'selected' : ''}>Random ${home.ageGroup} team</option>
               ${sameAge.map((t) => `<option value="${t.id}" ${t.id === opponentId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
             </select>
-            <button class="btn btn-ghost" id="s-reroll">🎲 New opponent</button>
+            <div class="row"><button class="btn btn-ghost" id="s-reroll">🎲 New opponent</button>${logoControls(away.badge, 'away', '📷 Their logo')}</div>
           </div>`}
         </div>
         <div class="card options">
@@ -463,6 +466,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
       render();
     });
     root.querySelector<HTMLSelectElement>('#s-away')?.addEventListener('change', (e) => { opponentId = (e.target as HTMLSelectElement).value; render(); });
+    wireLogoControls(root, () => away.badge, () => { if (opponentId !== 'cpu') saveTeam(away); render(); });
     root.querySelector('#s-reroll')?.addEventListener('click', () => { cpu = generateOpponent(home.ageGroup, home.kit); opponentId = 'cpu'; render(); });
     root.querySelectorAll<HTMLElement>('[data-diff]').forEach((b) => b.addEventListener('click', () => { difficulty = b.dataset.diff as Difficulty; render(); }));
     root.querySelectorAll<HTMLElement>('[data-players]').forEach((b) => b.addEventListener('click', () => {
@@ -615,7 +619,7 @@ function renderLeague(root: HTMLElement, router: Router): void {
             <thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead>
             <tbody>
               ${table.map((row, i) => `<tr class="${row.isYou ? 'is-you' : ''} ${i < 2 && ls.tier > 1 ? 'is-up' : ''} ${i === table.length - 1 && ls.tier < 5 ? 'is-down' : ''}">
-                <td>${i + 1}</td><td class="t-name">${badgeSvg(row.team.badge, 22)} ${esc(row.team.name)}</td><td>${row.played}</td><td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.gf - row.ga > 0 ? '+' : ''}${row.gf - row.ga}</td><td><strong>${row.points}</strong></td>
+                <td>${i + 1}</td><td class="t-name">${badgeSvg(row.team.badge, 22)} ${esc(row.team.name)}${row.isYou ? '' : ` <span class="logo-mini">${logoControls(row.team.badge, row.team.id, '📷')}</span>`}</td><td>${row.played}</td><td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.gf - row.ga > 0 ? '+' : ''}${row.gf - row.ga}</td><td><strong>${row.points}</strong></td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -635,6 +639,7 @@ function renderLeague(root: HTMLElement, router: Router): void {
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
+  wireLogoControls(root, (key) => ls.teams.find((t) => t.id === key)?.badge, () => { setLeague(ls); renderLeague(root, router); });
   root.querySelector('#l-play')?.addEventListener('click', () => {
     const [h, a] = resolveKits(next!.home, next!.away);
     router.startMatch({ home: h, away: a, difficulty: 'normal', halfSeconds: ls.halfSeconds, mode: 'match', league: true, cpuLevel: info.level });
@@ -651,6 +656,7 @@ function fixtureCard(f: Fixture, label: string, humanId: string): string {
   const side = (t: Team, score: number | null, pens: number | null, won: boolean) => `
     <div class="fx-team ${won ? 'is-winner' : ''} ${t.id === humanId ? 'is-you' : ''}">
       ${badgeSvg(t.badge, 40)}<span class="fx-name">${esc(t.name)}</span>
+      ${t.id === humanId ? '' : `<span class="logo-mini">${logoControls(t.badge, t.id, '📷')}</span>`}
       <span class="fx-score">${score === null ? '' : score}${pens !== null ? `<small>(${pens})</small>` : ''}</span>
     </div>`;
   return `<div class="card fixture">
@@ -693,6 +699,7 @@ function renderTournament(root: HTMLElement, router: Router, s: TournamentState)
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
+  wireLogoControls(root, (key) => teamById(s, key)?.badge, (key) => { const t = teamById(s, key); if (t && getTeam(t.id)) saveTeam(t); renderTournament(root, router, s); });
   root.querySelector('#c-play')?.addEventListener('click', () => {
     const f = currentFixture(s)!;
     const [h, a] = resolveKits(f.home, f.away);
@@ -793,6 +800,7 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
         <ul class="muted plain-list">
           <li><strong>Privacy:</strong> nothing leaves this device. There are no accounts, no chat, no adverts, no in-app purchases and no tracking. Teams, settings and stickers are saved in this browser's local storage only.</li>
           <li><strong>Names:</strong> children type their own team and player names. A small word filter blocks the obvious rude words; nothing is shared with anyone.</li>
+          <li><strong>Logos:</strong> a club logo picture can be uploaded for any team. It is shrunk and kept in this browser only; it is never sent anywhere.</li>
           <li><strong>Offline:</strong> once loaded, the game keeps working without an internet connection. On a phone or tablet you can add it to the home screen.</li>
           <li><strong>Play time:</strong> a match lasts two to ten minutes depending on the half length chosen on the setup screen.</li>
         </ul>

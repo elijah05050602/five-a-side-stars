@@ -41,6 +41,15 @@ export function badgeSvg(b: Badge, size = 48): string {
     hex: '<path d="M24 3 L42 13.5 V34.5 L24 45 L6 34.5 V13.5 Z"/>',
   }[b.shape];
   const id = `b${Math.random().toString(36).slice(2, 8)}`;
+  if (b.image) {
+    // An uploaded logo fills the badge shape; the shape outline keeps every team's badge the same family.
+    return `<svg xmlns="http://www.w3.org/2000/svg" class="badge badge-image" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">
+    <defs><clipPath id="${id}">${shape}</clipPath></defs>
+    <g fill="#ffffff">${shape}</g>
+    <image clip-path="url(#${id})" href="${b.image}" x="3" y="3" width="42" height="42" preserveAspectRatio="xMidYMid slice"/>
+    <g fill="none" stroke="#1b2a41" stroke-width="2" stroke-linejoin="round">${shape}</g>
+  </svg>`;
+  }
   return `<svg xmlns="http://www.w3.org/2000/svg" class="badge" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">
     <defs><clipPath id="${id}">${shape}</clipPath></defs>
     <g fill="${b.colour1}" stroke="#1b2a41" stroke-width="2" stroke-linejoin="round">${shape}</g>

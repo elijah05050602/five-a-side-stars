@@ -319,3 +319,10 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
 .outcome-promoted, .outcome-champion { border: 3px solid var(--yellow); background: linear-gradient(160deg, #fff8dc, #fff); }
 .outcome-relegated { border: 3px solid #e63946; }
 .history summary { cursor: pointer; font-weight: 700; }
+
+/* ---------- Club logo upload ---------- */
+.btn-small { padding: 6px 10px; font-size: .85rem; }
+.logo-controls { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.logo-row { align-items: center; gap: 10px; margin: 6px 0 10px; }
+.logo-mini .btn-small { padding: 2px 6px; font-size: .75rem; border-width: 2px; margin-left: 4px; vertical-align: middle; }
+.league-table .t-name .logo-controls { display: inline-flex; }

@@ -26,6 +26,8 @@ export interface Badge {
   icon: string;
   colour1: string;
   colour2: string;
+  /** An uploaded club logo as a small data URL; when set it replaces the icon and colours. */
+  image?: string;
 }
 
 export interface Kit {
