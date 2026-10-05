@@ -800,7 +800,7 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
       </div>
       <div class="card">
         <h2>About this game</h2>
-        <p class="muted">Five-a-Side Stars is a football game for children aged 7 and up. Players build a team and play short matches against the computer, or against a friend on the same keyboard.</p>
+        <p class="muted">Goal Rush! is a five-a-side football game for children aged 7 and up. Players build a team and play short matches against the computer, or against a friend on the same keyboard.</p>
         <ul class="muted plain-list">
           <li><strong>Privacy:</strong> nothing leaves this device. There are no accounts, no chat, no adverts, no in-app purchases and no tracking. Teams, settings and stickers are saved in this browser's local storage only.</li>
           <li><strong>Names:</strong> children type their own team and player names. A small word filter blocks the obvious rude words; nothing is shared with anyone.</li>

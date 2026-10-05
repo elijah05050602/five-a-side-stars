@@ -1,6 +1,6 @@
-# Five-a-Side Stars
+# Goal Rush!
 
-A top-down 3D 5-a-side football browser game for kids aged 7 and up. You build
+Goal Rush! is a top-down 3D five-a-side football browser game for kids aged 7 and up. You build
 grassroots youth teams in age groups U5 to U10, give the players names, numbers
 and kits, and play short matches against the computer.
 
