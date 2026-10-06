@@ -742,3 +742,16 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .player-card:is(.is-picked, .is-drop-target):focus-visible { outline-color: var(--orange) !important; }
 /* Formation dots are SVG, which has no box-shadow: the navy outline frames the dot and its ring turns white. */
 .fm-dot:focus-visible circle { stroke: var(--white); stroke-width: 4; }
+
+/* Goal confetti in the scoring team's colours, and a pop on their score (the HUD skips both when motion is calm). */
+.confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 5; }
+.confetti i { position: absolute; top: -16px; width: 9px; height: 14px; border-radius: 2px; animation: confetti-fall 2s cubic-bezier(.25, .6, .45, 1) forwards; }
+@keyframes confetti-fall { from { transform: translate(0, 0) rotate(0deg); } to { transform: translate(40px, 110vh) rotate(720deg); } }
+#sb-h.is-pop, #sb-a.is-pop { display: inline-block; animation: score-pop .6s ease-out; }
+@keyframes score-pop { 30% { transform: scale(1.6); } }
+
+/* Stickers that unlock a badge icon are the rare ones: a holographic shimmer once collected (still when motion is calm). */
+.sticker.is-shiny { position: relative; overflow: hidden; background: linear-gradient(135deg, #fff6c2, #ffd6f2, #c9f2ff, #d9ffd6); }
+.sticker.is-shiny::after { content: ''; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, .75) 45%, transparent 60%); background-size: 250% 100%; animation: sticker-shine 3s ease-in-out infinite; pointer-events: none; }
+@keyframes sticker-shine { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+@media (prefers-reduced-motion: reduce) { .sticker.is-shiny::after { animation: none; } }

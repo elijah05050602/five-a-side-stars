@@ -1,7 +1,7 @@
 import { AGE_STATS } from '../../data/ageGroups';
 import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode } from '../../data/defaults';
 import { getLeague, getTeam, saveTeam } from '../../data/storage';
-import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, POSITIONS, POSITION_LABELS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type FormationId, type HairStyle, type Kit, type Position, type SkillKey, type Special, type Team } from '../../data/types';
+import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, GENDERS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, POSITIONS, POSITION_LABELS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type FormationId, type Gender, type HairStyle, type Kit, type Position, type SkillKey, type Special, type Team } from '../../data/types';
 import { STAR_BUDGET, STAR_CAP, fitSkills, randomSkills, skillKeys, skillLabel, starsLeft, starsText, totalStars } from '../../data/skills';
 import { kitsClash } from '../../game/kitTexture';
 import { FORMATIONS, applyFormation, assignSlots, canPlay, formationById, formationFor, swapPlayers } from '../../data/formations';
@@ -149,7 +149,7 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
     }
     const nums = new Set<number>();
     for (const p of team.players) {
-      p.name = p.name.trim() || randomPlayerName();
+      p.name = p.name.trim() || randomPlayerName(p.gender);
       if (nums.has(p.number)) { alert(`Two players have number ${p.number}. Give each player their own number.`); step = 2; render(); return false; }
       nums.add(p.number);
     }
@@ -294,6 +294,7 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
           <div class="pills">${SPECIALS.map((sp) => `<button class="pill ${p.special === sp.id ? 'is-active' : ''}" data-special="${sp.id}" title="${esc(sp.blurb)}" ${pressed(p.special === sp.id)}>${sp.label}</button>`).join('')}</div>
         </div>
         <div class="field"><span>Skin</span><div class="swatches">${SKIN_TONES.map((c) => `<button class="swatch round ${p.skin === c ? 'is-active' : ''}" style="background:${c}" data-skin="${c}" aria-label="Skin: ${colourName(c)}" ${pressed(p.skin === c)}></button>`).join('')}</div></div>
+        <div class="field"><span>Boy or girl</span><div class="pills">${GENDERS.map((g) => `<button class="pill ${p.gender === g ? 'is-active' : ''}" data-gender="${g}" ${pressed(p.gender === g)}>${g === 'boy' ? '👦 Boy' : '👧 Girl'}</button>`).join('')}</div></div>
         <div class="field"><span>Hair style</span><div class="pills">${HAIR_STYLES.map((h) => `<button class="pill ${p.hairStyle === h ? 'is-active' : ''}" data-hairstyle="${h}" ${pressed(p.hairStyle === h)}>${HAIR_STYLE_LABELS[h]}</button>`).join('')}</div></div>
         <div class="field"><span>Build</span><div class="pills">${BUILDS.map((b) => `<button class="pill ${(p.build ?? 'regular') === b ? 'is-active' : ''}" data-build="${b}" ${pressed((p.build ?? 'regular') === b)}>${b[0].toUpperCase() + b.slice(1)}</button>`).join('')}</div></div>
         <div class="field"><span>Hair colour</span><div class="swatches">${HAIR_COLOURS.map((c) => `<button class="swatch round ${p.hair === c ? 'is-active' : ''}" style="background:${c}" data-hair="${c}" aria-label="Hair: ${colourName(c)}" ${pressed(p.hair === c)}></button>`).join('')}</div></div>
@@ -303,7 +304,7 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
     form.querySelector('#p-add')?.addEventListener('click', () => {
       const used = new Set(team.players.map((x) => x.number));
       let n = 2; while (used.has(n)) n++;
-      team.players.push(makePlayer(team.players.length % 2 ? 'DEF' : 'ATT', n, randomPlayerName(), false, team.ageGroup));
+      team.players.push(makePlayer(team.players.length % 2 ? 'DEF' : 'ATT', n, undefined, false, team.ageGroup));
       selectedPlayer = team.players.length - 1;
       render();
     });
@@ -325,6 +326,7 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
       renderSquad(form);
     }));
     form.querySelector('#p-spread')?.addEventListener('click', () => { p.skills = randomSkills(p.position, team.ageGroup); renderSquad(form); });
+    form.querySelectorAll<HTMLElement>('[data-gender]').forEach((b) => b.addEventListener('click', () => { p.gender = b.dataset.gender as Gender; preview?.setGender(p.gender); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-hairstyle]').forEach((b) => b.addEventListener('click', () => { p.hairStyle = b.dataset.hairstyle as HairStyle; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-boots]').forEach((b) => b.addEventListener('click', () => { p.boots = b.dataset.boots!; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-bootstyle]').forEach((b) => b.addEventListener('click', () => { p.bootStyle = b.dataset.bootstyle as BootStyle; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots, p.bootStyle); renderSquad(form); }));
@@ -351,7 +353,7 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
     });
     const nameEl = form.querySelector<HTMLInputElement>('#p-name')!;
     nameEl.addEventListener('input', () => { p.name = nameEl.value; form.querySelectorAll('.pc-name')[selectedPlayer].textContent = p.name; });
-    form.querySelector('#p-dice')!.addEventListener('click', () => { p.name = randomPlayerName(); nameEl.value = p.name; form.querySelectorAll('.pc-name')[selectedPlayer].textContent = p.name; });
+    form.querySelector('#p-dice')!.addEventListener('click', () => { p.name = randomPlayerName(p.gender); nameEl.value = p.name; form.querySelectorAll('.pc-name')[selectedPlayer].textContent = p.name; });
     const numEl = form.querySelector<HTMLInputElement>('#p-num')!;
     const setNum = (n: number, writeBack = true) => {
       n = Math.max(1, Math.min(99, Math.round(n) || 1));

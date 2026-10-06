@@ -64,9 +64,15 @@ export type Skills = Record<SkillKey, number>;
 /** The four ratings saved before the seven-stat update (keepers read them as Speed, Handling, Kicking, Diving). */
 export interface LegacySkills { speed: number; shooting: number; passing: number; defending: number }
 
+/** Boy or girl, for a player's face and the names and hair a made-up player starts with. */
+export type Gender = 'boy' | 'girl';
+export const GENDERS: Gender[] = ['boy', 'girl'];
+
 export interface Player {
   id: string;
   name: string;
+  /** Girls get eyelashes. Unset for players made before this existed, or named by hand. */
+  gender?: Gender;
   number: number;
   /** Where they line up right now (set by the formation, dragging, or picking a position). */
   position: Position;

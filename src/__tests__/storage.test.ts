@@ -148,6 +148,20 @@ describe('a damaged save never costs the rest of it', () => {
     expect(getTeam('mine')!.short).toBe('SUP');
   });
 
+  it("keeps a player's boy or girl, and drops anything else", () => {
+    const save = goodSave();
+    const t = save.teams.find((x: { id: string }) => x.id === 'mine');
+    t.players[0].gender = 'girl';
+    t.players[1].gender = 'banana';
+    delete t.players[2].gender;
+    localStorage.setItem(KEY, JSON.stringify(save));
+    reloadSave();
+    const mine = getTeam('mine')!;
+    expect(mine.players[0].gender).toBe('girl');
+    expect(mine.players[1].gender).toBeUndefined();
+    expect(mine.players[2].gender).toBeUndefined();
+  });
+
   it('keeps a real uploaded logo', () => {
     const save = goodSave();
     const logo = 'data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==';

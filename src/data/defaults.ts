@@ -1,4 +1,4 @@
-import { BADGE_ICONS, type AgeGroup, type Badge, type Kit, type Player, type Position, type Team } from './types';
+import { BADGE_ICONS, type AgeGroup, type Badge, type Gender, type Kit, type Player, type Position, type Team } from './types';
 import { randomSkills } from './skills';
 import { FORMATIONS, applyFormation } from './formations';
 import { isNameOk } from './wordFilter';
@@ -27,9 +27,24 @@ export function randomTeamName(): string {
   return `${pick(TEAM_WORDS_A)} ${pick(TEAM_WORDS_B)}`;
 }
 
-export function randomPlayerName(): string {
-  return pick(FIRST_NAMES);
+/** The made-up names that are girls' names; the rest of FIRST_NAMES are boys'. */
+const GIRL_NAMES = new Set(['Ava', 'Mia', 'Zoe', 'Isla', 'Ruby', 'Nia', 'Elsie', 'Lily', 'Amara', 'Freya', 'Priya', 'Hana']);
+
+/** Boy or girl for one of the made-up names; nothing for a name someone typed. */
+export function genderOfName(name: string): Gender | undefined {
+  return FIRST_NAMES.includes(name) ? (GIRL_NAMES.has(name) ? 'girl' : 'boy') : undefined;
 }
+
+export function randomPlayerName(gender?: Gender): string {
+  return pick(gender ? FIRST_NAMES.filter((n) => genderOfName(n) === gender) : FIRST_NAMES);
+}
+
+/** The hair a made-up player starts with. Every style stays open to everyone in the builder. */
+const STARTING_HAIR: Record<Gender | 'any', Player['hairStyle'][]> = {
+  any: ['short', 'short', 'spiky', 'spiky', 'long', 'long', 'curly', 'afro', 'buns', 'bald'],
+  boy: ['short', 'short', 'spiky', 'spiky', 'curly', 'afro', 'bald', 'long'],
+  girl: ['long', 'long', 'buns', 'buns', 'curly', 'afro', 'short', 'spiky'],
+};
 
 /** The three letters on the scoreboard: the initials, or the start of a one-word name, but never a rude word. */
 export function shortCode(name: string): string {
@@ -45,10 +60,10 @@ export function shortCode(name: string): string {
   return code(tries.find((t) => isNameOk(code(t))) ?? ['T', 'M']);
 }
 
-export function makePlayer(position: Position, number: number, name = randomPlayerName(), starter = true, ageGroup: AgeGroup = 'U8'): Player {
+export function makePlayer(position: Position, number: number, name = randomPlayerName(), starter = true, ageGroup: AgeGroup = 'U8', gender = genderOfName(name)): Player {
   return {
-    id: uid(), name, number, position, skin: pick(SKIN_TONES), hair: pick(HAIR_COLOURS),
-    hairStyle: pick(['short', 'short', 'spiky', 'spiky', 'long', 'long', 'curly', 'afro', 'buns', 'bald'] as Player['hairStyle'][]),
+    id: uid(), name, number, position, gender, skin: pick(SKIN_TONES), hair: pick(HAIR_COLOURS),
+    hairStyle: pick(STARTING_HAIR[gender ?? 'any']),
     build: pick(['regular', 'regular', 'small', 'tall', 'sturdy'] as Player['build'][]), boots: pick(BOOT_COLOURS), bootStyle: pick(['classic', 'classic', 'stripes', 'toecap', 'twotone'] as Player['bootStyle'][]),
     special: 'none', starter, skills: randomSkills(position, ageGroup),
   };

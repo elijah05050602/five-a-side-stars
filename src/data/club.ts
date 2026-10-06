@@ -12,7 +12,7 @@ export const CLUB_LOGO_URL = './art/davao-strikers.jpg';
 /** Club colours, picked from the logo. */
 export const CLUB_COLOURS = { orange: '#f26a1b', navy: '#13233a', cream: '#efe3c4', gold: '#f2a03d' };
 
-interface ClubPlayer { name: string; number: number; positions: Position[]; starter: boolean; look: Pick<Player, 'skin' | 'hair' | 'hairStyle' | 'build' | 'boots' | 'bootStyle'> }
+interface ClubPlayer { name: string; number: number; positions: Position[]; starter: boolean; girl?: true; look: Pick<Player, 'skin' | 'hair' | 'hairStyle' | 'build' | 'boots' | 'bootStyle'> }
 
 /** How the club's kids look: light brown skin, dark hair. */
 const SKIN = '#d49a6a';
@@ -22,14 +22,14 @@ const HAIR = '#1b1b1b';
 const SQUAD: ClubPlayer[] = [
   { name: 'Ragnar', number: 19, positions: ['GK'], starter: true, look: { skin: SKIN, hair: HAIR, hairStyle: 'short', build: 'tall', boots: '#ff7a00', bootStyle: 'toecap' } },
   { name: 'Elijah', number: 8, positions: ['DEF', 'WING'], starter: true, look: { skin: SKIN, hair: HAIR, hairStyle: 'short', build: 'regular', boots: '#3da5f4', bootStyle: 'stripes' } },
-  { name: 'Baby Girl', number: 22, positions: ['WING', 'DEF'], starter: true, look: { skin: SKIN, hair: HAIR, hairStyle: 'buns', build: 'small', boots: '#ff6fb5', bootStyle: 'twotone' } },
+  { name: 'Baby Girl', number: 22, positions: ['WING', 'DEF'], starter: true, girl: true, look: { skin: SKIN, hair: HAIR, hairStyle: 'buns', build: 'small', boots: '#ff6fb5', bootStyle: 'twotone' } },
   { name: 'Sage', number: 12, positions: ['WING', 'ATT'], starter: true, look: { skin: SKIN, hair: HAIR, hairStyle: 'short', build: 'regular', boots: '#ffffff', bootStyle: 'classic' } },
   { name: 'Liam', number: 21, positions: ['ATT', 'DEF'], starter: true, look: { skin: SKIN, hair: HAIR, hairStyle: 'short', build: 'tall', boots: '#222222', bootStyle: 'stripes' } },
   { name: 'Randall', number: 10, positions: ['ATT', 'WING'], starter: false, look: { skin: SKIN, hair: HAIR, hairStyle: 'short', build: 'small', boots: '#ffd23f', bootStyle: 'classic' } },
 ];
 
 /** Bump when the club sends new details, so teams already saved on a device pick them up once. */
-const CLUB_VERSION = 2;
+const CLUB_VERSION = 3;
 
 /** A fresh copy of the club's U7 team, exactly as the club sent it. Everything stays editable. */
 export function davaoStrikersTeam(): Team {
@@ -44,7 +44,7 @@ export function davaoStrikersTeam(): Team {
     awayKit: makeKit(navy, orange, cream, navy, 'sash'),
     keeperKit: makeKit(cream, navy, navy, cream, 'plain'),
     players: SQUAD.map((c) => ({
-      ...makePlayer(c.positions[0], c.number, c.name, c.starter, 'U7'),
+      ...makePlayer(c.positions[0], c.number, c.name, c.starter, 'U7', c.girl ? 'girl' : 'boy'),
       ...c.look,
       positions: [...c.positions],
     })),
@@ -59,11 +59,15 @@ export function davaoStrikersTeam(): Team {
 export function ensureClubTeam(): Team {
   const saved = getTeam(CLUB_TEAM_ID);
   if (saved) {
-    if ((saved.clubVersion ?? 1) < CLUB_VERSION) {
-      // The club updated how its kids look: apply it to the players still on the squad, keep everything else.
+    const from = saved.clubVersion ?? 1;
+    if (from < CLUB_VERSION) {
+      // Version 2 updated how the club's kids look; version 3 says who is a girl and keeps any looks changed since.
+      // Only the players still on the squad change, and nothing else.
       for (const c of SQUAD) {
         const p = saved.players.find((x) => x.name === c.name);
-        if (p) Object.assign(p, { skin: c.look.skin, hair: c.look.hair, hairStyle: c.look.hairStyle, build: c.look.build });
+        if (!p) continue;
+        if (from < 2) Object.assign(p, { skin: c.look.skin, hair: c.look.hair, hairStyle: c.look.hairStyle, build: c.look.build });
+        p.gender ??= c.girl ? 'girl' : 'boy';
       }
       saved.clubVersion = CLUB_VERSION;
       saveTeam(saved);

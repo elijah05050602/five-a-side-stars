@@ -84,6 +84,7 @@ export class KitPreview3D {
 
   setKit(kit: Kit, number: number): void { this.model.setKit(kit, number); }
   setLook(skin: string, hair: string, hairStyle?: Player["hairStyle"], boots?: string, bootStyle?: BootStyle): void { this.model.setLook(skin, hair, hairStyle, boots, bootStyle); }
+  setGender(gender: Player['gender']): void { this.model.setGender(gender); }
   setBuild(build: Build): void { this.model.setBuild(build); }
   setScale(scale: number): void { this.scale = scale; this.model.group.scale.setScalar(1); }
 
