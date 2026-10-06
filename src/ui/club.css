@@ -1,0 +1,43 @@
+/* Davao Strikers FC club page, multi-position chips and drag-to-swap line-ups. */
+.dock-club { background: #13233a; color: #ffb27a; border-color: #f26a1b; box-shadow: 0 3px 0 #0b1626; }
+
+.club { max-width: 980px; margin: 0 auto; }
+.club-hero { display: flex; gap: 18px; align-items: center; background: linear-gradient(135deg, var(--club-navy), #24406b); color: var(--club-cream); border-color: var(--club-orange); }
+.club-logo { width: clamp(96px, 22vw, 180px); height: auto; aspect-ratio: 1; border-radius: 50%; border: 4px solid #f2a03d; object-fit: cover; flex: none; }
+.club-text small { color: #ffb27a; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.club-text h2 { margin: 2px 0 6px; color: #fff; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.club-text p { margin: 0 0 8px; color: var(--club-cream); }
+.club-kits { gap: 6px; }
+.club-squad { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin: 14px 0; }
+.club-player { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+.club-player.is-sub { opacity: .8; }
+.club-num { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 18px; background: #f26a1b; color: #fff; border: 3px solid #13233a; }
+.club-name { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.club-name small { color: #4a5a73; }
+.club-player .chip-sub { margin-left: auto; }
+.club-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+@media (max-width: 560px) {
+  .club-hero { flex-direction: column; text-align: center; }
+  .club-text h2, .club-kits { justify-content: center; }
+}
+
+/* Players who can play more than one position */
+.pc-also { font-size: 11px; font-weight: 700; color: #4a5a73; letter-spacing: .02em; }
+.pill-also { font-size: 14px; }
+
+/* Drag (or tap two) to swap in the line-up */
+.formation-pitch { touch-action: none; user-select: none; -webkit-user-select: none; }
+.fm-dot { cursor: grab; }
+.fm-dot .fm-name { font: 700 7.5px var(--font); fill: #fff; stroke: var(--navy); stroke-width: 2.2px; paint-order: stroke; }
+.fm-dot.is-out circle { stroke-dasharray: 3 2; }
+.fm-sub circle { fill: #ffffff; }
+.fm-bench { fill: #dfe6f2; stroke: var(--navy); stroke-width: 2; }
+.fm-bench-label { font: 700 8px var(--font); fill: #4a5a73; letter-spacing: .1em; }
+.fm-dot.is-picked circle, .fm-dot.is-drop-target circle { stroke: #ff7a00; stroke-width: 4; }
+.fm-dot.is-drop-target circle { fill: #ffd23f; }
+.fm-dot.is-dragging { opacity: .45; }
+.player-card.is-picked, .player-card.is-drop-target { outline: 4px solid #ff7a00; outline-offset: 2px; }
+.player-card.is-lifted { transform: scale(1.05); box-shadow: 0 8px 0 var(--navy); }
+.player-card.is-dragging { opacity: .5; }
+.drag-ghost { position: fixed; left: 0; top: 0; z-index: 9000; pointer-events: none; margin: -22px 0 0 -40px; padding: 8px 14px; border-radius: 999px; background: var(--yellow); color: var(--navy); border: 3px solid var(--navy); box-shadow: 0 4px 0 var(--navy); font: 700 15px var(--font); white-space: nowrap; }
+body.is-drag-swapping, body.is-drag-swapping * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }

@@ -47,19 +47,31 @@ const NEAR: Record<Exclude<Position, 'GK'>, Exclude<Position, 'GK'>[]> = {
   ATT: ['ATT', 'WING', 'MID', 'DEF'],
 };
 
+/** Every position a player is good at: their natural spots, or just where they stand now. */
+export function canPlay(p: Pick<Player, 'position' | 'positions'>): Position[] {
+  return p.positions?.length ? p.positions : [p.position];
+}
+
 /**
  * Match outfield players to a formation's spots: first everyone already in the right
- * position, then the closest fit. Returns each player's slot (players beyond the slots get none).
+ * position, then anyone who can also play there, then the closest fit.
+ * Returns each player's slot (players beyond the slots get none).
  */
-export function assignSlots<T extends { info: Pick<Player, 'position'> } | Pick<Player, 'position'>>(players: T[], formation: Formation): Map<T, Slot> {
-  const posOf = (p: T): Position => ('info' in p ? p.info.position : p.position);
+export function assignSlots<T extends { info: Pick<Player, 'position' | 'positions'> } | Pick<Player, 'position' | 'positions'>>(players: T[], formation: Formation): Map<T, Slot> {
+  const infoOf = (p: T): Pick<Player, 'position' | 'positions'> => ('info' in p ? p.info : p);
+  const posOf = (p: T): Position => (infoOf(p).position === 'GK' ? 'ATT' : infoOf(p).position);
   const out = new Map<T, Slot>();
   const free = [...players];
   const open = [...formation.slots];
-  for (let rank = 0; rank < 4 && free.length && open.length; rank++) {
+  const fits: ((p: T, slot: Slot) => boolean)[] = [
+    (p, slot) => posOf(p) === slot.pos,
+    (p, slot) => canPlay(infoOf(p)).includes(slot.pos),
+    ...[1, 2, 3].map((rank) => (p: T, slot: Slot) => posOf(p) === NEAR[slot.pos][rank]),
+  ];
+  for (const fit of fits) {
     for (const slot of [...open]) {
-      const want = NEAR[slot.pos][rank];
-      const i = free.findIndex((p) => (posOf(p) === 'GK' ? 'ATT' : posOf(p)) === want);
+      if (!free.length) break;
+      const i = free.findIndex((p) => fit(p, slot));
       if (i < 0) continue;
       out.set(free[i], slot);
       free.splice(i, 1);
@@ -67,6 +79,23 @@ export function assignSlots<T extends { info: Pick<Player, 'position'> } | Pick<
     }
   }
   return out;
+}
+
+/**
+ * Swap two players' places: dragging one onto another in the line-up. Starters swap
+ * spots on the pitch; a sub swapped with a starter comes on in their place. Two subs
+ * just swap places on the bench. Natural positions never change.
+ */
+export function swapPlayers(team: Team, a: Player, b: Player): void {
+  const i = team.players.indexOf(a), j = team.players.indexOf(b);
+  if (i < 0 || j < 0 || i === j) return;
+  if (a.starter || b.starter) {
+    [a.position, b.position] = [b.position, a.position];
+    [a.starter, b.starter] = [b.starter, a.starter];
+  }
+  // Order matters too: two players in the same position fill that position's spots in squad order.
+  team.players[i] = b;
+  team.players[j] = a;
 }
 
 /** Pick a formation for a team: the outfield starters take the positions it asks for. */

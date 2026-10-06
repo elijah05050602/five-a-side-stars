@@ -27,6 +27,8 @@ npm test         # run the automated checks (saves, league, cup, match engine)
 - **Player stats**: seven star ratings per player. Outfielders have Speed, Dribbling, Passing, Shooting, Tackling, Stamina and Strength; keepers have Speed, Handling, Diving, Reflexes, Positioning, Kicking and Strength. The age group caps the stars and sets the budget to share out.
 - **Dribbling**: the ball is not stuck to your boots. Each touch knocks it a little ahead (further when sprinting, closer with good Dribbling), so a defender can nip in between touches.
 - **Sticker album**: finish matches, win cups and hit milestones to collect stickers; some unlock extra badge icons.
+- **Davao Strikers FC**: Goal Rush! is the club's official football game. The 🦊 Davao Strikers chip on the lobby opens the club page, where you play as their Under 7s (club badge, orange and navy kits, the real squad) in any mode. It is an ordinary saved team, so everything stays editable, and Reset puts the club's squad back.
+- **Positions and line-ups**: a player can be good in more than one position (tick "Can also play"), and formations put players in spots they can play first. On the squad step, drag a player onto another (or tap one, then the other) to swap them, or drag a sub onto the pitch to bring them on.
 - **Team sheet**: from the squad step of the team builder, download a printable PNG team sheet.
 - **Weather and time of day**: pick sunny, cloudy, rain, snow, sunset or a night game under floodlights on the setup screen, or let the game surprise you.
 - **Commentary and replays**: a commentator who knows the score, calls shots wide, over or off the bar, and an instant slow-motion replay of every goal (off when reduce motion is on).
