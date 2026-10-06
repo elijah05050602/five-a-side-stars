@@ -1,5 +1,5 @@
 import { getSettings } from '../data/storage';
-import { audioContext, channelBus, loadAudio, releaseAudio } from './audio';
+import { afterPlayerModel, audioContext, channelBus, loadAudio, releaseAudio } from './audio';
 
 /**
  * Background music: ElevenLabs Music loops, the home theme on the menu pages
@@ -105,11 +105,14 @@ class Music {
     });
   }
 
-  /** Fetch the jingles ahead of full time so they play on cue. */
+  /** Fetch the jingles ahead of full time so they play on cue, once the player model is in (see afterPlayerModel). */
   preloadJingles(): void {
     if (!getSettings().music || !audioContext()) return;
-    void loadAudio('audio/win.mp3');
-    void loadAudio('audio/draw.mp3');
+    void afterPlayerModel().then(() => {
+      if (!getSettings().music) return;
+      void loadAudio('audio/win.mp3');
+      void loadAudio('audio/draw.mp3');
+    });
   }
 
   private switchTo(track: Track): void {

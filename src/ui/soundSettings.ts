@@ -38,7 +38,7 @@ export function wireSoundSettings(root: HTMLElement): void {
       applyVolumes();
       if (r.ch === 'music') music.refresh();
       // Fetch the commentator's clips now (perhaps mid-match, from the pause screen) so the next line is spoken.
-      if (r.ch === 'voice' && box.checked) void preloadCommentary();
+      if (r.ch === 'voice' && box.checked) void preloadCommentary(true);
     });
     slider.addEventListener('input', () => {
       updateSettings({ [r.vol]: Number(slider.value) / 100 });

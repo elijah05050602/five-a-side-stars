@@ -6,6 +6,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// The player model's download, which the commentary and the jingles wait for. A test can hold it back.
+const model = vi.hoisted(() => ({ ready: Promise.resolve() as Promise<unknown> }));
+vi.mock('../game/playerAsset', () => ({ loadPlayerAsset: () => model.ready }));
+
 // ---------- a minimal Web Audio stand-in ----------
 
 class FakeParam {
@@ -146,6 +150,7 @@ async function settle(): Promise<void> { for (let i = 0; i < 50; i++) await Prom
 
 beforeEach(() => {
   vi.resetModules();
+  model.ready = Promise.resolve();
   FakeContext.made = [];
   FakeOffline.made = [];
   FakeOffline.broken = false;
@@ -652,6 +657,67 @@ describe('commentary: who speaks when', () => {
     }
     v.say('save'); // nothing more after the match is gone
     expect(lineSources(c)).toHaveLength(3);
+  });
+});
+
+describe('first visit: the player model comes first', () => {
+  /** Hold the player model back, with ways to let it load or fail. */
+  function holdModel(): { load: () => void; fail: () => void } {
+    const m = { load: () => undefined as void, fail: () => undefined as void };
+    model.ready = new Promise((resolve, reject) => { m.load = () => resolve({}); m.fail = () => reject(new Error('no model')); });
+    return m;
+  }
+  const got = () => fetched.map((u) => u.replace(/^\//, '')).sort();
+
+  it('the commentary waits for the player model before downloading', async () => {
+    const m = holdModel();
+    serveSprite();
+    const { Commentary, preloadCommentary } = await import('../game/voice');
+    void preloadCommentary(); // the first tap
+    new Commentary().load(); // the tutorial starts straight away
+    await settle();
+    expect(fetched).toEqual([]);
+    m.load();
+    await settle();
+    expect(got()).toEqual(['audio/commentary.json', 'audio/commentary.mp3']);
+  });
+
+  it('a player model that fails to load does not hold the commentary up', async () => {
+    const m = holdModel();
+    serveSprite();
+    const { preloadCommentary } = await import('../game/voice');
+    const loading = preloadCommentary();
+    m.fail();
+    expect(await loading).not.toBeNull();
+  });
+
+  it('a line that wants speaking ends the wait, and is spoken when the clips arrive', async () => {
+    holdModel();
+    serveSprite();
+    const { Commentary } = await import('../game/voice');
+    const v = new Commentary();
+    v.load();
+    await settle();
+    expect(fetched).toEqual([]);
+    v.say('kickoffFirst'); // the model is still loading, but the kick-off line wants the clips now
+    await settle();
+    expect(said(FakeContext.made[0]).map((s) => s.key)).toEqual(['kickoffFirst']);
+  });
+
+  it('the full-time jingles wait for it too, but play on cue if full time comes first', async () => {
+    const m = holdModel();
+    files['audio/win.mp3'] = () => fakeMp3(7.69, 2);
+    files['audio/draw.mp3'] = () => fakeMp3(7.11, 2);
+    const { music } = await import('../game/music');
+    music.preloadJingles();
+    await settle();
+    expect(fetched).toEqual([]);
+    music.jingle('win');
+    await settle();
+    expect(got()).toEqual(['audio/win.mp3']);
+    m.load();
+    await settle();
+    expect(got()).toEqual(['audio/draw.mp3', 'audio/win.mp3']);
   });
 });
 

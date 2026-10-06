@@ -1,4 +1,5 @@
 import { getSettings } from '../data/storage';
+import { loadPlayerAsset } from './playerAsset';
 
 /**
  * One shared Web Audio context for music, effects, the crowd and the
@@ -181,6 +182,26 @@ export function applyVolumes(): void {
   for (const ch of Object.keys(buses) as AudioChannel[]) buses[ch]!.gain.setTargetAtTime(channelLevel(ch), c.currentTime, 0.05);
   window.clearTimeout(quietTimer);
   if (!soundOn()) quietTimer = window.setTimeout(() => { if (!soundOn()) { sleep(); setSession('auto'); } }, 400);
+}
+
+let modelWait: Promise<void> | null = null;
+let endModelWait = (): void => undefined;
+
+/**
+ * Downloads that are not needed yet (the commentator's clips, the full-time
+ * jingles) wait for the player model to load, or fail to. On a first visit the
+ * tutorial starts at once and "Tap to Play" waits for the model, so they would
+ * only slow it down. `now` ends the wait, for a sound that is wanted already.
+ */
+export function afterPlayerModel(now = false): Promise<void> {
+  if (!modelWait) {
+    modelWait = new Promise<void>((resolve) => {
+      endModelWait = resolve;
+      loadPlayerAsset().then(() => resolve(), () => resolve());
+    });
+  }
+  if (now) endModelWait();
+  return modelWait;
 }
 
 /**

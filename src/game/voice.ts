@@ -1,5 +1,5 @@
 import { getSettings } from '../data/storage';
-import { audioContext, channelBus, loadAudio, releaseAudio } from './audio';
+import { afterPlayerModel, audioContext, channelBus, loadAudio, releaseAudio } from './audio';
 import type { LineKey } from './commentary';
 
 /**
@@ -82,17 +82,20 @@ export function spriteMatches(sprite: Sprite, seconds: number): boolean {
  * is ready in time, when a match starts, when commentary is switched on, and
  * by a line that finds the clips missing (commentary was off when the match
  * started, or a download failed: that is tried again at most every ten seconds).
+ * The download waits for the player model (see afterPlayerModel) unless `now`
+ * says the clips are wanted already, as they are by a line.
  * An index and recording that do not match are refused: wrong lines are worse
  * than none, and asking again would only bring the same pair from the cache.
  */
-export function preloadCommentary(): Promise<Loaded | null> {
+export function preloadCommentary(now = false): Promise<Loaded | null> {
   if (!getSettings().commentary || mismatched || !audioContext()) return Promise.resolve(null);
+  if (now) void afterPlayerModel(true);
   if (!spritePromise) {
     if (performance.now() < retryAt) return Promise.resolve(null);
-    spritePromise = Promise.all([
+    spritePromise = afterPlayerModel().then(() => Promise.all([
       fetch(`${import.meta.env.BASE_URL}audio/commentary.json`).then((r) => (r.ok ? (r.json() as Promise<Sprite>) : null)).catch(() => null),
       loadAudio('audio/commentary.mp3', SPRITE_RATE),
-    ]).then(([sprite, buffer]) => {
+    ])).then(([sprite, buffer]) => {
       if (!sprite || !buffer) return null;
       if (spriteMatches(sprite, buffer.duration)) return { sprite, buffer };
       mismatched = true;
@@ -118,12 +121,18 @@ export class Commentary {
   private loading = false;
   private pending: { key: LineKey; score?: readonly [number, number]; at: number } | null = null;
 
-  /** Start fetching the clips. Silent until they arrive; nothing breaks if they never do. say() calls it again while they are missing. */
-  load(): void {
-    if (this.buffer || this.disposed || this.loading) return;
+  /**
+   * Start fetching the clips (straight away if `now`, else once the player
+   * model is in). Silent until they arrive; nothing breaks if they never do.
+   * say() calls it again, with `now`, while they are missing.
+   */
+  load(now = false): void {
+    if (this.buffer || this.disposed) return;
     if (loaded) { this.sprite = loaded.sprite; this.buffer = loaded.buffer; return; }
+    const download = preloadCommentary(now);
+    if (this.loading) return;
     this.loading = true;
-    void preloadCommentary().then((got) => {
+    void download.then((got) => {
       this.loading = false;
       if (this.disposed || !got) return;
       this.sprite = got.sprite;
@@ -139,7 +148,7 @@ export class Commentary {
   say(key: LineKey, score?: readonly [number, number]): void {
     if (this.disposed || !getSettings().commentary) return;
     // Commentary switched on mid-match, or the clips failed to arrive: pick them up or fetch them now.
-    this.load();
+    this.load(true);
     if (!this.sprite || !this.buffer) {
       if (priority(key) >= 2) this.pending = { key, score: score && [score[0], score[1]], at: performance.now() };
       return;
