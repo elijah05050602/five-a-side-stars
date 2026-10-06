@@ -5,6 +5,7 @@ import { contrastColour, numberTexture, playerAtlas } from './playerAtlas';
 import { faceTexture, type Expression } from './playerFace';
 import { ProceduralPlayerModel } from './ProceduralPlayerModel';
 import { DIVE_AIR_SHARE, DRIBBLE_STRIDE } from './sim';
+import { graphicsProfile } from './graphics';
 import { addOutline, addSkinnedOutline, smoothOutlineNormals, toonMaterial } from './toon';
 
 /** Models are drawn bigger than their physical size so the kids read clearly from the camera. */
@@ -216,7 +217,7 @@ export class PlayerModel {
       m.castShadow = true;
       m.receiveShadow = false;
       m.frustumCulled = false;
-      addSkinnedOutline(m, 0.028);
+      if (graphicsProfile().playerOutlines) addSkinnedOutline(m, 0.028);
     }
     for (const name of ['Head_plain', 'Head_short', 'Head_long'] as Head[]) {
       const node = rig.getObjectByName(name);

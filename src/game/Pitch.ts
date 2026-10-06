@@ -5,6 +5,10 @@ export interface PitchDims {
   length: number; width: number; goalWidth: number; goalHeight: number; goalDepth: number;
   /** Grass between the lines and the boards (0 = boards on the lines, as in training). */
   runoffSide?: number; runoffEnd?: number;
+  /** Graphics: let the stands, trees and boards cast shadows (default true). */
+  sceneryShadows?: boolean;
+  /** Graphics: shiny physically based grass and boards; false uses a cheaper matt material (default true). */
+  pbr?: boolean;
 }
 
 /** Where the four floodlight towers stand: [x, y, z] of each lamp head. */
@@ -81,8 +85,11 @@ function boardTexture(): THREE.CanvasTexture {
 export function buildPitch(d: PitchDims): THREE.Group {
   const g = new THREE.Group();
   const L = d.length, W = d.width;
+  // The grass fills most of the screen, so on Low it skips the costly physically based lighting.
+  const surface = (opts: { map: THREE.Texture; roughness: number }): THREE.MeshStandardMaterial | THREE.MeshLambertMaterial =>
+    d.pbr === false ? new THREE.MeshLambertMaterial({ map: opts.map }) : new THREE.MeshStandardMaterial(opts);
 
-  const grass = new THREE.Mesh(new THREE.PlaneGeometry(L + 6, W + 6), new THREE.MeshStandardMaterial({ map: grassTexture(12, '#3cc47c', '#33b36f'), roughness: 1 }));
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(L + 6, W + 6), surface({ map: grassTexture(12, '#3cc47c', '#33b36f'), roughness: 1 }));
   grass.rotation.x = -Math.PI / 2;
   grass.receiveShadow = true;
   grass.userData.grass = true;
@@ -92,7 +99,7 @@ export function buildPitch(d: PitchDims): THREE.Group {
   const apronTex = grassTexture(1, '#259a60', '#259a60');
   apronTex.wrapS = apronTex.wrapT = THREE.RepeatWrapping;
   apronTex.repeat.set(6, 6);
-  const apron = new THREE.Mesh(new THREE.PlaneGeometry(L + 60, W + 60), new THREE.MeshStandardMaterial({ map: apronTex, roughness: 1 }));
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(L + 60, W + 60), surface({ map: apronTex, roughness: 1 }));
   apron.rotation.x = -Math.PI / 2;
   apron.position.y = -0.01;
   apron.receiveShadow = true;
@@ -151,7 +158,7 @@ export function buildPitch(d: PitchDims): THREE.Group {
     const tex = boardTex.clone();
     tex.needsUpdate = true;
     tex.repeat.set(Math.max(1, Math.round(Math.max(lx, lz) / 8)), 1);
-    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7 });
+    const mat = surface({ map: tex, roughness: 0.7 });
     const m = new THREE.Mesh(new THREE.BoxGeometry(lx, boardH, lz), mat);
     m.position.set(x, boardH / 2, z);
     m.castShadow = true;
@@ -207,7 +214,7 @@ export function buildPitch(d: PitchDims): THREE.Group {
     trunk.position.y = 0.5;
     addOutline(trunk, 0.03);
     const size = 1.1 + (i % 3) * 0.3;
-    const top = new THREE.Mesh(new THREE.SphereGeometry(size, 10, 8), leafMats[i % 3].clone());
+    const top = new THREE.Mesh(new THREE.SphereGeometry(size, 10, 8), leafMats[i % 3]);
     top.position.y = 1.0 + size * 0.9;
     top.castShadow = true;
     top.userData.leaves = true;
@@ -221,6 +228,8 @@ export function buildPitch(d: PitchDims): THREE.Group {
     tree.position.set(Math.cos(a) * (L / 2 + 8 + (i % 3) * 1.5), 0, Math.sin(a) * (W / 2 + 7 + ((i * 2) % 3) + far));
     g.add(tree);
   }
+  // Only the players and the ball then draw into the shadow map, which is most of its cost saved.
+  if (d.sceneryShadows === false) g.traverse((o) => { o.castShadow = false; });
   return g;
 }
 

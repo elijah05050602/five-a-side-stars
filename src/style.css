@@ -621,6 +621,9 @@ body.reduce-motion .bind.is-listening { animation: none; }
 .cam-label { font-weight: 700; color: var(--navy); }
 .cam-picker .pill { min-height: 38px; padding: 4px 14px; font-size: 15px; }
 .controls-card .cam-row { justify-content: flex-start; }
+.gfx-row { margin-top: 6px; }
+.gfx-row .pill { min-height: 38px; padding: 4px 14px; font-size: 15px; }
+.gfx-note { margin: 4px 0 0; font-size: 13px; text-align: center; }
 /* Keep the HUD out from under notches, rounded corners and the home bar. */
 .joystick { left: calc(24px + env(safe-area-inset-left)); bottom: calc(24px + env(safe-area-inset-bottom)); }
 .action-buttons { right: calc(20px + env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom)); }

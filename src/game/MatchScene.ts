@@ -17,6 +17,8 @@ import { Commentary } from './voice';
 import { music } from './music';
 import { getSettings } from '../data/storage';
 import { TutorialCoach } from './tutorial';
+import { batchStatic } from './batchStatic';
+import { graphicsProfile, type GraphicsProfile } from './graphics';
 
 export type SimMode = NonNullable<SimConfig['mode']>;
 
@@ -90,6 +92,13 @@ export class MatchScene {
   /** First-time tutorial coach and its glowing star, when this is the tutorial. */
   private readonly coach: TutorialCoach | null = null;
   private readonly marker = new THREE.Group();
+  private readonly gfx: GraphicsProfile;
+  /** Current render resolution; Auto graphics nudges it down while frames are slow. */
+  private pixelRatio: number;
+  private prCeiling = Infinity;
+  private lastAdaptUp = false;
+  private frameMs = 16.7;
+  private adaptTimer = -3;
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, config: SimConfig, private readonly onFinish: (r: MatchResult) => void, private readonly onQuit: () => void, options: SceneOptions = {}) {
     this.sim = new MatchSim(config);
@@ -105,10 +114,12 @@ export class MatchScene {
     this.input = new Input(twoPlayer ? controls.keys.p1 : controls.keys.solo, twoPlayer ? 0 : 'any', controls.pad);
     this.input2 = twoPlayer ? new Input(controls.keys.p2, 1, controls.pad) : null;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    // Tablets and phones get a lower pixel ratio and a smaller shadow map so the game stays smooth.
-    const touch = window.matchMedia('(pointer: coarse)').matches;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, touch ? 1.5 : 2));
-    this.renderer.shadowMap.enabled = true;
+    // The Graphics setting (Auto picks Low on phones) trades detail for a smooth frame rate.
+    const gfx = graphicsProfile();
+    this.gfx = gfx;
+    this.pixelRatio = Math.min(window.devicePixelRatio, gfx.maxPixelRatio);
+    this.renderer.setPixelRatio(this.pixelRatio);
+    this.renderer.shadowMap.enabled = gfx.shadowMap;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -119,8 +130,8 @@ export class MatchScene {
 
     const sun = new THREE.DirectionalLight(0xffffff, 2.2);
     sun.position.set(-12, 30, 18);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(touch ? 1024 : 2048, touch ? 1024 : 2048);
+    sun.castShadow = gfx.shadowMap;
+    sun.shadow.mapSize.set(gfx.shadowSize, gfx.shadowSize);
     const sc = sun.shadow.camera;
     sc.left = -this.sim.length / 2 - 6; sc.right = this.sim.length / 2 + 6;
     sc.top = this.sim.width / 2 + 6; sc.bottom = -this.sim.width / 2 - 6;
@@ -132,13 +143,14 @@ export class MatchScene {
     this.scene.add(sun, rim, new THREE.HemisphereLight(0xdff3ff, 0x3b7f4e, 1.25));
 
     const runoff = this.sim.mode === 'match';
-    const pitch = buildPitch({ length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth, runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0 });
+    const pitch = buildPitch({ sceneryShadows: gfx.sceneryShadows, pbr: gfx.pbrGround, length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth, runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0 });
     this.scene.add(pitch);
     this.extras = pitchExtras(pitch);
-    this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, touch);
+    this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, gfx);
+    if (gfx.batchScenery) batchStatic(pitch, [...this.extras.nets.map((n) => n.group), this.extras.scoreboard.group]);
     this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, 0, 0);
 
-    this.crowd = new Crowd(this.sim, { touch });
+    this.crowd = new Crowd(this.sim, { lite: gfx.liteCrowd });
     this.crowd.setConditions({ night: this.conditions.time === 'night', weather: this.conditions.weather });
     this.scene.add(this.crowd.group);
     // Dev builds only: lets a test script poke the crowd (window.__crowd.onEvent({ type: 'goal', side: 0 })).
@@ -198,6 +210,36 @@ export class MatchScene {
     this.last = performance.now();
     this.sfx.start(this.conditions.weather);
     this.raf = requestAnimationFrame(this.frame);
+  }
+
+  /**
+   * Auto graphics: when frames keep running slow (under about 40 a second), draw at a lower
+   * resolution; when they stay smooth for a while, step back up, but never above a level that
+   * was already too slow.
+   */
+  private adapt(ms: number): void {
+    if (!this.gfx.adaptive || ms > 250 || document.hidden) return;
+    this.frameMs += (ms - this.frameMs) * 0.05;
+    this.adaptTimer += ms / 1000;
+    const slow = this.frameMs > 25, smooth = this.frameMs < 19;
+    if (!slow && !smooth) { this.adaptTimer = Math.min(this.adaptTimer, 0); return; }
+    if (slow && this.adaptTimer > 2 && this.pixelRatio > this.gfx.minPixelRatio + 0.01) {
+      if (this.lastAdaptUp) this.prCeiling = this.pixelRatio - 0.01;
+      this.setPixelRatio(Math.max(this.gfx.minPixelRatio, this.pixelRatio - 0.15), false);
+    } else if (smooth && this.adaptTimer > 8) {
+      const next = Math.min(window.devicePixelRatio, this.gfx.maxPixelRatio, this.pixelRatio + 0.1);
+      if (next > this.pixelRatio + 0.01 && next <= this.prCeiling) this.setPixelRatio(next, true);
+      else this.adaptTimer = 0;
+    }
+  }
+
+  private setPixelRatio(pr: number, up: boolean): void {
+    this.pixelRatio = pr;
+    this.lastAdaptUp = up;
+    this.adaptTimer = 0;
+    this.frameMs = 16.7;
+    this.renderer.setPixelRatio(pr);
+    this.resize();
   }
 
   /** Snapshot the sim for the replay buffer (about three seconds kept). */
@@ -306,6 +348,7 @@ export class MatchScene {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.frame);
     const dt = Math.min(0.1, (now - this.last) / 1000);
+    this.adapt(now - this.last);
     this.last = now;
     if (this.sim.shootout && this.upfield && (this.sim.shootout.taking === 0 ? 1 : -1) !== this.upDir) this.updateView();
     const input = this.toPitch(this.input.poll());

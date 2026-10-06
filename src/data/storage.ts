@@ -4,12 +4,13 @@ import type { CareerState } from '../game/career';
 import { ensureSkills, fitSkills } from './skills';
 import type { Progress } from './progress';
 import type { Team } from './types';
+import type { GraphicsQuality } from '../game/graphics';
 
 const KEY = 'five-a-side-stars:v1';
 
 interface SaveFile {
   teams: Team[];
-  settings: { sound: boolean; music: boolean; commentary: boolean; musicVolume: number; voiceVolume: number; sfxVolume: number; reduceMotion: boolean; halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard'; tutorialDone: boolean };
+  settings: { sound: boolean; music: boolean; commentary: boolean; musicVolume: number; voiceVolume: number; sfxVolume: number; reduceMotion: boolean; halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard'; tutorialDone: boolean; graphics: GraphicsQuality };
   progress?: Progress;
   league?: LeagueState | null;
   career?: CareerState | null;
@@ -19,7 +20,7 @@ let cache: SaveFile | null = null;
 
 function fresh(): SaveFile {
   const prefersLess = typeof window !== 'undefined' && 'matchMedia' in window && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  return { teams: starterTeams(), settings: { sound: true, music: true, commentary: true, musicVolume: 0.7, voiceVolume: 1, sfxVolume: 1, reduceMotion: prefersLess, halfLengthSeconds: 120, difficulty: 'normal', tutorialDone: false } };
+  return { teams: starterTeams(), settings: { sound: true, music: true, commentary: true, musicVolume: 0.7, voiceVolume: 1, sfxVolume: 1, reduceMotion: prefersLess, halfLengthSeconds: 120, difficulty: 'normal', tutorialDone: false, graphics: 'auto' } };
 }
 
 export function loadSave(): SaveFile {
