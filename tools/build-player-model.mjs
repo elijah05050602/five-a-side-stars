@@ -15,7 +15,9 @@ import fs from 'fs';
 const PACK = process.env.KAYKIT || '/tmp/kaykit/addons/kaykit_character_pack_adventures/Characters/gltf';
 const OUT = process.argv[2] || 'player.glb';
 const REMAP = process.argv[3] === 'remap';
-const KEEP_ANIMS = ['Idle', 'Walking_A', 'Running_A', 'Running_B', 'Cheer', 'Unarmed_Melee_Attack_Kick', 'Dodge_Left', 'Dodge_Right', 'Hit_A', 'Jump_Full_Short'];
+const KEEP_ANIMS = ['Idle', 'Walking_A', 'Running_B', 'Cheer', 'Unarmed_Melee_Attack_Kick', 'Dodge_Left', 'Dodge_Right', 'Hit_A',
+  // Keeper catches and throws, headers, a sad sit-down and calling for the ball.
+  'Throw', 'PickUp', 'Jump_Full_Long', 'Sit_Floor_Down', 'Spellcast_Raise'];
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 
 const doc = await io.read(`${PACK}/Rogue.glb`);

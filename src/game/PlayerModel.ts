@@ -4,7 +4,7 @@ import { cloneRig, loadPlayerAsset, playerAssetNow, type PlayerAsset } from './p
 import { contrastColour, numberTexture, playerAtlas } from './playerAtlas';
 import { faceTexture, type Expression } from './playerFace';
 import { ProceduralPlayerModel } from './ProceduralPlayerModel';
-import { DIVE_AIR_SHARE, DRIBBLE_STRIDE } from './sim';
+import { DIVE_AIR_SHARE, DRIBBLE_STRIDE, SLIDE_AT, type Celebration, type MoveKind } from './sim';
 import { graphicsProfile } from './graphics';
 import { addOutline, addSkinnedOutline, smoothOutlineNormals, toonMaterial } from './toon';
 
@@ -45,6 +45,14 @@ export interface AnimState {
   /** Step-over skill move: 1 as it starts, fading to 0; stepoverDir is which way the feint goes (-1 or 1). */
   stepover?: number;
   stepoverDir?: number;
+  /** While a goal stands: this kid's celebration (or gloom), and seconds since the goal. */
+  celebrate?: Celebration | null;
+  celebrateT?: number;
+  /** A one-off move (keeper handling, a header, a first touch off a high ball): 1 as it starts, fading to 0. */
+  move?: MoveKind | null;
+  moveAnim?: number;
+  /** A keeper with the ball in their hands, held out in front. */
+  hold?: boolean;
 }
 
 export const IDLE_STATE: AnimState = { speed: 0, kick: 0, dive: 0, diveDir: 1, stun: 0, tackle: 0, scale: 1, wobble: 0, mood: 'neutral', gazeX: 0, gazeY: 0, cheer: false };
@@ -80,6 +88,8 @@ const LYING_LIFT = 0.3;
 const TAP_TIME = 0.2;
 /** Time in Running_B when the right foot swings through under the body. */
 const RUN_RIGHT_THROUGH = 0.35;
+/** How far a kneeling kid sinks (the shin length), as a share of their scale. */
+const KNEEL_DROP = 0.17;
 
 const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -144,6 +154,16 @@ export class PlayerModel {
   private legR: THREE.Object3D | null = null;
   private armL: THREE.Object3D | null = null;
   private armR: THREE.Object3D | null = null;
+  private foreL: THREE.Object3D | null = null;
+  private foreR: THREE.Object3D | null = null;
+  private shinL: THREE.Object3D | null = null;
+  private shinR: THREE.Object3D | null = null;
+  private chest: THREE.Object3D | null = null;
+  private headBone: THREE.Object3D | null = null;
+  private lastMove: MoveKind | null = null;
+  private lastMoveAnim = 0;
+  private sitting = false;
+  private readonly rest: [THREE.Object3D, THREE.Quaternion][] = [];
   private root: THREE.Object3D | null = null;
   private readonly rootRest = new THREE.Vector3();
   private slide = 0;
@@ -247,6 +267,14 @@ export class PlayerModel {
     this.legR = rig.getObjectByName('upperlegr') ?? null;
     this.armL = rig.getObjectByName('upperarml') ?? null;
     this.armR = rig.getObjectByName('upperarmr') ?? null;
+    this.foreL = rig.getObjectByName('lowerarml') ?? null;
+    this.foreR = rig.getObjectByName('lowerarmr') ?? null;
+    this.shinL = rig.getObjectByName('lowerlegl') ?? null;
+    this.shinR = rig.getObjectByName('lowerlegr') ?? null;
+    this.chest = rig.getObjectByName('chest') ?? null;
+    this.headBone = rig.getObjectByName('head') ?? null;
+    // Bones the procedural layer bends. Clips that do not key one would let the bends pile up, so each frame starts from rest.
+    for (const b of [this.legL, this.legR, this.shinL, this.shinR, this.armL, this.armR, this.foreL, this.foreR, this.chest, this.headBone]) if (b) this.rest.push([b, b.quaternion.clone()]);
     this.root = rig.getObjectByName('root') ?? null;
     if (this.root) this.rootRest.copy(this.root.position);
     this.setFacing(this.facing);
@@ -397,7 +425,14 @@ export class PlayerModel {
     // Step-over: a quick dodge one way over the ball (the clip is played fast so it reads as a feint).
     if (stepping && !this.wasStepping && !kicking && !diving) this.startOneShot((st.stepoverDir ?? 1) > 0 ? 'Dodge_Right' : 'Dodge_Left', 2.6, false);
     this.wasStepping = stepping;
-    if (realKick) { this.tap = 0; this.startOneShot('Unarmed_Melee_Attack_Kick', 2.4, false); }
+    // Keeper handling and headers: a scoop off the grass, an overarm throw; a header is a jump, not a kick.
+    const move = (st.moveAnim ?? 0) > 0 ? st.move ?? null : null;
+    const moveStart = move !== null && (move !== this.lastMove || (st.moveAnim ?? 0) > this.lastMoveAnim + 0.05);
+    this.lastMove = move; this.lastMoveAnim = st.moveAnim ?? 0;
+    const mu = move ? 1 - (st.moveAnim ?? 0) : 0; // 0 → 1 through the move
+    if (moveStart && move === 'scoop') this.startOneShot('PickUp', 2.6, false, 0.15);
+    if (moveStart && move === 'throw') this.startOneShot('Throw', 1.8, false, 0.3);
+    if (realKick && move !== 'header' && move !== 'throw') { this.tap = 0; this.startOneShot('Unarmed_Melee_Attack_Kick', 2.4, false); }
     const recovering = (st.recover ?? 0) > 0;
     const committed = diving || (this.isKeeper && recovering);
     if (diving && !this.wasDiving) {
@@ -408,6 +443,13 @@ export class PlayerModel {
     if (!committed && this.wasCommitted && this.oneShot) this.endOneShot();
     this.wasCommitted = committed;
     if (stunned && !this.wasStunned && !diving) this.startOneShot('Hit_A', 1.4, false);
+    // Goal celebrations: the beaten keeper sits down on the grass.
+    const cel = st.celebrate ?? null, ct = st.celebrateT ?? 0;
+    const kneeling = cel === 'slide' && ct >= SLIDE_AT;
+    const sitting = cel === 'sit' && ct > 0.6 && !committed;
+    if (sitting && !this.sitting) this.startOneShot('Sit_Floor_Down', 1.3, true);
+    if (!sitting && this.sitting && this.oneShot && !committed) this.endOneShot();
+    this.sitting = sitting;
     if (tackling && !this.wasTackling && !kicking) this.slide = 0.42;
     this.wasDiving = diving; this.wasStunned = stunned; this.wasTackling = tackling;
 
@@ -415,13 +457,14 @@ export class PlayerModel {
     // A keeper moving across their goal shuffles side-on in the ready stance instead of running.
     const strafe = this.isKeeper && !committed ? (st.strafe ?? 0) : 0;
     const shuffling = Math.abs(strafe) / scale > 0.35 && Math.abs(strafe) > st.speed * 0.6;
-    const want: Loco = st.cheer && norm < 0.8 ? 'cheer' : norm < 0.35 || shuffling ? 'idle' : norm < 2.4 ? 'walk' : 'run';
+    const want: Loco = kneeling ? 'idle' : st.cheer && norm < 0.8 ? 'cheer' : norm < 0.35 || shuffling ? 'idle' : norm < 2.4 ? 'walk' : 'run';
     if (want !== this.loco) this.switchLoco(want);
     const run = this.actions.get('Running_B'), walk = this.actions.get('Walking_A');
     // Running_B swings each arm with the opposite leg; its stride is longer than Running_A's, so it plays a little faster.
     // Dribbling locks the stride to the touches: one touch per step, each with the foot coming through.
     if (run) run.setEffectiveTimeScale(st.dribble ? run.getClip().duration / (2 * DRIBBLE_STRIDE) : THREE.MathUtils.clamp(norm / 3.4, 1, 2.4));
-    if (walk) walk.setEffectiveTimeScale(THREE.MathUtils.clamp(norm / 1.8, 0.7, 1.5));
+    if (walk) walk.setEffectiveTimeScale(THREE.MathUtils.clamp(norm / 1.8, cel === 'slump' ? 0.5 : 0.7, 1.5));
+    for (const [b, q] of this.rest) b.quaternion.copy(q);
     this.mixer.update(dt);
 
     // Procedural layer on top of the clips. Body axes: x forward, y up, z the kid's right.
@@ -467,6 +510,33 @@ export class PlayerModel {
       lift += LYING_LIFT * scale * (1 - up);
       pitch = -0.35 * Math.sin(u * Math.PI);
     }
+    const k = Math.sin(mu * Math.PI); // in and out over a move
+    if (move === 'header' || move === 'headTrap') {
+      // Spring up to meet it: lean back, then snap the head through the ball.
+      lift += (move === 'header' ? 0.24 : 0.12) * scale * k;
+      pitch += (move === 'header' ? 0.5 : 0.3) * Math.sin(2 * Math.PI * mu) * k;
+    } else if (move === 'diveHeader') {
+      // Launch forward flat out to meet it, land on the belly, then push back up.
+      const flat = mu < 0.3 ? Math.sin((mu / 0.3) * Math.PI * 0.5) : mu < 0.72 ? 1 : 1 - (mu - 0.72) / 0.28;
+      const fly = mu < 0.3 ? Math.sin((mu / 0.3) * Math.PI) : 0;
+      pitch = -1.4 * flat;
+      lift += (0.18 * fly + 0.2 * flat) * scale;
+      roll = 0;
+    } else if (move === 'chestTrap') pitch += 0.35 * k; // chest out, leaning back to cushion it
+    else if (move === 'thighTrap') pitch -= 0.08 * k;
+    else if (move === 'catchHigh') lift += 0.22 * scale * k;
+    else if (move === 'catchChest') { lift -= 0.05 * scale * k; pitch -= 0.15 * k; }
+    else if (move === 'punt') pitch += 0.2 * k;
+    let kneel = 0;
+    if (kneeling) {
+      // Knee slide: drop onto the knees, lean back and slide to a stop.
+      kneel = Math.min(1, (ct - SLIDE_AT) / 0.2);
+      lift -= KNEEL_DROP * scale * kneel;
+      pitch += 0.3 * kneel;
+      roll = 0;
+    }
+    if (cel === 'plane') roll += 0.28 * Math.sin(ct * 3.2); // banking like an aeroplane
+    if (cel === 'slump') pitch -= 0.08;
     this.body.rotation.x = roll;
     this.body.rotation.z = pitch;
     this.body.position.y = lift;
@@ -498,6 +568,84 @@ export class PlayerModel {
       this.swingSideways(this.legL, open);
       this.swingSideways(this.legR, -open);
     }
+    this.poseExtras(st, move, mu, k, kneel, ct);
+  }
+
+  /** Bone-level touches for celebrations, a keeper's handling, headers and first touches, on top of the clips. */
+  private poseExtras(st: AnimState, move: MoveKind | null, mu: number, k: number, kneel: number, ct: number): void {
+    if (!this.armL || !this.armR) return;
+    const cel = st.celebrate ?? null;
+    if (kneel > 0) {
+      // Thighs upright under the body, shins flat on the grass behind, arms flung up to the sky.
+      if (this.legL && this.legR) { this.swingAbout(this.legL, 0, 0, 1, -0.3 * kneel); this.swingAbout(this.legR, 0, 0, 1, -0.3 * kneel); }
+      if (this.shinL && this.shinR) { this.swingAbout(this.shinL, 0, 0, 1, -1.55 * kneel); this.swingAbout(this.shinR, 0, 0, 1, -1.55 * kneel); }
+      const wave = 0.15 * Math.sin(ct * 9);
+      this.aimArms(0.15, 1, 0.9 + wave, 0.15, 1, 0.9 + wave, kneel);
+      return;
+    }
+    if (cel === 'plane') { this.aimArms(0, 0.1, 1, 0, 0.1, 1, 1); return; }
+    if (cel === 'slump') {
+      // Heads down, shoulders slumped, arms dangling.
+      if (this.chest) this.swingAbout(this.chest, 0, 0, 1, -0.3);
+      if (this.headBone) this.swingAbout(this.headBone, 0, 0, 1, -0.35);
+      this.aimArms(0.05, -1, 0.12, 0.05, -1, 0.12, 0.8);
+      return;
+    }
+    if (move === 'header' || move === 'chestTrap' || move === 'headTrap') { this.aimArms(0.1, -0.2, 1, 0.1, -0.2, 1, k * (move === 'headTrap' ? 0.5 : 0.8)); return; }
+    if (move === 'diveHeader') { this.aimArms(1, -0.3, 0.5, 1, -0.3, 0.5, k); return; }
+    if (move === 'thighTrap') {
+      // Knee up to cushion it, arms out for balance.
+      if (this.legR) this.swingAbout(this.legR, 0, 0, 1, 1.5 * k);
+      if (this.shinR) this.swingAbout(this.shinR, 0, 0, 1, -1.6 * k);
+      this.aimArms(0, -0.4, 1, 0, -0.4, 1, 0.6 * k);
+      return;
+    }
+    // A keeper's hands: up high for a lob, then the ball is clutched to the chest until it is thrown or kicked.
+    if (move === 'catchHigh') {
+      const up = mu < 0.45 ? 1 : 1 - (mu - 0.45) / 0.55;
+      this.aimArms(0.5, 1, 0.55, 0.5, 1, 0.55, up);
+      if (up < 1) this.holdArms(1 - up);
+      return;
+    }
+    if (move === 'scoop' || move === 'throw' || move === 'punt') return; // the clip has the arms
+    const hold = move === 'catchChest' ? Math.min(1, mu * 4) : st.hold ? 1 : 0;
+    if (hold > 0) this.holdArms(hold);
+  }
+
+  /** Arms out in front, wrapped round the ball. */
+  private holdArms(w: number): void {
+    this.aimArms(0.75, -0.6, 0.3, 0.75, -0.6, 0.3, w);
+    // Forearms forward and in, hands either side of the ball.
+    this.aimBone(this.foreL, 1, 0, 0.35, w);
+    this.aimBone(this.foreR, 1, 0, -0.35, w);
+  }
+
+  /**
+   * Point both arms (upper arm and forearm together) along body-frame directions: x forward, y up,
+   * and `outL`/`outR` how far out to that side. w blends from the clip's pose (0) to the aimed pose (1).
+   */
+  private aimArms(fl: number, ul: number, outL: number, fr: number, ur: number, outR: number, w: number): void {
+    if (w <= 0) return;
+    this.aimBone(this.armL, fl, ul, -outL, w);
+    this.aimBone(this.foreL, fl, ul, -outL, w);
+    this.aimBone(this.armR, fr, ur, outR, w);
+    this.aimBone(this.foreR, fr, ur, outR, w);
+  }
+
+  private readonly tmpV = new THREE.Vector3();
+  private readonly tmpV2 = new THREE.Vector3();
+  /** Turn a bone so it points (towards its first child) along a body-frame direction, blended by w. */
+  private aimBone(bone: THREE.Object3D | null, x: number, y: number, z: number, w: number): void {
+    const child = bone?.children[0];
+    const parent = bone?.parent;
+    if (!bone || !child || !parent || w <= 0) return;
+    const from = child.getWorldPosition(this.tmpV).sub(bone.getWorldPosition(this.tmpV2)).normalize();
+    const to = this.tmpAxis.set(x, y, z).normalize().applyQuaternion(this.body.getWorldQuaternion(this.tmpQ));
+    const d = this.tmpQ.setFromUnitVectors(from, to);
+    if (w < 1) d.slerp(this.tmpQ2.identity(), 1 - w);
+    // world delta d becomes local: q' = Pinv * d * P * q
+    const p = parent.getWorldQuaternion(this.tmpQ3);
+    bone.quaternion.premultiply(this.tmpQ4.copy(p).premultiply(d).premultiply(p.invert()));
   }
 
   /**
@@ -520,6 +668,8 @@ export class PlayerModel {
 
   private readonly tmpQ = new THREE.Quaternion();
   private readonly tmpQ2 = new THREE.Quaternion();
+  private readonly tmpQ3 = new THREE.Quaternion();
+  private readonly tmpQ4 = new THREE.Quaternion();
   private readonly tmpAxis = new THREE.Vector3();
 
   /** Swing a limb out sideways (about the kid's forward axis; positive lifts a left limb, negative a right one) on top of the clip. */
@@ -534,7 +684,6 @@ export class PlayerModel {
   private swingAbout(bone: THREE.Object3D, ax: number, ay: number, az: number, angle: number): void {
     const parent = bone.parent;
     if (!parent) return;
-    this.body.updateWorldMatrix(true, true);
     // The body-frame axis in world space, then in the bone's parent space.
     this.tmpAxis.set(ax, ay, az).applyQuaternion(this.body.getWorldQuaternion(this.tmpQ));
     this.tmpAxis.applyQuaternion(parent.getWorldQuaternion(this.tmpQ2).invert()).normalize();
@@ -555,11 +704,13 @@ export class PlayerModel {
     if (from && from !== to) from.fadeOut(fade);
   }
 
-  private startOneShot(name: string, timeScale: number, hold: boolean): void {
+  /** Play a clip once over the run; `from` skips the first part of it (a share of its length). */
+  private startOneShot(name: string, timeScale: number, hold: boolean, from = 0): void {
     const a = this.actions.get(name);
     if (!a) return;
     if (this.oneShot && this.oneShot !== a) this.oneShot.fadeOut(0.05);
     a.reset().setLoop(THREE.LoopOnce, 1).setEffectiveTimeScale(timeScale).setEffectiveWeight(1);
+    a.time = a.getClip().duration * from;
     a.clampWhenFinished = hold;
     a.fadeIn(0.06).play();
     this.actions.get(this.clipName(this.loco))?.fadeOut(0.06);

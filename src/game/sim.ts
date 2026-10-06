@@ -118,11 +118,22 @@ export interface SimPlayer {
   trickCooldown: number;
   /** Seconds of burst left after a skill move that worked. */
   trickBoost: number;
+  /** While a goal stands: how this kid celebrates it, or takes it badly. */
+  celebrate: Celebration | null;
+  /** A one-off move for the model (a keeper's catch or throw, a header, a first touch off a high ball), 1 fading to 0. */
+  move: MoveKind | null;
+  moveAnim: number;
+  /** A keeper who has the ball in their hands (not at their feet from a team-mate's pass back). */
+  handling: boolean;
   mul: SkillMuls;
   match: PlayerMatchStats;
 }
 
 export type TrickKind = 'stepover' | 'nutmeg';
+/** Goal celebrations: a knee slide or aeroplane run for the scorer, a huddle for the team, and gloom for the other side. */
+export type Celebration = 'slide' | 'plane' | 'huddle' | 'slump' | 'sit';
+/** One-off moves the models act out: keeper handling, headers and first touches off a high ball. */
+export type MoveKind = 'catchHigh' | 'catchChest' | 'scoop' | 'throw' | 'punt' | 'header' | 'diveHeader' | 'headTrap' | 'chestTrap' | 'thighTrap';
 /** Restarts after the ball goes out of play, plus the two the referee gives for fouls. */
 export type SetPieceKind = 'freekick' | 'penalty' | 'corner' | 'throwin' | 'goalkick';
 
@@ -183,6 +194,8 @@ export interface SimEvent {
   player?: Player;
   /** trick: whether it beat the defender. */
   ok?: boolean;
+  /** shot: it was a header. */
+  header?: boolean;
 }
 
 export interface SimConfig {
@@ -223,6 +236,18 @@ export const RUNOFF_END = 1.6;
 export const DRIBBLE_STRIDE = 0.38;
 /** Seconds a kick-off taker may wait before the ball is played to a team-mate for them. */
 const KICKOFF_WAIT = 8;
+/** Seconds a match goal stands before kick-off: the players celebrate, then the camera visits the fans. */
+export const GOAL_HOLD = 6;
+/** When the camera leaves the players' celebration for the fans. */
+export const CROWD_SHOT_AT = 3.4;
+/** Seconds the scorer runs before dropping into a knee slide. */
+export const SLIDE_AT = 1.25;
+/** A header's pace as a share of a shot's. */
+const HEADER_POWER = 0.62;
+/** A high ball above this (times the age scale) is headed rather than chested. */
+const HEAD_HEIGHT = 0.8;
+/** A lower cross than this can still be met with a diving header. */
+const DIVE_HEAD_HEIGHT = 0.35;
 /** A dive lasts 1 / DIVE_RATE seconds: DIVE_AIR seconds of it in the air, the rest lying on the grass. */
 const DIVE_RATE = 2;
 const DIVE_AIR = 0.32;
@@ -306,6 +331,9 @@ export class MatchSim {
   /** Tutorial: the one player the learner controls the whole way through. */
   tutorialHero: SimPlayer | null = null;
   private pressureTimer = 0;
+  /** The kid leading the goal celebration (null when there is none). */
+  celebrator: SimPlayer | null = null;
+  private celebrationSpot: V2 = v();
 
   constructor(readonly config: SimConfig) {
     this.teams = [config.home, config.away];
@@ -334,6 +362,7 @@ export class MatchSim {
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, distanceRun: 0, isKeeper: info.position === 'GK',
           speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
+          celebrate: null, move: null, moveAnim: 0, handling: false,
           mul, match: freshMatchStats(),
         };
         this.players.push(p);
@@ -367,9 +396,11 @@ export class MatchSim {
     const takers = this.teamOf(side).filter((p) => !p.isKeeper);
     const taker = takers[so.results[side].length % takers.length];
     const keeper = this.teamOf((1 - side) as Side).find((p) => p.isKeeper) ?? this.teamOf((1 - side) as Side)[0];
+    this.celebrator = null;
     this.players.forEach((p, i) => {
       p.pos = v(-dir * 2 + (i % 5) * 0.8 * -dir, -3 + (i % 3) * 3);
       p.vel = v(); p.kickCooldown = 0; p.charge = 0; p.diveAnim = 0; p.recover = 0; p.kickAnim = 0; p.penaltyGuess = 0;
+      p.celebrate = null; p.move = null; p.moveAnim = 0; p.handling = false;
     });
     taker.pos = v(spot.x - dir * 0.5, 0);
     taker.facing = side === 0 ? 0 : Math.PI;
@@ -443,6 +474,10 @@ export class MatchSim {
         p.kickAnim = 0;
         p.diveAnim = 0;
         p.recover = 0;
+        p.celebrate = null;
+        p.move = null;
+        p.moveAnim = 0;
+        p.handling = false;
       });
       if (s === side) {
         // The furthest forward stands on the ball, the next just behind.
@@ -455,6 +490,7 @@ export class MatchSim {
     this.phase = this.mode === 'training' ? 'play' : 'kickoff';
     this.phaseTimer = 0;
     this.setPiece = null;
+    this.celebrator = null;
     for (const hs of [0, 1] as Side[]) {
       if (!this.isHuman(hs)) { this.controlledBy[hs] = null; continue; }
       const human = this.teamOf(hs);
@@ -480,8 +516,9 @@ export class MatchSim {
     if (this.phase === 'paused' || this.phase === 'fulltime') return;
     if (this.phase === 'goal') {
       this.phaseTimer += dt;
-      // A match goal holds a little longer so the camera can watch the fans celebrate (MatchScene).
-      if (this.phaseTimer > (this.mode === 'training' ? 1.6 : this.mode === 'match' && !this.shootout ? 4.4 : 3.2)) {
+      this.stepCelebration(dt);
+      // A match goal holds a little longer so the camera can watch the players and then the fans celebrate (MatchScene).
+      if (this.phaseTimer > (this.mode === 'training' ? 1.6 : this.mode === 'match' && !this.shootout ? GOAL_HOLD : 3.2)) {
         if (this.shootout) this.advanceShootout();
         else if (this.mode === 'tutorial') return; // the coach puts the ball back
         else if (this.mode === 'training') this.setupKickoff(this.config.humanSide ?? 0);
@@ -537,6 +574,7 @@ export class MatchSim {
       p.holdTime = this.ball.owner === p ? p.holdTime + dt : 0;
       if (this.controlledBy[p.side] !== p) p.stamina = Math.min(1, p.stamina + dt / 4);
       p.kickAnim = Math.max(0, p.kickAnim - dt * 4);
+      this.tickMove(p, dt);
       this.tickDive(p, dt);
       p.trickAnim = Math.max(0, p.trickAnim - dt * 2.2);
       p.trickBoost = Math.max(0, p.trickBoost - dt);
@@ -593,6 +631,7 @@ export class MatchSim {
     for (const p of this.players) {
       p.kickCooldown = Math.max(0, p.kickCooldown - dt);
       p.kickAnim = Math.max(0, p.kickAnim - dt * 4);
+      this.tickMove(p, dt);
       this.tickDive(p, dt);
       if (this.keeperCommitted(p)) continue;
       const inp = inputs[p.side];
@@ -933,13 +972,17 @@ export class MatchSim {
     const presser = this.nearest(opps, p.pos);
     const mate = this.bestPassTarget(p, null);
     const mateMarked = mate ? dist(this.nearest(opps, mate.pos)?.pos ?? v(99, 99), mate.pos) < 3 : true;
+    const hands = p.handling;
     if (mate && !mateMarked && !pressed) {
       this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z), 1.1);
+      // From the hands it is thrown overarm, dropping a little way out and bouncing on.
+      if (hands) { this.setMove(p, 'throw'); this.ball.vy = 1.2; }
     } else {
       // Big clearance upfield, away from whoever is closest.
       const awayZ = presser ? Math.sign(p.pos.z - presser.pos.z) || 1 : (Math.random() < 0.5 ? -1 : 1);
       const boot = Math.sqrt(p.mul.strength); // Strength: a longer clearance
       this.kick(p, v(dir, awayZ * rand(0.2, 0.6)), this.stats.power * 0.95 * boot, this.stats.power * 0.35 * boot);
+      if (hands) this.setMove(p, 'punt'); // dropped from the hands and volleyed
     }
   }
 
@@ -954,6 +997,90 @@ export class MatchSim {
     p.diveDir = dir;
     const top = this.stats.speed * 1.9 * p.speedMul;
     p.diveSpeed = clamp(need / (DIVE_AIR * 0.6), this.stats.speed * 0.5, top);
+  }
+
+  /** Starts a one-off move for the model to act out. */
+  private setMove(p: SimPlayer, kind: MoveKind): void {
+    p.move = kind;
+    p.moveAnim = 1;
+  }
+
+  private tickMove(p: SimPlayer, dt: number): void {
+    // Catches and throws take about half a second; first touches and headers a little less.
+    p.moveAnim = Math.max(0, p.moveAnim - dt * (p.move === 'diveHeader' ? 1.4 : p.move === 'catchHigh' || p.move === 'throw' || p.move === 'punt' ? 1.9 : 2.6));
+    if (p.moveAnim <= 0) p.move = null;
+  }
+
+  /**
+   * After a goal: the scorer runs off to celebrate (a knee slide or an aeroplane run), team-mates
+   * chase them into a huddle, and the other side trudge back with their heads down while their
+   * keeper sits on the grass. Kick-off puts everyone back, so this never affects play.
+   */
+  private startCelebration(side: Side, scorer: SimPlayer | null): void {
+    const team = this.teamOf(side);
+    const hero = scorer && !scorer.isKeeper ? scorer : this.forwards(team)[0] ?? team[0];
+    this.celebrator = hero ?? null;
+    if (!hero) return;
+    const goalX = this.goalX(side);
+    // A run away from the goal and towards the near touchline, where the camera watches from.
+    const away = norm(v(-Math.sign(goalX) * 0.6, 0.8));
+    const runFor = this.stats.speed * SLIDE_AT;
+    this.celebrationSpot = v(clamp(hero.pos.x + away.x * runFor, -this.length * 0.42, this.length * 0.42), clamp(hero.pos.z + away.z * runFor, -this.width * 0.4, this.width * 0.4));
+    for (const p of this.players) {
+      p.move = null; p.moveAnim = 0; p.handling = false; p.charge = 0;
+      if (p.side === side) p.celebrate = p === hero ? (this.goals.length % 2 ? 'slide' : 'plane') : 'huddle';
+      else p.celebrate = p.isKeeper ? 'sit' : 'slump';
+    }
+  }
+
+  private stepCelebration(dt: number): void {
+    const hero = this.celebrator;
+    if (!hero || this.mode === 'training' || this.mode === 'tutorial') return;
+    const t = this.phaseTimer;
+    const run = this.stats.speed;
+    const spot = this.celebrationSpot;
+    const mates = this.teamOf(hero.side).filter((m) => m !== hero && !m.isKeeper);
+    for (const p of this.players) {
+      this.tickDive(p, dt);
+      if (this.keeperCommitted(p)) { /* a keeper still finishing a dive */ }
+      else if (p === hero && p.celebrate === 'slide') {
+        if (t < SLIDE_AT) this.steer(p, this.towards(p.pos, spot, run * 1.05), 12);
+        else { const k = Math.exp(-2.4 * dt); p.vel = v(p.vel.x * k, p.vel.z * k); } // sliding on the knees, slowing down
+      } else if (p === hero) {
+        // Aeroplane: swoop round the spot in a wide curve, arms out.
+        const to = v(spot.x - p.pos.x, spot.z - p.pos.z);
+        const a = Math.atan2(to.z, to.x) + (len(to) < 3 ? 1.35 : 0.5);
+        this.steer(p, v(Math.cos(a) * run * 0.85, Math.sin(a) * run * 0.85), 6);
+      } else if (p.celebrate === 'huddle' && !p.isKeeper) {
+        // Chase the scorer and pile round them.
+        const i = mates.indexOf(p);
+        const ang = (i / Math.max(1, mates.length)) * Math.PI * 2 + 0.6;
+        const ring = 0.55 * this.stats.scale + 0.35;
+        const target = v(hero.pos.x + Math.cos(ang) * ring, hero.pos.z + Math.sin(ang) * ring);
+        const d = dist(p.pos, target);
+        this.steer(p, d > 0.2 ? this.towards(p.pos, target, Math.min(run * 1.3, d * 4)) : v(), 14);
+        if (d < 1.2) p.facing = Math.atan2(hero.pos.z - p.pos.z, hero.pos.x - p.pos.x);
+      } else if (p.celebrate === 'slump') {
+        // Trudge back towards your own half.
+        const target = v(this.ownGoalX(p.side) * 0.25, p.pos.z * 0.8);
+        const d = dist(p.pos, target);
+        this.steer(p, d > 0.5 && t > 0.5 ? this.towards(p.pos, target, run * 0.22) : v(), 6);
+      } else this.steer(p, v(), 20);
+      p.pos.x += p.vel.x * dt;
+      p.pos.z += p.vel.z * dt;
+      const sp = len(p.vel);
+      if (sp > 0.4 && !p.isKeeper && !(p.celebrate === 'huddle' && dist(p.pos, hero.pos) < 1.4)) {
+        // Face where they are going, turning smoothly (a slider keeps facing the way they slid).
+        const want = Math.atan2(p.vel.z, p.vel.x);
+        const d = Math.atan2(Math.sin(want - p.facing), Math.cos(want - p.facing));
+        p.facing += clamp(d, -8 * dt, 8 * dt);
+      }
+    }
+  }
+
+  private towards(from: V2, to: V2, speed: number): V2 {
+    const n = norm(v(to.x - from.x, to.z - from.z));
+    return v(n.x * speed, n.z * speed);
   }
 
   /** Runs the dive clock, and starts the get-up when a dive ends. */
@@ -1249,7 +1376,8 @@ export class MatchSim {
     if (b.owner) {
       const o = b.owner;
       const speed = len(o.vel);
-      const ahead = 0.3 * this.stats.scale + 0.15;
+      // A keeper holding it has it tucked in at the chest; anyone else has it just ahead of their feet.
+      const ahead = o.isKeeper && o.handling ? 0.42 * this.stats.scale + 0.05 : 0.3 * this.stats.scale + 0.15;
       const feet = v(o.pos.x + Math.cos(o.facing) * ahead, o.pos.z + Math.sin(o.facing) * ahead);
       const toFeet = dist(b.pos, feet);
       // Keepers hold it, set-piece takers and kick-off takers stand on it, and a kid
@@ -1260,7 +1388,9 @@ export class MatchSim {
         b.vel = v((feet.x - b.pos.x) * gain, (feet.z - b.pos.z) * gain);
         b.pos.x += b.vel.x * dt;
         b.pos.z += b.vel.z * dt;
-        b.y = Math.max(0, b.y - 6 * dt);
+        // A keeper with it in their hands holds it to the chest; everyone else has it at their feet.
+        if (o.isKeeper && o.handling) b.y += (this.handHeight() - b.y) * Math.min(1, dt * 14);
+        else b.y = Math.max(0, b.y - 6 * dt);
         b.vy = 0;
         b.spin += len(b.vel) * dt / b.radius;
         return;
@@ -1274,8 +1404,9 @@ export class MatchSim {
       b.vel = v(o.vel.x + (target.x - b.pos.x) * 12, o.vel.z + (target.z - b.pos.z) * 12);
       b.pos.x += b.vel.x * dt;
       b.pos.z += b.vel.z * dt;
-      b.y = Math.max(0, b.y - 6 * dt);
-      b.vy = 0;
+      // Brought down off the chest or thigh, it drops to the feet.
+      if (b.y > 0) { b.vy -= 9.81 * dt; b.y = Math.max(0, b.y + b.vy * dt); }
+      if (b.y <= 0) b.vy = 0;
       b.spin += len(b.vel) * dt / b.radius;
       return;
     }
@@ -1355,6 +1486,7 @@ export class MatchSim {
               b.owner = p;
               b.lastTouch = p;
               b.vel = v(p.vel.x, p.vel.z);
+              if (p.isKeeper) { p.handling = true; this.setMove(p, 'scoop'); }
               o.kickCooldown = 0.4;
               p.holdTime = 0;
               p.think = p.isKeeper ? 0.8 : 0.1;
@@ -1465,6 +1597,9 @@ export class MatchSim {
           return;
         }
       }
+      const sc = this.stats.scale;
+      // A cross met in the air in the box is headed at goal: a leap for a high one, a diving header for one at waist height.
+      if (!best.isKeeper && b.lofted && b.y > DIVE_HEAD_HEIGHT * sc + 0.1 && this.canHead(best)) { this.header(best, b.y < HEAD_HEIGHT * sc + 0.1); return; }
       // A pass that reaches a team-mate counts, and sets up a possible assist.
       const from = b.lastKick;
       if (from && from.side === best.side && from !== best && b.wasPass) { from.match.passes++; b.assist = from; }
@@ -1473,7 +1608,15 @@ export class MatchSim {
       b.receiver = null;
       b.owner = best;
       b.lastTouch = best;
-      b.vy = 0; b.y = 0;
+      if (best.isKeeper) {
+        // Keepers take shots and crosses in their hands (high, at the chest, or scooped off the grass), but a team-mate's pass back stays at their feet.
+        best.handling = !ownPass;
+        if (best.handling) this.setMove(best, b.y > 0.9 * sc + 0.45 ? 'catchHigh' : b.y > 0.25 || ballSpeed > 6 ? 'catchChest' : 'scoop');
+      } else if (b.y > HEAD_HEIGHT * sc + 0.1) this.setMove(best, 'headTrap');
+      else if (b.y > 0.5 * sc + 0.1) this.setMove(best, 'chestTrap');
+      else if (b.y > 0.2 * sc + 0.08) this.setMove(best, 'thighTrap');
+      // The ball drops from wherever it was met (the chest, a thigh) to the feet.
+      b.vy = 0;
       // A controlled first touch: the ball is cushioned to the receiver's pace.
       b.vel = v(best.vel.x, best.vel.z);
       best.touchTimer = 0;
@@ -1488,7 +1631,8 @@ export class MatchSim {
     const n = norm(dir);
     b.owner = null;
     b.vel = v(n.x * speed, n.z * speed);
-    b.vy = loft;
+    // Struck from off the ground (a keeper's punt from the hands): flatter, so it lands where it would have from the grass.
+    b.vy = loft > 0 && b.y > 0.05 ? loft - b.y / ((2 * loft) / 9.81) : loft;
     b.lastTouch = p;
     b.lastKick = p;
     b.flightId++;
@@ -1498,6 +1642,7 @@ export class MatchSim {
     b.lofted = false;
     p.kickCooldown = 0.35;
     p.kickAnim = 1;
+    p.handling = false;
     p.facing = Math.atan2(n.z, n.x);
     if (this.phase === 'kickoff') this.phase = 'play';
     if (this.phase === 'setpiece') { this.phase = 'play'; this.setPiece = null; }
@@ -1547,6 +1692,8 @@ export class MatchSim {
 
   /** How high a throw-in is held: just over the kid's head. */
   private throwHeight(): number { return 1.75 * this.stats.scale + 0.15; }
+  /** Where a keeper holds a caught ball, out in front of their tummy (the models are drawn 1.35 times life size, with big heads). */
+  private handHeight(): number { return 0.8 * this.stats.scale; }
 
   /** True once the whole ball is over a touchline, or over a goal line anywhere but into the goal. */
   isOut(): boolean {
@@ -1845,6 +1992,33 @@ export class MatchSim {
     this.events.push({ type: 'shot', side: p.side, player: p.info });
   }
 
+  /** A high ball dropping in the box is met with a header at goal. */
+  private canHead(p: SimPlayer): boolean {
+    if (this.phase !== 'play' || this.mode === 'tutorial') return false;
+    const gx = this.goalX(p.side);
+    const toGoal = Math.abs(gx - p.pos.x);
+    return toGoal < this.width * 0.26 + 2.2 * this.stats.scale + 1 && toGoal > 0.8 && Math.abs(p.pos.z) < this.goalWidth * 1.5;
+  }
+
+  /** A header: weaker than a shot and aimed down, but straight off the cross with no time for the keeper to set. */
+  private header(p: SimPlayer, diving: boolean): void {
+    const b = this.ball;
+    const from = b.lastKick;
+    if (from && from.side === p.side && from !== p && b.wasPass) { from.match.passes++; b.assist = from; }
+    else b.assist = null;
+    const goal = v(this.goalX(p.side), 0);
+    const spread = ((1 - this.stats.control) * 0.9 + 0.35) * p.mul.spread;
+    const targetZ = clamp(rand(-this.goalWidth / 2, this.goalWidth / 2) * 0.7 + rand(-spread, spread), -this.goalWidth * 0.6, this.goalWidth * 0.6);
+    const power = this.stats.power * HEADER_POWER * Math.sqrt(p.mul.power) * (0.9 + 0.2 * p.mul.strength);
+    const dir = v(goal.x - p.pos.x, targetZ - p.pos.z);
+    p.facing = Math.atan2(dir.z, dir.x); // turn the head (and the body after it) towards goal
+    this.kick(p, dir, power, -0.6);
+    p.kickCooldown = 0.5;
+    this.setMove(p, diving ? 'diveHeader' : 'header');
+    p.match.shots++;
+    this.events.push({ type: 'shot', side: p.side, player: p.info, header: true });
+  }
+
   pass(p: SimPlayer, aim: V2 | null, speedMul = 1, backToKeeper = true): void {
     const mate = this.bestPassTarget(p, aim, false, backToKeeper);
     let dir: V2;
@@ -1959,6 +2133,7 @@ export class MatchSim {
       this.phase = 'goal';
       this.phaseTimer = 0;
       b.owner = null;
+      if (this.mode === 'match' || this.shootout) this.startCelebration(scoringSide, ownGoal ? null : touch);
       this.events.push({ type: 'goal', side: scoringSide, player: scorer });
     }
   }
