@@ -26,5 +26,17 @@ describe('controls', () => {
     expect(c.keys.p1.lob).toEqual(['KeyV', 'KeyR']);
     expect(c.pad.lob).toEqual([]);
   });
-});
 
+  it('keeps a saved camera choice, and an older save or a broken one falls back to the normal camera', () => {
+    const c = defaultControls();
+    c.camera = { height: 'sky', portrait: 'side' };
+    saveControls(c);
+    expect(getControls().camera).toEqual({ height: 'sky', portrait: 'side' });
+    const old = defaultControls() as unknown as Record<string, unknown>;
+    delete old.camera;
+    saveControls(old as unknown as ControlsConfig);
+    expect(getControls().camera).toEqual({ height: 'mid', portrait: 'upfield' });
+    saveControls({ ...defaultControls(), camera: { height: 'moon', portrait: 'diagonal' } } as unknown as ControlsConfig);
+    expect(getControls().camera).toEqual({ height: 'mid', portrait: 'upfield' });
+  });
+});

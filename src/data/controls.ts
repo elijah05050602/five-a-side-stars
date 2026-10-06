@@ -19,10 +19,27 @@ export interface TouchLayout {
   opacity: number;
 }
 
+/** How high the match camera sits above the action. */
+export type CameraHeight = 'low' | 'mid' | 'high' | 'sky';
+export const CAMERA_HEIGHTS: CameraHeight[] = ['low', 'mid', 'high', 'sky'];
+export const CAMERA_HEIGHT_LABELS: Record<CameraHeight, string> = { low: 'Low', mid: 'Normal', high: 'High', sky: 'Sky' };
+/** Distance multiplier for each height: higher sees more of the pitch, lower sees the players up close. */
+export const CAMERA_HEIGHT_SCALE: Record<CameraHeight, number> = { low: 0.8, mid: 1, high: 1.25, sky: 1.55 };
+
+/** Which way the pitch runs on a screen taller than it is wide (a phone held upright). */
+export type PortraitView = 'upfield' | 'side';
+export const PORTRAIT_VIEW_LABELS: Record<PortraitView, string> = { upfield: 'Up the pitch', side: 'Side on' };
+
+export interface CameraView {
+  height: CameraHeight;
+  portrait: PortraitView;
+}
+
 export interface ControlsConfig {
   keys: Record<KeyProfile, KeyMap>;
   pad: PadMap;
   touch: TouchLayout;
+  camera: CameraView;
 }
 
 /** Slots shown per action on the controls screen. */
@@ -60,6 +77,7 @@ export function defaultControls(): ControlsConfig {
       shoot: [1], pass: [0], lob: [3], sprint: [7, 5], switch: [4], trick: [2], pause: [9],
     },
     touch: { size: 1, leftHanded: false, opacity: 1 },
+    camera: { height: 'mid', portrait: 'upfield' },
   };
 }
 
@@ -99,6 +117,11 @@ function sanitise(raw: unknown): ControlsConfig {
     if (typeof t.size === 'number') d.touch.size = Math.min(1.4, Math.max(0.8, t.size));
     if (typeof t.opacity === 'number') d.touch.opacity = Math.min(1, Math.max(0.4, t.opacity));
     d.touch.leftHanded = t.leftHanded === true;
+  }
+  const cam = r.camera;
+  if (cam) {
+    if (CAMERA_HEIGHTS.includes(cam.height)) d.camera.height = cam.height;
+    if (cam.portrait === 'upfield' || cam.portrait === 'side') d.camera.portrait = cam.portrait;
   }
   return d;
 }
