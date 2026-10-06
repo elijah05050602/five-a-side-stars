@@ -51,13 +51,29 @@ class FakeSource extends FakeNode {
 
 class FakeOscillator extends FakeSource { type = 'sine'; readonly frequency = new FakeParam(440); readonly detune = new FakeParam(0); }
 
-/** Decodes a fake MP3 (its bytes say how long it is and how many channels it has) at a context's rate; a length of 0 fails. */
-function fakeDecode(rate: number, data: ArrayBuffer, ok: (b: FakeBuffer) => void, fail?: (e: unknown) => void): Promise<FakeBuffer> {
+/** A fake MP3: the bytes just say how long it is and how many channels it has. */
+function fakeMp3(seconds: number, channels = 1): ArrayBuffer { return new Float64Array([seconds, channels]).buffer; }
+
+/**
+ * Decodes a fake MP3 at a context's rate. Like the real decodeAudioData it
+ * takes the bytes (they cannot be decoded twice); a length of 0 fails.
+ */
+function fakeDecode(rate: number, data: ArrayBuffer, ok: (b: FakeBuffer) => void, fail?: (e: unknown) => void, broken = false): Promise<FakeBuffer> {
   const [seconds, channels] = new Float64Array(data);
-  if (!(seconds > 0)) { fail?.(new Error('bad audio')); return Promise.reject(new Error('bad audio')); }
+  structuredClone(data, { transfer: [data] });
+  if (broken || !(seconds > 0)) { fail?.(new Error('bad audio')); return Promise.reject(new Error('bad audio')); }
   const b = new FakeBuffer(channels, Math.round(seconds * rate), rate);
   ok(b);
   return Promise.resolve(b);
+}
+
+/** An OfflineAudioContext, only used for decoding at a chosen rate. */
+class FakeOffline {
+  static made: number[] = [];
+  static broken = false;
+  readonly sampleRate: number;
+  constructor(_channels: number, _length: number, rate: number) { this.sampleRate = rate; FakeOffline.made.push(rate); }
+  decodeAudioData(data: ArrayBuffer, ok: (b: FakeBuffer) => void, fail?: (e: unknown) => void): Promise<FakeBuffer> { return fakeDecode(this.sampleRate, data, ok, fail, FakeOffline.broken); }
 }
 
 class FakeContext extends EventTarget {
@@ -92,6 +108,18 @@ let win: EventTarget & { [name: string]: unknown };
 let files: Record<string, () => unknown>;
 let fetched: string[];
 
+/** A few cues in the shape of public/audio/commentary.json. */
+const CLIPS: Record<string, [number, number][]> = {
+  kickoffFirst: [[1, 2]], quietAttack: [[4, 1.5], [6, 1.5]], save: [[8, 1.5], [10, 1.5]], foul: [[12, 2]],
+  goalOpener: [[15, 3]], fulltimeWin: [[19, 2.5]], score_1_0: [[22, 1]], score_2_1: [[24, 1]],
+};
+
+/** Serve the commentary index and a recording of the given length. */
+function serveSprite(seconds = 705.24): void {
+  files['audio/commentary.json'] = () => ({ voice: 'test', clips: CLIPS });
+  files['audio/commentary.mp3'] = () => fakeMp3(seconds);
+}
+
 function setHidden(hidden: boolean): void {
   doc.hidden = hidden;
   doc.visibilityState = hidden ? 'hidden' : 'visible';
@@ -104,9 +132,12 @@ async function settle(): Promise<void> { for (let i = 0; i < 10; i++) await Prom
 beforeEach(() => {
   vi.resetModules();
   FakeContext.made = [];
+  FakeOffline.made = [];
+  FakeOffline.broken = false;
   // Timers are looked up when called, so vi.useFakeTimers() reaches them too.
   win = Object.assign(new EventTarget(), {
     AudioContext: FakeContext,
+    OfflineAudioContext: FakeOffline,
     setTimeout: (fn: () => void, ms?: number) => setTimeout(fn, ms),
     clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
   } as { [name: string]: unknown });
@@ -234,6 +265,51 @@ describe('audio context and the page', () => {
     c.dispatchEvent(new Event('statechange'));
     win.dispatchEvent(new Event('click'));
     expect(c.state).toBe('running');
+  });
+});
+
+describe('decoding', () => {
+  it('decodes the 24 kHz commentary at its own rate: half the memory of the context rate', async () => {
+    serveSprite();
+    const { preloadCommentary } = await import('../game/voice');
+    const b = (await preloadCommentary())!.buffer as unknown as FakeBuffer;
+    expect(FakeOffline.made).toEqual([24000]);
+    expect(b.sampleRate).toBe(24000);
+    expect(b.duration).toBeCloseTo(705.24, 2);
+    // 32-bit samples: about 68 MB, where the 48 kHz context would have made about 135 MB.
+    expect((b.length * b.numberOfChannels * 4) / 1e6).toBeCloseTo(67.7, 1);
+  });
+
+  it('decodes music at the context rate as before', async () => {
+    files['audio/music-home.mp3'] = () => fakeMp3(61, 2);
+    const { loadAudio } = await import('../game/audio');
+    const b = (await loadAudio('audio/music-home.mp3')) as unknown as FakeBuffer;
+    expect(b.sampleRate).toBe(48000);
+    expect(FakeOffline.made).toEqual([]);
+  });
+
+  it('falls back to the main context where an offline context at 24 kHz cannot be made (old Safari)', async () => {
+    serveSprite();
+    win.OfflineAudioContext = undefined;
+    win.webkitOfflineAudioContext = class { constructor() { throw new DOMException('sample rate not supported', 'NotSupportedError'); } };
+    const { preloadCommentary } = await import('../game/voice');
+    expect(((await preloadCommentary())!.buffer as unknown as FakeBuffer).sampleRate).toBe(48000);
+  });
+
+  it('falls back to the main context where there is no offline context at all', async () => {
+    serveSprite();
+    win.OfflineAudioContext = undefined;
+    const { preloadCommentary } = await import('../game/voice');
+    expect(((await preloadCommentary())!.buffer as unknown as FakeBuffer).sampleRate).toBe(48000);
+  });
+
+  it('decodes a copy with the main context if the offline decode fails', async () => {
+    serveSprite();
+    FakeOffline.broken = true;
+    const { preloadCommentary } = await import('../game/voice');
+    expect(FakeOffline.made).toEqual([]);
+    expect(((await preloadCommentary())!.buffer as unknown as FakeBuffer).sampleRate).toBe(48000);
+    expect(FakeOffline.made).toEqual([24000]);
   });
 });
 

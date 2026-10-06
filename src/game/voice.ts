@@ -4,7 +4,7 @@ import type { LineKey } from './commentary';
 
 /**
  * The spoken commentator. Every clip lives in one small audio sprite
- * (public/audio/commentary.mp3, recorded by tools/audio/build_commentary.py)
+ * (public/audio/commentary.mp3, built by tools/audio/split_elevenlabs.py)
  * with an index of where each line starts. Clips are generic ("What a save!")
  * so they suit any team; the ticker still shows the full line with names.
  * After a goal, at half time and at full time a score call follows ("It's two,
@@ -41,6 +41,13 @@ export const FALLBACK: Partial<Record<LineKey, LineKey>> = {
   goalHeader: 'goalLead', goalComeback: 'goalEqualiser', goalTurnaround: 'goalLead', goalTapIn: 'goalLead', missSitter: 'missWide',
 };
 
+/**
+ * The sprite's own sample rate (SR in tools/audio/split_elevenlabs.py). Decoded
+ * at this rate rather than the context's, its 705 s take about 68 MB instead
+ * of 124 MB at 44.1 kHz or 135 MB at 48 kHz.
+ */
+const SPRITE_RATE = 24000;
+
 let spritePromise: Promise<{ sprite: Sprite; buffer: AudioBuffer } | null> | null = null;
 
 /** Fetch the clips (once). Called on the first tap so the opening kick-off line is ready in time. */
@@ -49,7 +56,7 @@ export function preloadCommentary(): Promise<{ sprite: Sprite; buffer: AudioBuff
   if (!spritePromise) {
     spritePromise = Promise.all([
       fetch(`${import.meta.env.BASE_URL}audio/commentary.json`).then((r) => (r.ok ? (r.json() as Promise<Sprite>) : null)).catch(() => null),
-      loadAudio('audio/commentary.mp3'),
+      loadAudio('audio/commentary.mp3', SPRITE_RATE),
     ]).then(([sprite, buffer]) => (sprite && buffer ? { sprite, buffer } : null));
     void spritePromise.then((got) => { if (!got) spritePromise = null; });
   }

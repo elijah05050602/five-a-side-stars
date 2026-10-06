@@ -183,19 +183,51 @@ export function applyVolumes(): void {
   if (!soundOn()) quietTimer = window.setTimeout(() => { if (!soundOn()) { sleep(); setSession('auto'); } }, 400);
 }
 
-/** Fetch and decode a file from public/ once; resolves null if it cannot be loaded or played. */
-export function loadAudio(path: string): Promise<AudioBuffer | null> {
+/**
+ * Fetch and decode a file from public/ once; resolves null if it cannot be
+ * loaded or played. `rate` is for a file recorded below the context's rate:
+ * see decode().
+ */
+export function loadAudio(path: string, rate?: number): Promise<AudioBuffer | null> {
   let p = buffers.get(path);
   if (!p) {
     const c = audioContext();
     if (!c) return Promise.resolve(null);
     p = fetch(`${import.meta.env.BASE_URL}${path}`)
       .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.statusText))))
-      .then((data) => new Promise<AudioBuffer>((resolve, reject) => { void c.decodeAudioData(data, resolve, reject); }))
+      .then((data) => decode(c, data, rate))
       .catch(() => { buffers.delete(path); return null; });
     buffers.set(path, p);
   }
   return p;
+}
+
+/**
+ * decodeAudioData turns a file into 32-bit samples at its context's rate (44.1
+ * or 48 kHz), which for a file recorded lower is mostly wasted memory: the
+ * 24 kHz commentary would take about 135 MB at 48 kHz. Given `rate`, the file
+ * is decoded by an offline context at that rate instead, and playback
+ * resamples it on the fly. Browsers that cannot do that (old Safari only makes
+ * offline contexts from 44.1 kHz up) decode with the main context as before.
+ */
+function decode(c: AudioContext, data: ArrayBuffer, rate?: number): Promise<AudioBuffer> {
+  const Offline = window.OfflineAudioContext || (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext }).webkitOfflineAudioContext;
+  if (rate && rate < c.sampleRate && Offline) {
+    try {
+      const offline = new Offline(1, 1, rate);
+      // Decoding takes the bytes, so keep a copy for the main context in case this way fails.
+      const copy = data.slice(0);
+      return decodeWith(offline, data).catch(() => decodeWith(c, copy));
+    } catch { /* no offline context at this rate */ }
+  }
+  return decodeWith(c, data);
+}
+
+function decodeWith(c: BaseAudioContext, data: ArrayBuffer): Promise<AudioBuffer> {
+  return new Promise<AudioBuffer>((resolve, reject) => {
+    // Old Safari only calls back; newer browsers also return a promise, which would report the failure a second time.
+    (c.decodeAudioData(data, resolve, reject) as Promise<AudioBuffer> | undefined)?.catch(() => undefined);
+  });
 }
 
 /** Two seconds of white noise, shared by the crowd, rain, drums and ball thumps. */
