@@ -10,6 +10,12 @@ import { preloadCommentary } from './game/voice';
 import { loadPlayerAsset } from './game/playerAsset';
 import { renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
 
+// Straight away rather than on 'load': the service worker then stores every file of the game while
+// this first visit is still open, so one visit is enough to play offline.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => { /* offline play is a bonus, not a requirement */ });
+}
+
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLElement;
 let match: MatchScene | null = null;
@@ -22,9 +28,6 @@ loadPlayerAsset().catch(() => { /* PlayerModel falls back to the procedural kid 
 unlockAudio(() => { music.start(); void preloadCommentary(); });
 // Fetch the home theme behind the loading screen so it starts on the very first tap.
 music.preload('home');
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => { /* offline play is a bonus, not a requirement */ }); });
-}
 
 const router: Router = {
   go(screen: Screen) {
