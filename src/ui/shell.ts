@@ -1,4 +1,4 @@
-import { getLeague, getSettings, updateSettings } from '../data/storage';
+import { cupInProgress, getLeague, getSettings, updateSettings } from '../data/storage';
 import { music } from '../game/music';
 import { applyVolumes } from '../game/audio';
 import { esc } from './hud';
@@ -56,7 +56,7 @@ export function wireShell(root: HTMLElement, router: Router): void {
     switch (b.dataset.nav as ShellTab | 'parents' | 'controls') {
       case 'lobby': return router.go({ name: 'menu' });
       case 'squad': return router.go({ name: 'teams' });
-      case 'cup': return router.go({ name: 'setup', mode: 'tournament' });
+      case 'cup': return router.go(cupInProgress() ? { name: 'tournament' } : { name: 'setup', mode: 'tournament' });
       case 'league': return router.go(getLeague() ? { name: 'league' } : { name: 'setup', mode: 'league' });
       case 'album': return router.go({ name: 'album' });
       case 'parents': return router.go({ name: 'parents' });

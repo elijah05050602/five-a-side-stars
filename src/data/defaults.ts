@@ -31,10 +31,9 @@ export function randomPlayerName(): string {
 }
 
 export function shortCode(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  let code = '';
-  if (words.length >= 2) code = words.map((w) => w[0]).join('').slice(0, 3);
-  else code = (words[0] ?? 'TM').slice(0, 3);
+  // Letters and digits only, counted by character: an emoji in the name would be cut in half on the scoreboard.
+  const words = name.trim().split(/\s+/).map((w) => Array.from(w).filter((c) => /[\p{L}\p{N}]/u.test(c))).filter((w) => w.length > 0);
+  const code = words.length >= 2 ? words.slice(0, 3).map((w) => w[0]).join('') : (words[0] ?? ['T', 'M']).slice(0, 3).join('');
   return code.toUpperCase().padEnd(3, 'X');
 }
 

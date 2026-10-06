@@ -3,7 +3,7 @@ import { soundSettings, wireSoundSettings } from './soundSettings';
 import { graphicsSettings, wireGraphicsSettings } from './graphicsSettings';
 import { applyVolumes } from '../game/audio';
 import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode } from '../data/defaults';
-import { deleteTeam, getCareer, getLeague, getSettings, getTeam, getTeams, resetAll, saveTeam, setCareer, setLeague, updateSettings } from '../data/storage';
+import { cupInProgress, deleteTeam, exportSave, getCareer, getLeague, getSettings, getTeam, getTeams, getTournament, hasBackup, importSave, requestPersistentStorage, resetAll, restoreBackup, saveTeam, setCareer, setLeague, setTournament, updateSettings, type MotionChoice } from '../data/storage';
 import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, POSITIONS, POSITION_LABELS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type Difficulty, type FormationId, type HairStyle, type Kit, type Position, type SkillKey, type Special, type Team } from '../data/types';
 import { STAR_BUDGET, STAR_CAP, fitSkills, randomSkills, skillKeys, skillLabel, starsLeft, starsText, totalStars } from '../data/skills';
 import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, advanceCareer, applyCareerMatch, careerAge, careerSeasonOutcome, careerSeasonOver, createCareer, playerOfTheMatch, seasonName, statRows, type GrowthEvent } from '../game/career';
@@ -16,8 +16,9 @@ import { contrastColour } from '../game/playerAtlas';
 import type { MatchResult, SimMode } from '../game/MatchScene';
 import { WEATHER_CHOICES, type WeatherChoice } from '../game/Weather';
 import { STICKERS, getProgress, lockedIcons, recordCareer, recordSeason, recordTrophy, unlockedIcons, type Sticker } from '../data/progress';
-import { TIERS, applyLeagueResult, computeTable, createLeague, nextFixture, nextSeason, seasonOutcome, seasonOver, tierInfo, yourPosition } from '../game/league';
-import { applyResult, createTournament, currentFixture, humanStillIn, teamById, type Fixture, type TournamentState } from '../game/tournament';
+import { TIERS, applyLeagueResult, computeTable, createLeague, nextFixture, nextSeason, roundJobs, seasonOutcome, seasonOver, tierInfo, yourPosition } from '../game/league';
+import { applyResult, createTournament, cupAheadRequest, currentFixture, humanStillIn, teamById, type Fixture, type TournamentState } from '../game/tournament';
+import { inBackground, type CupAhead, type SimOutcome } from '../game/background';
 import { esc } from './hud';
 import { badgeSvg, kitChip } from './kitPreview';
 import { KitPreview3D } from './preview3d';
@@ -28,8 +29,9 @@ import { music } from '../game/music';
 import { applyMotionSetting } from './motion';
 import pkg from '../../package.json';
 import { dock, pageHead, shellBar, wireShell, type ShellTab } from './shell';
-import { controlsSentence } from '../data/controls';
+import { controlsSentence, resetControls } from '../data/controls';
 import { renderControls } from './controlsScreen';
+import { colourName } from './colourNames';
 
 export interface StartOptions {
   home: Team;
@@ -62,8 +64,9 @@ export type Screen =
   | { name: 'teams' }
   | { name: 'builder'; teamId?: string }
   | { name: 'setup'; homeId?: string; mode?: SetupMode }
-  | { name: 'results'; result: MatchResult; stickers?: Sticker[]; tournament?: TournamentState; league?: boolean; career?: boolean }
-  | { name: 'tournament'; state: TournamentState }
+  | { name: 'results'; result: MatchResult; summary: ResultSummary; tournament?: TournamentState; league?: boolean; career?: boolean }
+  /** The cup in the save when no state is given. */
+  | { name: 'tournament'; state?: TournamentState }
   | { name: 'league' }
   | { name: 'career' }
   | { name: 'album' }
@@ -72,12 +75,32 @@ export type Screen =
   | { name: 'club' };
 
 let cleanup: (() => void) | null = null;
+/** Set by a screen with unsaved changes: returns false to stay put. */
+let leaveGuard: (() => boolean) | null = null;
 
-export function renderScreen(root: HTMLElement, screen: Screen, router: Router): void {
+/** Tear down the current screen (its window listeners included). Matches call this before they start. */
+export function leaveScreen(): void {
   cleanup?.();
   cleanup = null;
-  currentRouter = router;
   onEscape = null;
+  leaveGuard = null;
+}
+
+/** False when the current screen has unsaved changes and the player chose to stay. */
+export function canLeaveScreen(): boolean {
+  return !leaveGuard || leaveGuard();
+}
+
+/** The phone's Back button: do what the screen's own back button does. False when there is nowhere to go back to. */
+export function goBack(): boolean {
+  if (!onEscape) return false;
+  onEscape();
+  return true;
+}
+
+export function renderScreen(root: HTMLElement, screen: Screen, router: Router): void {
+  leaveScreen();
+  currentRouter = router;
   root.innerHTML = '';
   root.className = 'screen-root';
   switch (screen.name) {
@@ -85,8 +108,12 @@ export function renderScreen(root: HTMLElement, screen: Screen, router: Router):
     case 'teams': return renderTeams(root, router);
     case 'builder': return renderBuilder(root, router, screen.teamId);
     case 'setup': return renderSetup(root, router, screen.homeId, screen.mode ?? 'match');
-    case 'results': return renderResults(root, router, screen.result, screen.stickers ?? [], screen.tournament, screen.league, screen.career);
-    case 'tournament': return renderTournament(root, router, screen.state);
+    case 'results': return renderResults(root, router, screen.result, screen.summary, screen.tournament, screen.league, screen.career);
+    case 'tournament': {
+      const state = screen.state ?? getTournament();
+      if (!state) return router.go({ name: 'setup', mode: 'tournament' });
+      return renderTournament(root, router, state);
+    }
     case 'league': return renderLeague(root, router);
     case 'career': return renderCareer(root, router);
     case 'album': return renderAlbum(root, router);
@@ -98,14 +125,41 @@ export function renderScreen(root: HTMLElement, screen: Screen, router: Router):
 
 let currentRouter: Router;
 let onEscape: (() => void) | null = null;
-window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && onEscape && !document.body.classList.contains('in-match')) { e.preventDefault(); onEscape(); } });
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !onEscape || document.body.classList.contains('in-match')) return;
+  e.preventDefault();
+  // Esc in a text box just leaves the box, so a half-typed name is not thrown away with the screen.
+  const t = e.target as HTMLElement | null;
+  if (t && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || t.isContentEditable)) { t.blur(); return; }
+  onEscape();
+});
 
 function topBar(title: string, tab: ShellTab = 'none', backLabel = 'Lobby', extra = ''): string {
   return shellBar(tab) + pageHead(title, backLabel, extra);
 }
 
+/** aria-pressed for a pill, tile or swatch that shows the current choice. */
+const pressed = (on: boolean): string => `aria-pressed="${on}"`;
+
+const BADGE_SHAPE_LABELS: Record<BadgeShape, string> = { shield: 'Shield', circle: 'Circle', diamond: 'Diamond', hex: 'Hexagon' };
+
+/** A selector that finds the same control again after a redraw: its id, or its data attributes. */
+function focusKey(el: Element | null): string | null {
+  if (!(el instanceof HTMLElement || el instanceof SVGElement) || !el.closest('#ui')) return null;
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  const attrs = [...el.attributes].filter((a) => a.name.startsWith('data-')).map((a) => `[${a.name}="${CSS.escape(a.value)}"]`).join('');
+  return attrs ? `${el.tagName.toLowerCase()}${attrs}` : null;
+}
+
+/** Put keyboard focus back on the control the player was using before a redraw. */
+function restoreFocus(root: HTMLElement, key: string | null): void {
+  if (!key) return;
+  root.querySelector<HTMLElement | SVGElement>(key)?.focus({ preventScroll: true });
+}
+
 function wire(root: HTMLElement, back: () => void): void {
-  root.querySelector('[data-back]')?.addEventListener('click', back);
+  // The heading's back pill and any "Done" button at the bottom do the same thing.
+  root.querySelectorAll('[data-back]').forEach((b) => b.addEventListener('click', back));
   wireShell(root, currentRouter);
   onEscape = back;
 }
@@ -115,6 +169,7 @@ function wire(root: HTMLElement, back: () => void): void {
 function renderMenu(root: HTMLElement, router: Router): void {
   const league = getLeague();
   const career = getCareer();
+  const cup = cupInProgress();
   const progress = getProgress();
   const teams = getTeams();
   const hasKeyboard = window.matchMedia('(pointer: fine)').matches;
@@ -139,7 +194,7 @@ function renderMenu(root: HTMLElement, router: Router): void {
             <span class="launcher-go">KICK OFF ⚽</span>
           </button>
           <div class="portal-grid">
-            <button class="portal portal-gold" id="m-cup"><span class="portal-icon">🏆</span><span class="portal-text"><small>Four-team cup</small><strong>TOURNAMENT</strong><span>Two semis and a final</span></span></button>
+            <button class="portal portal-gold" id="m-cup"><span class="portal-icon">🏆</span><span class="portal-text"><small>Four-team cup</small><strong>TOURNAMENT</strong><span>${cup ? 'Carry on your cup' : 'Two semis and a final'}</span></span></button>
             <button class="portal portal-green" id="m-league"><span class="portal-icon">📋</span><span class="portal-text"><small>${league ? `Tier ${league.tier} · season ${league.season}` : 'Five tiers to climb'}</small><strong>LEAGUE</strong><span>${league ? 'Carry on your season' : 'Start in the Acorn League'}</span></span></button>
             <button class="portal portal-green" id="m-career"><span class="portal-icon">🌱</span><span class="portal-text"><small>${career ? (career.done ? 'Career finished' : `${careerAge(career)} · ${esc(seasonName(career))}`) : 'U5 to U10'}</small><strong>CAREER</strong><span>${career ? 'Carry on growing your team' : 'Grow your players year by year'}</span></span></button>
             <button class="portal portal-sky" id="m-pens"><span class="portal-icon">🥅</span><span class="portal-text"><small>Shoot-out</small><strong>PENALTIES</strong><span>Best of five, then sudden death</span></span></button>
@@ -155,7 +210,7 @@ function renderMenu(root: HTMLElement, router: Router): void {
   wireShell(root, router);
   onEscape = null;
   root.querySelector('#m-play')!.addEventListener('click', () => router.go({ name: 'setup' }));
-  root.querySelector('#m-cup')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'tournament' }));
+  root.querySelector('#m-cup')!.addEventListener('click', () => router.go(cup ? { name: 'tournament' } : { name: 'setup', mode: 'tournament' }));
   root.querySelector('#m-league')!.addEventListener('click', () => router.go(league ? { name: 'league' } : { name: 'setup', mode: 'league' }));
   root.querySelector('#m-career')!.addEventListener('click', () => router.go(career ? { name: 'career' } : { name: 'setup', mode: 'career' }));
   root.querySelector('#m-pens')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'shootout' }));
@@ -164,7 +219,8 @@ function renderMenu(root: HTMLElement, router: Router): void {
   root.querySelector('#m-album')!.addEventListener('click', () => router.go({ name: 'album' }));
   root.querySelector('#m-howto')!.addEventListener('click', () => router.startTutorial());
   root.querySelector('[data-club]')?.addEventListener('click', () => router.go({ name: 'club' }));
-  const onKey = (e: KeyboardEvent) => { if (e.code === 'Space' && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); router.go({ name: 'setup' }); } };
+  // Space kicks off from the lobby (never mid-match: Space is the shoot key there).
+  const onKey = (e: KeyboardEvent) => { if (e.code === 'Space' && !(e.target instanceof HTMLButtonElement) && !document.body.classList.contains('in-match')) { e.preventDefault(); router.go({ name: 'setup' }); } };
   window.addEventListener('keydown', onKey);
   cleanup = () => window.removeEventListener('keydown', onKey);
 }
@@ -263,6 +319,12 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
   const existing = teamId ? getTeam(teamId) : undefined;
   const team: Team = existing ? structuredClone(existing) : makeTeam({ name: randomTeamName(), ageGroup: 'U8' });
   for (const p of team.players) p.skills = fitSkills(p, team.ageGroup, !team.career);
+  // Leaving with unsaved changes asks first (the back pill, Esc, the phone's Back button and the top tabs all come here).
+  const saved = JSON.stringify(team);
+  leaveGuard = () => JSON.stringify(team) === saved || confirm('Leave without saving? Your changes to this team will be lost.');
+  // A career team grows up one age group a year, and a league team plays in its league's age group.
+  const ageLock = team.career ? 'Career teams move up an age group by themselves at the end of each year.'
+    : existing && getLeague()?.teamId === team.id ? 'This team is playing in a league. Leave the league to change its age group.' : '';
   let step: 0 | 1 | 2 = 0;
   let kitTab: 'kit' | 'awayKit' | 'keeperKit' = 'kit';
   /** Which outfield kit the squad step's preview wears. */
@@ -273,6 +335,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
   let preview: KitPreview3D | null = null;
 
   const render = () => {
+    const focused = focusKey(document.activeElement);
     preview?.dispose();
     preview = null;
     const stats = AGE_STATS[team.ageGroup];
@@ -318,16 +381,18 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
       if (!validate()) return;
       team.short = shortCode(team.name);
       saveTeam(team);
+      leaveGuard = null;
       router.go({ name: 'teams' });
     });
     const form = root.querySelector<HTMLElement>('#form')!;
-    if (step === 0) renderClub(form);
+    if (step === 0) renderBadgeStep(form);
     else if (step === 1) renderKits(form);
     else renderSquad(form);
     const canvas = root.querySelector<HTMLCanvasElement>('#preview')!;
     const shownPlayer = step === 2 ? team.players[Math.min(selectedPlayer, team.players.length - 1)] : team.players.find((p) => p.position !== 'GK')!;
     preview = new KitPreview3D(canvas, shownPlayer, shownKitFor(shownPlayer), stats.scale);
     wireKitStrip();
+    restoreFocus(root, focused);
   };
 
   /** The kit the preview wears: the one being edited on the kits step, otherwise the player's own. */
@@ -386,31 +451,34 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     return true;
   };
 
-  const renderClub = (form: HTMLElement) => {
+  const renderBadgeStep = (form: HTMLElement) => {
+    const focused = focusKey(document.activeElement);
     form.innerHTML = `
       <label class="field"><span>Team name</span>
-        <div class="row"><input id="f-name" maxlength="24" value="${esc(team.name)}" /><button class="btn btn-blue btn-icon" id="f-dice" title="Random name">🎲</button></div>
+        <div class="row"><input id="f-name" maxlength="24" value="${esc(team.name)}" /><button class="btn btn-blue btn-icon" id="f-dice" title="Random name" aria-label="Random team name">🎲</button></div>
       </label>
       <div class="field"><span>Age group</span>
-        <div class="pills">${AGE_GROUPS.map((a) => `<button class="pill ${a === team.ageGroup ? 'is-active' : ''}" data-age="${a}">${a}</button>`).join('')}</div>
+        <div class="pills">${AGE_GROUPS.map((a) => `<button class="pill ${a === team.ageGroup ? 'is-active' : ''}" data-age="${a}" ${pressed(a === team.ageGroup)} ${ageLock ? 'disabled' : ''}>${a}</button>`).join('')}</div>
         <p class="muted" id="f-age-blurb">${esc(AGE_STATS[team.ageGroup].label)}: ${esc(AGE_STATS[team.ageGroup].blurb)}</p>
+        ${ageLock ? `<p class="muted small">🔒 ${esc(ageLock)}</p>` : ''}
       </div>
       <div class="field"><span>Club badge</span>
         <div class="badge-row">
-          <div class="pills">${BADGE_SHAPES.map((sh) => `<button class="pill pill-badge ${team.badge.shape === sh ? 'is-active' : ''}" data-shape="${sh}">${badgeSvg({ ...team.badge, shape: sh }, 36)}</button>`).join('')}</div>
+          <div class="pills">${BADGE_SHAPES.map((sh) => `<button class="pill pill-badge ${team.badge.shape === sh ? 'is-active' : ''}" data-shape="${sh}" aria-label="${BADGE_SHAPE_LABELS[sh]} badge" ${pressed(team.badge.shape === sh)}>${badgeSvg({ ...team.badge, shape: sh }, 36)}</button>`).join('')}</div>
         </div>
         <div class="row logo-row">${logoControls(team.badge)}<span class="muted small">${team.badge.image ? 'Your logo fills the badge shape.' : 'Got a real club logo? Upload a picture and it fills the badge. It stays on this device.'}</span></div>
-        ${team.badge.image ? '' : `<div class="icon-grid">${[...BADGE_ICONS, ...unlockedIcons()].map((ic) => `<button class="icon-tile ${team.badge.icon === ic ? 'is-active' : ''}" data-icon="${ic}">${ic}</button>`).join('')}${lockedIcons().map((l) => `<button class="icon-tile is-locked" disabled title="Unlock with the ${esc(l.sticker.name)} sticker: ${esc(l.sticker.how)}">${l.icon}<small>🔒</small></button>`).join('')}</div>
+        ${team.badge.image ? '' : `<div class="icon-grid">${[...BADGE_ICONS, ...unlockedIcons()].map((ic) => `<button class="icon-tile ${team.badge.icon === ic ? 'is-active' : ''}" data-icon="${ic}" ${pressed(team.badge.icon === ic)}>${ic}</button>`).join('')}${lockedIcons().map((l) => `<button class="icon-tile is-locked" disabled title="Unlock with the ${esc(l.sticker.name)} sticker: ${esc(l.sticker.how)}">${l.icon}<small>🔒</small></button>`).join('')}</div>
         <p class="muted small">🔒 icons unlock when you earn stickers.</p>
         <div class="row">
-          <div class="field"><span>Badge colour 1</span><div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${team.badge.colour1 === c ? 'is-active' : ''}" style="background:${c}" data-badge="colour1" data-colour="${c}"></button>`).join('')}</div></div>
+          <div class="field"><span>Badge colour 1</span><div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${team.badge.colour1 === c ? 'is-active' : ''}" style="background:${c}" data-badge="colour1" data-colour="${c}" aria-label="Badge colour 1: ${colourName(c)}" ${pressed(team.badge.colour1 === c)}></button>`).join('')}</div></div>
         </div>
         <div class="row">
-          <div class="field"><span>Badge colour 2</span><div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${team.badge.colour2 === c ? 'is-active' : ''}" style="background:${c}" data-badge="colour2" data-colour="${c}"></button>`).join('')}</div></div>
+          <div class="field"><span>Badge colour 2</span><div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${team.badge.colour2 === c ? 'is-active' : ''}" style="background:${c}" data-badge="colour2" data-colour="${c}" aria-label="Badge colour 2: ${colourName(c)}" ${pressed(team.badge.colour2 === c)}></button>`).join('')}</div></div>
         </div>`}
       </div>`;
-    wireLogoControls(form, () => team.badge, () => { renderClub(form); const el = root.querySelector('#preview-badge'); if (el) el.innerHTML = badgeSvg(team.badge, 64); });
-    const refreshBadge = () => { renderClub(form); const el = root.querySelector('#preview-badge'); if (el) el.innerHTML = badgeSvg(team.badge, 64); const n = form.querySelector<HTMLInputElement>('#f-name'); if (n) n.focus({ preventScroll: true }); };
+    wireLogoControls(form, () => team.badge, () => { renderBadgeStep(form); const el = root.querySelector('#preview-badge'); if (el) el.innerHTML = badgeSvg(team.badge, 64); });
+    // Redraw in place; focus stays on the tapped control (no jumping to the name box, which would pop up a phone keyboard).
+    const refreshBadge = () => { renderBadgeStep(form); const el = root.querySelector('#preview-badge'); if (el) el.innerHTML = badgeSvg(team.badge, 64); };
     form.querySelectorAll<HTMLElement>('[data-shape]').forEach((b) => b.addEventListener('click', () => { team.badge.shape = b.dataset.shape as BadgeShape; refreshBadge(); }));
     form.querySelectorAll<HTMLElement>('[data-icon]').forEach((b) => b.addEventListener('click', () => { team.badge.icon = b.dataset.icon!; refreshBadge(); }));
     form.querySelectorAll<HTMLElement>('[data-badge]').forEach((b) => b.addEventListener('click', () => { team.badge[b.dataset.badge as 'colour1' | 'colour2'] = b.dataset.colour!; refreshBadge(); }));
@@ -418,11 +486,13 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     name.addEventListener('input', () => { team.name = name.value; updateCaption(); });
     form.querySelector('#f-dice')!.addEventListener('click', () => { team.name = randomTeamName(); name.value = team.name; updateCaption(); });
     form.querySelectorAll<HTMLElement>('[data-age]').forEach((b) => b.addEventListener('click', () => {
+      if (ageLock) return;
       team.ageGroup = b.dataset.age as AgeGroup;
       // Stars follow the age group: nothing above its cap, nothing over its budget.
       for (const p of team.players) p.skills = fitSkills(p, team.ageGroup, !team.career);
       render();
     }));
+    restoreFocus(form, focused);
   };
 
   const updateCaption = () => {
@@ -431,10 +501,11 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
   };
 
   const renderKits = (form: HTMLElement) => {
+    const focused = focusKey(document.activeElement);
     const kit = team[kitTab];
     const swatches = (key: keyof Kit, label: string) => `
       <div class="field"><span>${label}</span>
-        <div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${kit[key] === c ? 'is-active' : ''}" style="background:${c}" data-key="${key}" data-colour="${c}" aria-label="${c}"></button>`).join('')}</div>
+        <div class="swatches">${KIT_COLOURS.map((c) => `<button class="swatch ${kit[key] === c ? 'is-active' : ''}" style="background:${c}" data-key="${key}" data-colour="${c}" aria-label="${esc(label)}: ${colourName(c)}" ${pressed(kit[key] === c)}></button>`).join('')}</div>
       </div>`;
     const clashGk = kitTab !== 'awayKit' && kitsClash(team.kit, team.keeperKit);
     const clashAway = kitTab !== 'keeperKit' && kitsClash(team.kit, team.awayKit);
@@ -442,12 +513,12 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     const tileKit = (p: Kit['pattern']): Kit => ({ ...kit, pattern: p, shirt2: kit.shirt2 === kit.shirt ? contrastColour(kit.shirt) : kit.shirt2 });
     form.innerHTML = `
       <div class="tabs">
-        <button class="tab ${kitTab === 'kit' ? 'is-active' : ''}" data-tab="kit">Home kit</button>
-        <button class="tab ${kitTab === 'awayKit' ? 'is-active' : ''}" data-tab="awayKit">Away kit</button>
-        <button class="tab ${kitTab === 'keeperKit' ? 'is-active' : ''}" data-tab="keeperKit">Keeper kit</button>
+        <button class="tab ${kitTab === 'kit' ? 'is-active' : ''}" data-tab="kit" ${pressed(kitTab === 'kit')}>Home kit</button>
+        <button class="tab ${kitTab === 'awayKit' ? 'is-active' : ''}" data-tab="awayKit" ${pressed(kitTab === 'awayKit')}>Away kit</button>
+        <button class="tab ${kitTab === 'keeperKit' ? 'is-active' : ''}" data-tab="keeperKit" ${pressed(kitTab === 'keeperKit')}>Keeper kit</button>
       </div>
       <div class="field"><span>Pattern</span>
-        <div class="patterns">${KIT_PATTERNS.map((p) => `<button class="pattern-tile ${kit.pattern === p ? 'is-active' : ''}" data-pattern="${p}">${kitChip(tileKit(p), 44)}<small>${p}</small></button>`).join('')}</div>
+        <div class="patterns">${KIT_PATTERNS.map((p) => `<button class="pattern-tile ${kit.pattern === p ? 'is-active' : ''}" data-pattern="${p}" ${pressed(kit.pattern === p)}>${kitChip(tileKit(p), 44)}<small>${p}</small></button>`).join('')}</div>
       </div>
       ${swatches('shirt', 'Shirt')}
       ${swatches('shirt2', kit.pattern === 'plain' ? 'Second colour (collar and cuffs)' : 'Second colour (collar and pattern)')}
@@ -463,6 +534,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
       refreshKit(form);
     }));
     form.querySelectorAll<HTMLElement>('[data-colour]').forEach((b) => b.addEventListener('click', () => { (kit as unknown as Record<string, string>)[b.dataset.key!] = b.dataset.colour!; refreshKit(form); }));
+    restoreFocus(form, focused);
   };
 
   const refreshKit = (form: HTMLElement) => {
@@ -475,6 +547,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
   };
 
   const renderSquad = (form: HTMLElement) => {
+    const focused = focusKey(document.activeElement);
     selectedPlayer = Math.min(selectedPlayer, team.players.length - 1);
     const p = team.players[selectedPlayer];
     const taken = new Set(team.players.filter((x) => x !== p).map((x) => x.number));
@@ -484,7 +557,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
       <p class="muted">Squad of ${team.players.length} (5 to 8). Starters: ${starters} of 5. Tap a player to edit them, or drag one onto another to swap them.</p>
       <div class="squad-row squad-row-${team.players.length > 5 ? 'wide' : 'five'}">
         ${team.players.map((pl, i) => `
-          <button class="player-card ${i === selectedPlayer ? 'is-active' : ''} ${pl.starter ? '' : 'is-sub'} ${picked === pl.id ? 'is-picked' : ''}" data-player="${i}" data-swap="${pl.id}" data-swap-label="${pl.number} ${esc(pl.name)}">
+          <button class="player-card ${i === selectedPlayer ? 'is-active' : ''} ${pl.starter ? '' : 'is-sub'} ${picked === pl.id ? 'is-picked' : ''}" data-player="${i}" data-swap="${pl.id}" data-swap-label="${pl.number} ${esc(pl.name)}" ${pressed(i === selectedPlayer)}>
             ${kitChip(pl.position === 'GK' ? team.keeperKit : team[squadKit], 40)}
             <span class="pc-number">${pl.number}</span>
             <span class="pc-name">${esc(pl.name)}</span>
@@ -500,27 +573,27 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
           <label class="toggle"><input type="checkbox" id="p-starter" ${p.starter ? 'checked' : ''}/> Starts the match</label>
           ${team.players.length > 5 ? '<button class="btn btn-ghost" id="p-remove">Remove player</button>' : ''}
         </div>
-        <label class="field"><span>Name</span><div class="row"><input id="p-name" maxlength="14" value="${esc(p.name)}" /><button class="btn btn-blue btn-icon" id="p-dice" title="Random name">🎲</button></div></label>
+        <label class="field"><span>Name</span><div class="row"><input id="p-name" maxlength="14" value="${esc(p.name)}" /><button class="btn btn-blue btn-icon" id="p-dice" title="Random name" aria-label="Random player name">🎲</button></div></label>
         <div class="field"><span>Shirt number</span>
-          <div class="row"><button class="btn btn-ghost btn-icon" id="p-num-down">−</button><input id="p-num" type="number" min="1" max="99" value="${p.number}" /><button class="btn btn-ghost btn-icon" id="p-num-up">+</button></div>
+          <div class="row"><button class="btn btn-ghost btn-icon" id="p-num-down" aria-label="Lower shirt number">−</button><input id="p-num" type="number" min="1" max="99" value="${p.number}" aria-label="Shirt number" /><button class="btn btn-ghost btn-icon" id="p-num-up" aria-label="Higher shirt number">+</button></div>
           <p class="muted">Taken: ${[...taken].sort((a, b) => a - b).join(', ')}</p>
         </div>
         <div class="field"><span>Position</span>
-          <div class="pills">${POSITIONS.map((pos) => `<button class="pill ${p.position === pos ? 'is-active' : ''}" data-pos="${pos}">${POSITION_LABELS[pos]}</button>`).join('')}</div>
+          <div class="pills">${POSITIONS.map((pos) => `<button class="pill ${p.position === pos ? 'is-active' : ''}" data-pos="${pos}" ${pressed(p.position === pos)}>${POSITION_LABELS[pos]}</button>`).join('')}</div>
         </div>
         <div class="field"><span>Can also play <small class="muted">tap every position that suits ${esc(p.name || 'them')}</small></span>
           <div class="pills">${POSITIONS.filter((pos) => pos !== 'GK' && pos !== p.position).map((pos) => `<button class="pill pill-also ${canPlay(p).includes(pos) ? 'is-active' : ''}" data-also="${pos}" aria-pressed="${canPlay(p).includes(pos)}">${canPlay(p).includes(pos) ? '✓ ' : '+ '}${POSITION_LABELS[pos]}</button>`).join('')}</div>
         </div>
         ${skillsField(p, team)}
         <div class="field"><span>Special</span>
-          <div class="pills">${SPECIALS.map((sp) => `<button class="pill ${p.special === sp.id ? 'is-active' : ''}" data-special="${sp.id}" title="${esc(sp.blurb)}">${sp.label}</button>`).join('')}</div>
+          <div class="pills">${SPECIALS.map((sp) => `<button class="pill ${p.special === sp.id ? 'is-active' : ''}" data-special="${sp.id}" title="${esc(sp.blurb)}" ${pressed(p.special === sp.id)}>${sp.label}</button>`).join('')}</div>
         </div>
-        <div class="field"><span>Skin</span><div class="swatches">${SKIN_TONES.map((c) => `<button class="swatch round ${p.skin === c ? 'is-active' : ''}" style="background:${c}" data-skin="${c}"></button>`).join('')}</div></div>
-        <div class="field"><span>Hair style</span><div class="pills">${HAIR_STYLES.map((h) => `<button class="pill ${p.hairStyle === h ? 'is-active' : ''}" data-hairstyle="${h}">${HAIR_STYLE_LABELS[h]}</button>`).join('')}</div></div>
-        <div class="field"><span>Build</span><div class="pills">${BUILDS.map((b) => `<button class="pill ${(p.build ?? 'regular') === b ? 'is-active' : ''}" data-build="${b}">${b[0].toUpperCase() + b.slice(1)}</button>`).join('')}</div></div>
-        <div class="field"><span>Hair colour</span><div class="swatches">${HAIR_COLOURS.map((c) => `<button class="swatch round ${p.hair === c ? 'is-active' : ''}" style="background:${c}" data-hair="${c}"></button>`).join('')}</div></div>
-        <div class="field"><span>Boots</span><div class="swatches">${BOOT_COLOURS.map((c) => `<button class="swatch ${p.boots === c ? 'is-active' : ''}" style="background:${c}" data-boots="${c}"></button>`).join('')}</div>
-          <div class="pills">${BOOT_STYLES.map((b) => `<button class="pill ${(p.bootStyle ?? 'classic') === b ? 'is-active' : ''}" data-bootstyle="${b}">${BOOT_STYLE_LABELS[b]}</button>`).join('')}</div></div>
+        <div class="field"><span>Skin</span><div class="swatches">${SKIN_TONES.map((c) => `<button class="swatch round ${p.skin === c ? 'is-active' : ''}" style="background:${c}" data-skin="${c}" aria-label="Skin: ${colourName(c)}" ${pressed(p.skin === c)}></button>`).join('')}</div></div>
+        <div class="field"><span>Hair style</span><div class="pills">${HAIR_STYLES.map((h) => `<button class="pill ${p.hairStyle === h ? 'is-active' : ''}" data-hairstyle="${h}" ${pressed(p.hairStyle === h)}>${HAIR_STYLE_LABELS[h]}</button>`).join('')}</div></div>
+        <div class="field"><span>Build</span><div class="pills">${BUILDS.map((b) => `<button class="pill ${(p.build ?? 'regular') === b ? 'is-active' : ''}" data-build="${b}" ${pressed((p.build ?? 'regular') === b)}>${b[0].toUpperCase() + b.slice(1)}</button>`).join('')}</div></div>
+        <div class="field"><span>Hair colour</span><div class="swatches">${HAIR_COLOURS.map((c) => `<button class="swatch round ${p.hair === c ? 'is-active' : ''}" style="background:${c}" data-hair="${c}" aria-label="Hair: ${colourName(c)}" ${pressed(p.hair === c)}></button>`).join('')}</div></div>
+        <div class="field"><span>Boots</span><div class="swatches">${BOOT_COLOURS.map((c) => `<button class="swatch ${p.boots === c ? 'is-active' : ''}" style="background:${c}" data-boots="${c}" aria-label="Boots: ${colourName(c)}" ${pressed(p.boots === c)}></button>`).join('')}</div>
+          <div class="pills">${BOOT_STYLES.map((b) => `<button class="pill ${(p.bootStyle ?? 'classic') === b ? 'is-active' : ''}" data-bootstyle="${b}" ${pressed((p.bootStyle ?? 'classic') === b)}>${BOOT_STYLE_LABELS[b]}</button>`).join('')}</div></div>
       </div>`;
     form.querySelector('#p-add')?.addEventListener('click', () => {
       const used = new Set(team.players.map((x) => x.number));
@@ -558,27 +631,34 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
       selectedPlayer = Number(b.dataset.player);
       render();
     }));
-    form.querySelectorAll<SVGGElement>('[data-pick]').forEach((g) => g.addEventListener('click', () => {
-      const id = g.dataset.pick!;
-      if (picked && picked !== id) { swapById(picked, id); return; }
-      picked = picked === id ? null : id;
-      const i = team.players.findIndex((x) => x.id === id);
-      if (i >= 0) selectedPlayer = i;
-      render();
-    }));
+    form.querySelectorAll<SVGGElement>('[data-pick]').forEach((g) => {
+      const pick = () => {
+        const id = g.dataset.pick!;
+        if (picked && picked !== id) { swapById(picked, id); return; }
+        picked = picked === id ? null : id;
+        const i = team.players.findIndex((x) => x.id === id);
+        if (i >= 0) selectedPlayer = i;
+        render();
+      };
+      g.addEventListener('click', pick);
+      // The dots are focusable buttons, so Enter and Space pick them too.
+      g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    });
     const nameEl = form.querySelector<HTMLInputElement>('#p-name')!;
     nameEl.addEventListener('input', () => { p.name = nameEl.value; form.querySelectorAll('.pc-name')[selectedPlayer].textContent = p.name; });
     form.querySelector('#p-dice')!.addEventListener('click', () => { p.name = randomPlayerName(); nameEl.value = p.name; form.querySelectorAll('.pc-name')[selectedPlayer].textContent = p.name; });
     const numEl = form.querySelector<HTMLInputElement>('#p-num')!;
-    const setNum = (n: number) => {
+    const setNum = (n: number, writeBack = true) => {
       n = Math.max(1, Math.min(99, Math.round(n) || 1));
       p.number = n;
-      numEl.value = String(n);
+      if (writeBack) numEl.value = String(n);
       form.querySelectorAll('.pc-number')[selectedPlayer].textContent = String(n);
       numEl.classList.toggle('is-invalid', taken.has(n));
       preview?.setKit(shownKitFor(p), n);
     };
-    numEl.addEventListener('input', () => setNum(Number(numEl.value)));
+    // Follow the typing, but only tidy the box up once it is done, so it can be cleared to type a new number.
+    numEl.addEventListener('input', () => { if (numEl.value.trim() !== '') setNum(Number(numEl.value), false); });
+    numEl.addEventListener('change', () => setNum(Number(numEl.value)));
     form.querySelector('#p-num-down')!.addEventListener('click', () => setNum(p.number - 1));
     form.querySelector('#p-num-up')!.addEventListener('click', () => setNum(p.number + 1));
     form.querySelectorAll<HTMLElement>('[data-also]').forEach((b) => b.addEventListener('click', () => {
@@ -617,6 +697,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     }));
     form.querySelectorAll<HTMLElement>('[data-skin]').forEach((b) => b.addEventListener('click', () => { p.skin = b.dataset.skin!; preview?.setLook(p.skin, p.hair); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-hair]').forEach((b) => b.addEventListener('click', () => { p.hair = b.dataset.hair!; preview?.setLook(p.skin, p.hair); renderSquad(form); }));
+    restoreFocus(form, focused);
   };
 
   /** Swap two players by id (dragged or tapped on the line-up), keeping the open player open. */
@@ -643,7 +724,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     const pickedPlayer = team.players.find((x) => x.id === picked);
     // The pitch is drawn sideways: our goal on the left, attacking to the right.
     const dot = (px: number, py: number, pl: Team['players'][number], cls: string, title: string) =>
-      `<g class="fm-dot ${cls} ${picked === pl.id ? 'is-picked' : ''}" transform="translate(${px.toFixed(1)} ${py.toFixed(1)})" data-swap="${pl.id}" data-swap-label="${pl.number} ${esc(pl.name)}" data-pick="${pl.id}" role="button" tabindex="0"><title>${esc(title)}</title><circle r="11"/><text y="4" text-anchor="middle">${pl.number}</text><text y="22" text-anchor="middle" class="fm-name">${esc(pl.name.slice(0, 9))}</text></g>`;
+      `<g class="fm-dot ${cls} ${picked === pl.id ? 'is-picked' : ''}" transform="translate(${px.toFixed(1)} ${py.toFixed(1)})" data-swap="${pl.id}" data-swap-label="${pl.number} ${esc(pl.name)}" data-pick="${pl.id}" role="button" tabindex="0"><title>${esc(title)}</title><circle r="11"/><text y="4" text-anchor="middle">${pl.number}</text><text y="22" text-anchor="middle" class="fm-name">${esc(Array.from(pl.name).slice(0, 9).join(''))}</text></g>`;
     const onPitch = (x: number, z: number) => [x * 2 * 200, (z + 0.5) * 110] as const;
     const outOf = (pl: Team['players'][number], pos: Team['players'][number]['position']) => canPlay(pl).includes(pos) ? '' : ' (out of position)';
     const dots = [
@@ -655,7 +736,7 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     return `
       <div class="field formation-field"><span>Formation <small class="muted">${esc(f.shape)} · ${esc(f.blurb)}</small></span>
         <div class="formation-row">
-          <div class="pills formation-pills">${FORMATIONS.map((x) => `<button class="pill ${x.id === f.id ? 'is-active' : ''}" data-formation="${x.id}" title="${esc(x.blurb)}"><strong>${esc(x.name)}</strong> <small>${x.shape}</small></button>`).join('')}</div>
+          <div class="pills formation-pills">${FORMATIONS.map((x) => `<button class="pill ${x.id === f.id ? 'is-active' : ''}" data-formation="${x.id}" title="${esc(x.blurb)}" ${pressed(x.id === f.id)}><strong>${esc(x.name)}</strong> <small>${x.shape}</small></button>`).join('')}</div>
           <svg class="formation-pitch" viewBox="-14 -8 228 ${height}" aria-label="${esc(f.name)} formation" data-swap-instant>
             <rect x="-8" y="0" width="216" height="110" rx="6" class="fm-grass"/>
             <line x1="200" y1="0" x2="200" y2="110" class="fm-line"/><circle cx="200" cy="55" r="16" class="fm-line"/>
@@ -732,8 +813,17 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
   const info = MODE_INFO[mode];
   const lengthLabel = mode === 'training' ? 'Time' : mode === 'shootout' ? '' : 'Half length';
   const lengths = mode === 'training' ? [60, 90, 120, 180] : [60, 120, 180, 300];
+  /** A two-player cup needs a second saved team of the same age group: pick the first, or go back to one player. */
+  const pickSecondTeam = () => {
+    const other = teams.find((t) => t.id !== home.id && t.ageGroup === home.ageGroup);
+    if (other) { opponentId = other.id; return; }
+    twoPlayer = false;
+    opponentId = 'cpu';
+    alert('Make a second team of the same age group first, then you can both play in the cup.');
+  };
 
   const render = () => {
+    const focused = focusKey(document.activeElement);
     const away = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
     const sameAge = teams.filter((t) => t.id !== home.id && t.ageGroup === home.ageGroup);
     const [homeK, awayK, swapped] = resolveKits(home, away);
@@ -764,17 +854,17 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
         </div>
         <div class="card options">
           ${hasKeyboard ? `<div class="field"><span>Players</span>
-            <div class="pills"><button class="pill ${!twoPlayer ? 'is-active' : ''}" data-players="1">1 player</button><button class="pill ${twoPlayer ? 'is-active' : ''}" data-players="2">2 players, one keyboard</button></div>
+            <div class="pills"><button class="pill ${!twoPlayer ? 'is-active' : ''}" data-players="1" ${pressed(!twoPlayer)}>1 player</button><button class="pill ${twoPlayer ? 'is-active' : ''}" data-players="2" ${pressed(twoPlayer)}>2 players, one keyboard</button></div>
             ${twoPlayer ? `<p class="muted">Player 1: ${esc(controlsSentence('p1'))}.<br/>Player 2: ${esc(controlsSentence('p2'))}.<br/>Plug in two controllers and each player gets one. <button class="link-btn" data-nav="controls">Change controls</button></p>` : ''}
           </div>` : ''}
           ${mode === 'career' ? `<div class="field"><span>The journey</span><div class="age-ladder">${CAREER_AGES.map((a) => `<span class="rung-age">${a}</span>`).join('<span class="rung-arrow">→</span>')}</div><p class="muted small">${SEASONS_PER_YEAR} mini seasons a year · promotion and relegation between tiers carry over · stars grow up to each age group's cap.</p></div>` : mode === 'league' ? `<div class="field"><span>Tiers</span><ol class="tier-list">${TIERS.map((t) => `<li><strong>Tier ${t.tier}</strong> ${esc(t.name)}</li>`).join('')}</ol></div>` : `<div class="field"><span>Computer difficulty</span>
-            <div class="pills">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="pill ${d === difficulty ? 'is-active' : ''}" data-diff="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div>
+            <div class="pills">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="pill ${d === difficulty ? 'is-active' : ''}" data-diff="${d}" ${pressed(d === difficulty)}>${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div>
           </div>`}
           ${lengthLabel ? `<div class="field"><span>${lengthLabel}</span>
-            <div class="pills">${lengths.map((s) => `<button class="pill ${s === halfSeconds ? 'is-active' : ''}" data-len="${s}">${s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`}</button>`).join('')}</div>
+            <div class="pills">${lengths.map((s) => `<button class="pill ${s === halfSeconds ? 'is-active' : ''}" data-len="${s}" ${pressed(s === halfSeconds)}>${s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`}</button>`).join('')}</div>
           </div>` : ''}
           ${mode === 'tournament' || mode === 'league' || mode === 'career' ? '' : `<div class="field"><span>Weather</span>
-            <div class="pills">${WEATHER_CHOICES.map((w) => `<button class="pill ${w.id === weather ? 'is-active' : ''}" data-weather="${w.id}">${w.label}</button>`).join('')}</div>
+            <div class="pills">${WEATHER_CHOICES.map((w) => `<button class="pill ${w.id === weather ? 'is-active' : ''}" data-weather="${w.id}" ${pressed(w.id === weather)}>${w.label}</button>`).join('')}</div>
           </div>`}
         </div>
         ${swapped && !solo && mode !== 'tournament' ? `<p class="warn">👕 The kits clash, so ${esc(swapped)} will wear their away kit.</p>` : ''}
@@ -785,6 +875,8 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
       home = getTeam((e.target as HTMLSelectElement).value) ?? home;
       cpu = generateOpponent(home.ageGroup, home.kit);
       opponentId = 'cpu';
+      // A two-player cup keeps Player 2 in it with a saved team of the new age group.
+      if (twoPlayer && mode === 'tournament') pickSecondTeam();
       render();
     });
     root.querySelector<HTMLSelectElement>('#s-away')?.addEventListener('change', (e) => { opponentId = (e.target as HTMLSelectElement).value; render(); });
@@ -793,9 +885,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
     root.querySelectorAll<HTMLElement>('[data-diff]').forEach((b) => b.addEventListener('click', () => { difficulty = b.dataset.diff as Difficulty; render(); }));
     root.querySelectorAll<HTMLElement>('[data-players]').forEach((b) => b.addEventListener('click', () => {
       twoPlayer = b.dataset.players === '2';
-      // A two-player cup needs a second saved team of the same age; pick the first one.
-      if (twoPlayer && mode === 'tournament' && opponentId === 'cpu') opponentId = sameAge[0]?.id ?? 'cpu';
-      if (twoPlayer && mode === 'tournament' && opponentId === 'cpu') { twoPlayer = false; alert('Make a second team of the same age group first, then you can both play in the cup.'); }
+      if (twoPlayer && mode === 'tournament' && opponentId === 'cpu') pickSecondTeam();
       render();
     }));
     root.querySelectorAll<HTMLElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { halfSeconds = Number(b.dataset.len); render(); }));
@@ -804,7 +894,9 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
       if (mode !== 'training') updateSettings({ difficulty, halfLengthSeconds: halfSeconds });
       const awayTeam = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
       if (mode === 'tournament') {
+        if (cupInProgress() && !confirm('Start a new cup? The cup you are playing now will end.')) return;
         const state = createTournament(home, difficulty, halfSeconds, twoPlayer, twoPlayer ? awayTeam : undefined);
+        setTournament(state);
         router.go({ name: 'tournament', state });
         return;
       }
@@ -826,6 +918,7 @@ function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: S
       const [h, a] = resolveKits(home, awayTeam);
       router.startMatch({ home: h, away: a, difficulty, halfSeconds, twoPlayer, weather, mode: mode === 'training' ? 'training' : mode === 'shootout' ? 'shootout' : 'match' });
     });
+    restoreFocus(root, focused);
   };
   render();
 }
@@ -849,34 +942,79 @@ function stickerBanner(stickers: Sticker[]): string {
   return `<div class="new-stickers">${stickers.map((s) => `<div class="sticker sticker-new"><span class="sticker-emoji">${s.emoji}</span><strong>${esc(s.name)}</strong><small>New sticker!</small></div>`).join('')}</div>`;
 }
 
-function renderResults(root: HTMLElement, router: Router, r: MatchResult, stickers: Sticker[], tournament?: TournamentState, league?: boolean, career?: boolean): void {
-  const [h, a] = r.score;
-  if (tournament) applyResult(tournament, r);
-  let leagueNote = '';
-  let growthNote = '';
-  if (career) {
+/** What the results screen shows beyond the score, worked out once when the match finished. */
+export interface ResultSummary {
+  stickers: Sticker[];
+  /** Where the league or career table stands after this match. */
+  tableNote?: string;
+  /** Stars the career players earned in this match. */
+  growth?: GrowthEvent[];
+}
+
+/** Computer matches played in the background during the player's own (see playAhead). */
+export interface Ahead {
+  /** The rest of a league round: which round, and one result per fixture (null for the player's own). */
+  round?: { index: number; outcomes: (SimOutcome | null)[] };
+  cup?: CupAhead;
+}
+
+/** Start the computer matches that finish alongside this one (the rest of the league round, the other cup semi) while it is played. */
+export function playAhead(o: StartOptions): Promise<Ahead> {
+  const career = o.career ? getCareer() : null;
+  const ls = o.league ? getLeague() : career?.league ?? null;
+  const you = ls && getTeam(o.league ? ls.teamId : career!.teamId);
+  if (ls && you) {
+    const index = ls.round;
+    return inBackground({ kind: 'round', jobs: roundJobs(ls, you) }).then((res) => (res.kind === 'round' ? { round: { index, outcomes: res.outcomes } } : {}));
+  }
+  const cup = o.tournament && cupAheadRequest(o.tournament);
+  if (cup) return inBackground(cup).then((res) => (res.kind === 'cup' ? { cup: res.ahead } : {}));
+  return Promise.resolve({});
+}
+
+/**
+ * Record a finished match everywhere it counts (the cup bracket, the league table, the career and the
+ * players' stars) and build its results screen. Runs exactly once per match, when it ends, never on a redraw.
+ */
+export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[], ahead: Ahead = {}): Screen {
+  const summary: ResultSummary = { stickers: [...stickers] };
+  if (o.tournament) {
+    applyResult(o.tournament, r, ahead.cup);
+    setTournament(o.tournament);
+  }
+  if (o.career) {
     const c = getCareer();
     const you = c && getTeam(c.teamId);
     if (c && you && !c.done) {
-      const summary = applyCareerMatch(c, you, r);
+      const others = ahead.round?.index === c.league.round ? ahead.round.outcomes : undefined;
+      const s = applyCareerMatch(c, you, r, others);
       saveTeam(you);
       setCareer(c);
       const motm3 = Object.values(c.careerStats).some((st) => st.motm >= 3);
       const boot = Object.values(c.seasonStats).some((st) => st.goals >= 8);
-      stickers = [...stickers, ...recordCareer({ starUp: summary.growth.length > 0, fiveStar: summary.fiveStar, motm3, goldenBoot: boot })];
-      leagueNote = `<p class="muted">${esc(careerAge(c))} · ${esc(seasonName(c))} season · match ${Math.min(c.league.round, c.league.rounds.length)} of ${c.league.rounds.length} · you are ${ordinal(yourPosition(c.league, you))}</p>`;
-      growthNote = growthList(summary.growth);
+      summary.stickers.push(...recordCareer({ starUp: s.growth.length > 0, fiveStar: s.fiveStar, motm3, goldenBoot: boot }));
+      summary.tableNote = `${careerAge(c)} · ${seasonName(c)} season · match ${Math.min(c.league.round, c.league.rounds.length)} of ${c.league.rounds.length} · you are ${ordinal(yourPosition(c.league, you))}`;
+      summary.growth = s.growth;
     }
   }
-  if (league) {
+  if (o.league) {
     const ls = getLeague();
     const you = ls && getTeam(ls.teamId);
     if (ls && you) {
-      applyLeagueResult(ls, you, r);
+      const others = ahead.round?.index === ls.round ? ahead.round.outcomes : undefined;
+      applyLeagueResult(ls, you, r, others);
       setLeague(ls);
-      leagueNote = `<p class="muted">${esc(tierInfo(ls.tier).name)} · round ${Math.min(ls.round, ls.rounds.length)} of ${ls.rounds.length} played · you are ${ordinal(yourPosition(ls, you))}</p>`;
+      summary.tableNote = `${tierInfo(ls.tier).name} · round ${Math.min(ls.round, ls.rounds.length)} of ${ls.rounds.length} played · you are ${ordinal(yourPosition(ls, you))}`;
     }
   }
+  return { name: 'results', result: r, summary, tournament: o.tournament, league: o.league, career: o.career };
+}
+
+function renderResults(root: HTMLElement, router: Router, r: MatchResult, summary: ResultSummary, tournament?: TournamentState, league?: boolean, career?: boolean): void {
+  const [h, a] = r.score;
+  const stickers = summary.stickers;
+  const leagueNote = summary.tableNote ? `<p class="muted">${esc(summary.tableNote)}</p>` : '';
+  const growthNote = growthList(summary.growth ?? []);
   let headline = h === a ? "It's a draw!" : h > a ? `${r.home.name} win!` : `${r.away.name} win!`;
   if (r.mode === 'training') headline = r.trainingPoints >= 10 ? 'Sharp shooting!' : r.trainingPoints >= 5 ? 'Nice work!' : 'Keep practising!';
   if (r.mode === 'shootout') headline = h > a ? `${r.home.name} win the shoot-out!` : `${r.away.name} win the shoot-out!`;
@@ -1139,7 +1277,7 @@ function renderTournament(root: HTMLElement, router: Router, s: TournamentState)
   const youWon = champion?.id === s.humanTeamId;
   const stillIn = humanStillIn(s);
   const stickers = youWon && !s.trophyRecorded ? recordTrophy() : [];
-  if (youWon) s.trophyRecorded = true;
+  if (youWon && !s.trophyRecorded) { s.trophyRecorded = true; setTournament(s); }
   const next = currentFixture(s);
   const nextLabel = s.stage === 'semi' ? '⚽ Play your semi-final' : '⚽ Play the final!';
   root.innerHTML = `
@@ -1167,7 +1305,7 @@ function renderTournament(root: HTMLElement, router: Router, s: TournamentState)
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
-  wireLogoControls(root, (key) => teamById(s, key)?.badge, (key) => { const t = teamById(s, key); if (t && getTeam(t.id)) saveTeam(t); renderTournament(root, router, s); });
+  wireLogoControls(root, (key) => teamById(s, key)?.badge, (key) => { const t = teamById(s, key); if (t && getTeam(t.id)) saveTeam(t); setTournament(s); renderTournament(root, router, s); });
   root.querySelector('#c-play')?.addEventListener('click', () => {
     const f = currentFixture(s)!;
     const [h, a] = resolveKits(f.home, f.away);
@@ -1209,30 +1347,53 @@ function renderAlbum(root: HTMLElement, router: Router): void {
 
 // ---------- Parents ----------
 
-function renderParents(root: HTMLElement, router: Router): void {
-  // A tiny sum keeps little ones out of the grown-up settings.
-  const a = 3 + Math.floor(Math.random() * 6), b = 2 + Math.floor(Math.random() * 7);
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+/** Wrong answers in a row at the Parents gate, and when it opens again after too many. */
+let gateMisses = 0;
+let gateLockedUntil = 0;
+
+function renderParents(root: HTMLElement, router: Router, wrong = false): void {
+  // A sum written in words keeps young children out of the grown-up settings: a new one after every try,
+  // and a short wait after three misses so it cannot simply be guessed.
+  const a = 12 + Math.floor(Math.random() * 8), b = 3 + Math.floor(Math.random() * 7);
+  const wait = Math.ceil((gateLockedUntil - Date.now()) / 1000);
   root.innerHTML = `
     <div class="screen parents">
       ${topBar('Parents Zone')}
       <div class="card gate-card">
         <h2>Grown-ups only</h2>
-        <p class="muted">To open the settings, answer this: what is <strong>${a} × ${b}</strong>?</p>
+        ${wait > 0 ? `<p class="warn">Too many tries. Ask a grown-up, and try again in ${wait} seconds.</p>` : `
+        <p class="muted">To open the settings, answer this in numbers: what is <strong>${NUMBER_WORDS[a]} times ${NUMBER_WORDS[b]}</strong>?</p>
         <form class="row" id="gate">
-          <input type="number" inputmode="numeric" id="gate-answer" placeholder="?" autocomplete="off" />
+          <input type="number" inputmode="numeric" id="gate-answer" placeholder="?" autocomplete="off" aria-label="Answer" />
           <button class="btn btn-primary" type="submit">Open</button>
         </form>
-        <p class="warn" id="gate-wrong" hidden>Not quite. Ask a grown-up to help!</p>
+        ${wrong ? '<p class="warn" role="alert">Not quite. Ask a grown-up to help!</p>' : ''}`}
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
+  if (wait > 0) {
+    const timer = window.setTimeout(() => renderParents(root, router), wait * 1000);
+    cleanup = () => window.clearTimeout(timer);
+    return;
+  }
   const input = root.querySelector<HTMLInputElement>('#gate-answer')!;
   input.focus();
   root.querySelector('#gate')!.addEventListener('submit', (e) => {
     e.preventDefault();
-    if (Number(input.value) === a * b) renderParentSettings(root, router);
-    else { root.querySelector<HTMLElement>('#gate-wrong')!.hidden = false; input.value = ''; input.focus(); }
+    if (Number(input.value) === a * b) { gateMisses = 0; renderParentSettings(root, router); return; }
+    if (++gateMisses >= 3) { gateMisses = 0; gateLockedUntil = Date.now() + 30_000; }
+    renderParents(root, router, true);
   });
+}
+
+const MOTION_CHOICES: { id: MotionChoice; label: string }[] = [{ id: 'auto', label: 'Follow this device' }, { id: 'reduce', label: 'Calm' }, { id: 'full', label: 'Full' }];
+
+/** Put the settings that live outside the screens (volumes, music, motion) into effect after the save changed under them. */
+function applySavedSettings(): void {
+  applyVolumes();
+  music.refresh();
+  applyMotionSetting();
 }
 
 function renderParentSettings(root: HTMLElement, router: Router): void {
@@ -1244,8 +1405,23 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
       <div class="card">
         <h2>Settings</h2>
         ${soundSettings()}
-        <label class="toggle"><input type="checkbox" id="pa-motion" ${s.reduceMotion ? 'checked' : ''}/> Reduce motion (no confetti or wobbling, calmer animations)</label>
+        <div class="field"><span>Motion</span>
+          <div class="pills">${MOTION_CHOICES.map((m) => `<button class="pill ${s.motion === m.id ? 'is-active' : ''}" data-motion="${m.id}" ${pressed(s.motion === m.id)}>${m.label}</button>`).join('')}</div>
+          <p class="muted small">Calm means no confetti, no wobbling and no goal replays.${s.motion === 'auto' ? ` This device asks for ${s.reduceMotion ? 'calm' : 'full'} motion.` : ''}</p>
+        </div>
         ${graphicsSettings()}
+      </div>
+      <div class="card">
+        <h2>Keep the save safe</h2>
+        <p class="muted">Teams, stickers, the league and the career are saved in this browser only, and browsers can clear them (Safari does after about a week without a visit, unless the game is on the Home Screen). Save a backup file now and then; it also moves a save to another device.</p>
+        <div class="row">
+          <button class="btn btn-blue" id="pa-export">⬇️ Save a backup file</button>
+          <button class="btn btn-ghost" id="pa-import">⬆️ Load a backup file</button>
+          <input type="file" id="pa-import-file" accept=".json,application/json" hidden />
+          <button class="btn btn-ghost" id="pa-persist">🔒 Ask this browser to keep the save</button>
+          ${hasBackup() ? '<button class="btn btn-ghost" id="pa-undo">↩️ Put back the save from before the last reset, repair or loaded file</button>' : ''}
+        </div>
+        <p class="muted small" id="pa-save-note" aria-live="polite"></p>
       </div>
       <div class="card">
         <h2>About this game</h2>
@@ -1261,16 +1437,67 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
       </div>
       <div class="card">
         <h2>Start again</h2>
-        <p class="muted">This deletes every team, the sticker album and the settings on this device. It cannot be undone.</p>
-        <button class="btn btn-ghost" id="pa-reset">Reset everything</button>
+        <p class="muted">This deletes every team, the sticker album, the league, the career and the settings on this device, and puts the controls back to normal. The old save stays in the backup slot until the next reset, so it can be put back from the card above.</p>
+        <form class="row" id="pa-reset-form">
+          <label class="field"><span>Type RESET to confirm</span><input id="pa-reset-word" autocomplete="off" autocapitalize="characters" spellcheck="false" /></label>
+          <button class="btn btn-ghost" id="pa-reset" type="submit" disabled>Reset everything</button>
+        </form>
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
   wireSoundSettings(root);
   wireGraphicsSettings(root);
-  root.querySelector<HTMLInputElement>('#pa-motion')!.addEventListener('change', (e) => { updateSettings({ reduceMotion: (e.target as HTMLInputElement).checked }); applyMotionSetting(); });
-  root.querySelector('#pa-reset')!.addEventListener('click', () => {
-    if (confirm('Delete every team, sticker and setting on this device and start again?')) { resetAll(); applyVolumes(); music.refresh(); router.go({ name: 'menu' }); }
+  root.querySelectorAll<HTMLElement>('[data-motion]').forEach((b) => b.addEventListener('click', () => {
+    updateSettings({ motion: b.dataset.motion as MotionChoice });
+    applyMotionSetting();
+    renderParentSettings(root, router);
+    root.querySelector<HTMLElement>(`[data-motion="${b.dataset.motion}"]`)?.focus();
+  }));
+  const note = root.querySelector<HTMLElement>('#pa-save-note')!;
+  root.querySelector('#pa-export')!.addEventListener('click', () => {
+    const blob = new Blob([exportSave()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `goal-rush-save-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    note.textContent = 'Backup file saved. Keep it somewhere safe.';
   });
-  void deleteTeam;
+  const file = root.querySelector<HTMLInputElement>('#pa-import-file')!;
+  root.querySelector('#pa-import')!.addEventListener('click', () => file.click());
+  file.addEventListener('change', async () => {
+    const f = file.files?.[0];
+    file.value = '';
+    if (!f) return;
+    if (f.size > 20 * 1024 * 1024) { alert('That file is too big to be a Goal Rush! save.'); return; }
+    if (!confirm('Load this backup? It replaces the save on this device now (which goes to the backup slot, so it can be put back).')) return;
+    const result = importSave(await f.text());
+    if (!result.ok) { alert(result.reason); return; }
+    applySavedSettings();
+    router.go({ name: 'menu' });
+  });
+  root.querySelector('#pa-persist')!.addEventListener('click', async () => {
+    note.textContent = (await requestPersistentStorage())
+      ? 'This browser will keep the save, even when space runs low.'
+      : 'This browser decides for itself when to clear saves. A backup file is the safest way to keep it.';
+  });
+  root.querySelector('#pa-undo')?.addEventListener('click', () => {
+    if (!confirm('Put back the save from before the last reset, repair or loaded file? The save on this device now goes to the backup slot.')) return;
+    if (!restoreBackup()) { alert('There is no backup to put back.'); return; }
+    applySavedSettings();
+    router.go({ name: 'menu' });
+  });
+  const word = root.querySelector<HTMLInputElement>('#pa-reset-word')!;
+  const resetBtn = root.querySelector<HTMLButtonElement>('#pa-reset')!;
+  word.addEventListener('input', () => { resetBtn.disabled = word.value.trim().toUpperCase() !== 'RESET'; });
+  root.querySelector('#pa-reset-form')!.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (word.value.trim().toUpperCase() !== 'RESET') return;
+    resetAll();
+    resetControls();
+    applySavedSettings();
+    router.go({ name: 'menu' });
+  });
 }
