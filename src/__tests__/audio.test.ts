@@ -164,6 +164,67 @@ describe('audio context and the page', () => {
     expect(started).toBeGreaterThan(0);
   });
 
+  it('with every sound switched off, a tap never starts the audio or claims the playback session', async () => {
+    const session = { type: 'auto' };
+    vi.stubGlobal('navigator', { audioSession: session });
+    const { updateSettings } = await import('../data/storage');
+    updateSettings({ music: false, commentary: false, sound: false });
+    const { audioContext, unlockAudio } = await import('../game/audio');
+    let started = 0;
+    unlockAudio(() => started++);
+    for (const ev of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) win.dispatchEvent(new Event(ev));
+    expect(audioContext()).toBeNull();
+    expect(FakeContext.made).toHaveLength(0);
+    expect(started).toBe(0);
+    expect(session.type).toBe('auto');
+  });
+
+  it('sleeps once everything is switched off and wakes when one sound is switched back on', async () => {
+    vi.useFakeTimers();
+    const session = { type: 'auto' };
+    vi.stubGlobal('navigator', { audioSession: session });
+    const { updateSettings } = await import('../data/storage');
+    const { applyVolumes, audioContext, channelBus, unlockAudio } = await import('../game/audio');
+    unlockAudio(() => undefined);
+    const c = audioContext() as unknown as FakeContext;
+    const music = channelBus('music') as unknown as FakeGain;
+    expect(c.state).toBe('running');
+    expect(session.type).toBe('playback');
+    // The console bar's sound button turns all three off.
+    updateSettings({ music: false, commentary: false, sound: false });
+    applyVolumes();
+    expect(music.gain.events.at(-1)).toMatchObject({ type: 'target', value: 0 });
+    expect(c.state).toBe('running'); // the buses fade first
+    vi.advanceTimersByTime(500);
+    expect(c.state).toBe('suspended');
+    expect(session.type).toBe('auto');
+    // Taps, coming back to the page and sounds asking for the context leave it asleep.
+    win.dispatchEvent(new Event('pointerdown'));
+    win.dispatchEvent(new Event('click'));
+    setHidden(true);
+    setHidden(false);
+    audioContext();
+    expect(c.state).toBe('suspended');
+    // Switching one back on (from its tap) wakes it.
+    updateSettings({ sound: true });
+    applyVolumes();
+    expect(c.state).toBe('running');
+    expect(session.type).toBe('playback');
+    vi.advanceTimersByTime(1000);
+    expect(c.state).toBe('running');
+  });
+
+  it('switching a sound on for the first time makes the context inside that tap', async () => {
+    const { updateSettings } = await import('../data/storage');
+    updateSettings({ music: false, commentary: false, sound: false });
+    const { applyVolumes, audioContext } = await import('../game/audio');
+    expect(audioContext()).toBeNull();
+    updateSettings({ commentary: true });
+    applyVolumes();
+    expect(FakeContext.made).toHaveLength(1);
+    expect(FakeContext.made[0].state).toBe('running');
+  });
+
   it('wakes from an iPhone interruption (a call) on the next tap', async () => {
     const { audioContext, unlockAudio } = await import('../game/audio');
     unlockAudio(() => undefined);

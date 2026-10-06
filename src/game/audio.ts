@@ -6,25 +6,44 @@ import { getSettings } from '../data/storage';
  * never clips. Each kind of sound has its own volume bus, set from the settings.
  * Browsers only let audio start after a tap or key press, so `audioContext()`
  * is called from gestures and `resume()` is retried on every call. While the
- * page is hidden the context sleeps (see watchPage).
+ * page is hidden the context sleeps (see watchPage), and while music,
+ * commentary and effects are all switched off it is never started at all.
  */
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let noiseBuf: AudioBuffer | null = null;
+let quietTimer = 0;
 
 export type AudioChannel = 'music' | 'voice' | 'sfx';
 const buses: Partial<Record<AudioChannel, GainNode>> = {};
 const buffers = new Map<string, Promise<AudioBuffer | null>>();
 
+/** Is any of music, commentary and effects switched on? With all three off the game leaves the device's audio alone. */
+export function soundOn(): boolean {
+  const s = getSettings();
+  return s.music || s.commentary || s.sound;
+}
+
+/**
+ * iPhones mute Web Audio when the ring/silent switch is on, which reads as "no
+ * music". Declaring a playback session (Safari 17+) lets the game play like a
+ * video does, but that also stops other audio such as a parent's podcast, so
+ * it is only declared while some sound is switched on and handed back
+ * ('auto') once everything is off.
+ */
+function setSession(type: 'playback' | 'auto'): void {
+  const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+  if (session && session.type !== type) try { session.type = type; } catch { /* older browsers */ }
+}
+
 export function audioContext(): AudioContext | null {
   try {
     if (!ctx) {
+      // Everything switched off: no context at all, so a muted game never takes over the audio.
+      if (!soundOn()) return null;
       const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!Ctor) return null;
-      // iPhones mute Web Audio when the ring/silent switch is on, which reads as "no music".
-      // Declaring a playback session (Safari 17+) lets the game play like a video does.
-      const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
-      if (session) try { session.type = 'playback'; } catch { /* older browsers */ }
+      setSession('playback');
       ctx = new Ctor();
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -12;
@@ -44,10 +63,12 @@ export function audioContext(): AudioContext | null {
   }
 }
 
-/** Start the context again if it has stopped, unless the page is hidden. */
+/** Start the context again if it has stopped, unless the page is hidden or every sound is switched off. */
 function wake(): void {
   // iPhones report 'interrupted' (not 'suspended') after a call or app switch.
-  if (ctx && ctx.state !== 'running' && ctx.state !== 'closed' && !document.hidden) void ctx.resume().catch(() => undefined);
+  if (!ctx || ctx.state === 'running' || ctx.state === 'closed' || document.hidden || !soundOn()) return;
+  setSession('playback');
+  void ctx.resume().catch(() => undefined);
 }
 
 function sleep(): void {
@@ -76,11 +97,13 @@ const UNLOCK_EVENTS = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown
  * running, calling `onRunning` each time a gesture gets it going. When the
  * game comes back from the background (phones suspend the audio on a call or
  * app switch, and it sleeps while hidden) the next tap starts it again if
- * waking it without one did not work.
+ * waking it without one did not work. While every sound is switched off taps
+ * do nothing; applyVolumes() starts the audio when one is switched back on.
  */
 export function unlockAudio(onRunning: () => void): void {
   let armed = false;
   const tryUnlock = () => {
+    if (!soundOn()) return;
     const c = audioContext();
     if (!c) return;
     // Older iPhones only unlock audio once a sound actually starts inside the gesture.
@@ -144,10 +167,20 @@ export function channelBus(ch: AudioChannel): GainNode {
   return g;
 }
 
-/** Re-read the volume settings, gliding each bus to its new level. */
+/**
+ * Re-read the sound settings, gliding each bus to its new level. Switching a
+ * sound on wakes the audio (making the context if it is the first one);
+ * switching the last one off lets the buses fade, then puts the context to
+ * sleep and hands the audio session back. Call it straight from the tap or
+ * slider that changed the setting (the sound mixer, the console bar's sound
+ * button, Reset), since phones only start audio inside a gesture.
+ */
 export function applyVolumes(): void {
-  if (!ctx) return;
-  for (const ch of Object.keys(buses) as AudioChannel[]) buses[ch]!.gain.setTargetAtTime(channelLevel(ch), ctx.currentTime, 0.05);
+  const c = soundOn() ? audioContext() : ctx;
+  if (!c) return;
+  for (const ch of Object.keys(buses) as AudioChannel[]) buses[ch]!.gain.setTargetAtTime(channelLevel(ch), c.currentTime, 0.05);
+  window.clearTimeout(quietTimer);
+  if (!soundOn()) quietTimer = window.setTimeout(() => { if (!soundOn()) { sleep(); setSession('auto'); } }, 400);
 }
 
 /** Fetch and decode a file from public/ once; resolves null if it cannot be loaded or played. */
