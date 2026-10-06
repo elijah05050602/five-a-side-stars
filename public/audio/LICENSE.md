@@ -1,22 +1,24 @@
 # Music and commentary credits
 
-Everything in this folder was made for Goal Rush! and may be used with the game
-under its MIT licence. Rebuild any of it with the scripts in `tools/audio/`.
+Everything in this folder was made for Goal Rush! with ElevenLabs
+(https://elevenlabs.io) on the project owner's account, 2026-10-06. Use of the
+audio follows ElevenLabs' terms for that account: on the free plan that means
+non-commercial use with attribution to ElevenLabs (this file is that
+attribution); a paid plan adds commercial rights. It is not covered by the
+game's MIT licence. The scripts that rebuild it are in `tools/audio/`.
 
 ## Music (`menu.mp3`, `win.mp3`, `draw.mp3`)
 
-Composed for the game (the anthem is the tune the game used to play on
-oscillators, re-arranged for a band) in `tools/audio/compose_music.py`, and
-played with real sampled instruments from **GeneralUser GS v2.0.3** by
-S. Christian Collins (https://www.schristiancollins.com,
-https://github.com/mrbumpy409/GeneralUser-GS). Its licence allows use "without
-restriction for your own music creation, private or commercial", including in
-software. The SoundFont itself is not included here.
+Generated for the game with **ElevenLabs Music** (`eleven_music_v2_5`,
+instrumental). `menu.mp3` is cut to a 30-bar seamless loop by
+`tools/audio/loop_music.py`; the prompts are in
+`tools/audio/README-elevenlabs.md`.
 
 ## Commentary (`commentary.mp3`, `commentary.json`)
 
-Spoken by the **Kokoro-82M** text-to-speech model (Apache-2.0,
-https://github.com/hexgrad/kokoro, run with
-https://github.com/thewh1teagle/kokoro-onnx), voice `am_fenrir`, spoken phrase by phrase with pauses, from the script
-in `tools/audio/commentary_script.json`. The lines were written for the game;
-generated speech carries no extra licence terms. The model is not included here.
+Spoken by **ElevenLabs** text-to-speech (`eleven_v3`, voice "Connor - Sports,
+Advertisements & Social Media" from the ElevenLabs voice library), from the
+performance script in
+`tools/audio/commentary_elevenlabs.json` (the [tags] are v3 delivery directions
+such as [shouting] or [gasps]). Lines were recorded ten at a time and cut apart
+with `tools/audio/split_elevenlabs.py`. The lines were written for the game.

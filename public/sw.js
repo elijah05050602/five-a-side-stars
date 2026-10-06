@@ -1,5 +1,5 @@
 /* Goal Rush! service worker: caches the game so it plays offline. */
-const VERSION = 'goalrush-v3';
+const VERSION = 'goalrush-v4';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './favicon.svg', './icon-192.png', './icon-512.png', './models/player.glb'];
 
 self.addEventListener('install', (event) => {
