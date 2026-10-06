@@ -4,7 +4,7 @@ import { recordResult } from './data/progress';
 import { getSettings, getTeams, loadSave, updateSettings } from './data/storage';
 import { generateOpponent } from './data/defaults';
 import { applyMotionSetting } from './ui/motion';
-import { music } from './game/music';
+import { music, trackFor } from './game/music';
 import { unlockAudio } from './game/audio';
 import { preloadCommentary } from './game/voice';
 import { loadPlayerAsset } from './game/playerAsset';
@@ -20,6 +20,8 @@ applyMotionSetting();
 loadPlayerAsset().catch(() => { /* PlayerModel falls back to the procedural kid */ });
 // Music (and fetching the commentator's clips) can only start after a tap or key press.
 unlockAudio(() => { music.start(); void preloadCommentary(); });
+// Fetch the home theme behind the loading screen so it starts on the very first tap.
+music.preload('home');
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => { /* offline play is a bonus, not a requirement */ }); });
 }
@@ -30,6 +32,7 @@ const router: Router = {
     canvas.classList.remove('is-live');
     document.body.classList.remove('in-match');
     music.setQuiet(false);
+    music.setTrack(trackFor(screen.name));
     music.start(); // in case it never got going (no-op when already playing, or switched off)
     renderScreen(ui, screen, router);
   },
@@ -73,12 +76,28 @@ const router: Router = {
 if (getSettings().tutorialDone) router.go({ name: 'menu' });
 else router.startTutorial();
 
-// Lift the loading screen once the player model is in (or after a few seconds anyway), and not so fast that nobody can read it.
+// Once the player model is in (or after a few seconds anyway), and not so fast that nobody can read it,
+// the loading screen turns into a big Play button. Browsers only allow sound after a tap, so that
+// tap is what starts the music the moment the game opens.
 const boot = document.getElementById('boot');
 if (boot) {
   const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-  Promise.all([wait(1400), Promise.race([loadPlayerAsset().catch(() => undefined), wait(4000)])]).then(() => {
+  const lift = () => {
     boot.classList.add('is-gone');
     setTimeout(() => boot.remove(), 600);
+  };
+  Promise.all([wait(1400), Promise.race([loadPlayerAsset().catch(() => undefined), wait(4000)])]).then(() => {
+    if (location.search.includes('debug')) return lift();
+    const play = document.createElement('button');
+    play.className = 'boot-play';
+    play.type = 'button';
+    play.textContent = '▶ TAP TO PLAY';
+    boot.querySelector('.boot-bar')?.replaceWith(play);
+    boot.classList.add('is-ready');
+    play.focus();
+    // Lift on click (it follows touchend), so the same tap does not also press a menu button underneath.
+    const go = () => { boot.removeEventListener('click', go); window.removeEventListener('keydown', go); lift(); };
+    boot.addEventListener('click', go);
+    window.addEventListener('keydown', go);
   });
 }
