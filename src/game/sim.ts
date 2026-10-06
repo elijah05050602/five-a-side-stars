@@ -106,6 +106,9 @@ export interface SimPlayer {
   /** 0..1 sprint energy (human-controlled player only). */
   stamina: number;
   /** 0..1 shot power being charged while the shoot button is held. */
+  /** How far off a keeper's read of the current shot is (metres), and which shot (ball flight) it is for. */
+  misread: number;
+  readFlight: number;
   charge: number;
   kickKind: KickKind;
   /** Which way the keeper has committed to for a penalty (0 = not yet). */
@@ -384,7 +387,7 @@ export class MatchSim {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), role: info.position, slot: v(info.position === 'GK' ? 0.03 : 0.33, 0), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, distanceRun: 0, isKeeper: info.position === 'GK',
-          speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, kickKind: 'pass', penaltyGuess: 0,
+          speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, misread: 0, readFlight: -1, kickKind: 'pass', penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
           celebrate: null, move: null, moveAnim: 0, handling: false, edgeHold: 0,
           mul, match: freshMatchStats(),
@@ -1263,6 +1266,16 @@ export class MatchSim {
     return true;
   }
 
+  /**
+   * How far off a keeper's read of a shot can be. Young players want to score: on Starter and Easy the computer's
+   * keeper often guesses wrong and yours hardly ever; Hard reads nearly everything. Two humans, or two computer
+   * teams, get the same keepers.
+   */
+  private keeperMisread(p: SimPlayer): number {
+    const w = this.goalWidth;
+    return this.isHuman(p.side) ? w * clamp(0.2 - 0.06 * (this.diff.humanTackle - 0.85), 0.12, 0.24) : w * clamp(0.42 - 0.2 * this.diff.tackle, 0.14, 0.36);
+  }
+
   private driveKeeper(p: SimPlayer, dt: number): void {
     const b = this.ball;
     const own = this.ownGoalX(p.side);
@@ -1307,8 +1320,10 @@ export class MatchSim {
       targetZ = p.penaltyGuess * this.goalWidth * 0.4;
       if (t < 0.5) this.startDive(p, p.penaltyGuess, Math.abs(predZ - p.pos.z));
     } else if (toGoal && t < 1.4 && towardsUs) {
-      // Predict where the ball crosses the keeper's line and go there.
-      const predZ = b.pos.z + b.vel.z * t;
+      // Predict where the ball crosses the keeper's line and go there. Keepers read a shot imperfectly: the guess is
+      // off by up to keeperMisread(), the same for the whole shot, so a misread shot goes past them, never through.
+      if (p.readFlight !== b.flightId) { p.readFlight = b.flightId; p.misread = rand(-1, 1) * this.keeperMisread(p); }
+      const predZ = b.pos.z + b.vel.z * t + p.misread;
       targetZ = clamp(predZ, -this.goalWidth / 2 - 0.4, this.goalWidth / 2 + 0.4);
       if (Math.abs(predZ - p.pos.z) > reach * 0.45 && t < 0.45) this.startDive(p, Math.sign(predZ - p.pos.z) || 1, Math.abs(predZ - p.pos.z));
     } else if (this.phase !== 'setpiece' && b.owner && b.owner.side !== p.side && Math.abs(b.owner.pos.x - own) < 6 && Math.abs(b.owner.pos.z) < this.goalWidth) {
@@ -1724,18 +1739,32 @@ export class MatchSim {
         let pSave = bd < easy ? 0.97 * Math.max(speedFactor, 0.75) : clamp(1 - (bd - easy) / (reach - easy), 0, 1) * speedFactor;
         if (b.penaltyShot) pSave *= bd < easy ? 0.6 : 0.45; // even a keeper who guessed right can be beaten
         pSave *= best.mul.save;
+        // A shot from close in leaves the keeper little time, so it is much harder to stop than one from distance.
+        const from = b.lastKick ? dist(b.lastKick.pos, best.pos) : 10;
+        pSave *= clamp(0.25 + (from / Math.max(ballSpeed, 1)) * 1.4, 0.4, 1);
+        // Difficulty, kept generous because young players want to score: on Starter and Easy the computer's keeper is
+        // very beatable and yours is sharper; Hard is close to the full keeper. Two humans, or two computer teams,
+        // keep the same keeper strength on both sides.
+        pSave *= this.isHuman(best.side) ? clamp(0.75 + 0.2 * this.diff.humanTackle, 0.85, 1.1) : clamp(0.3 + 0.45 * this.diff.tackle, 0.45, 0.85);
         if (this.mode === 'tutorial') pSave *= 0.4; // the tutorial keeper lets most shots in
-        if (Math.random() > pSave) return; // beaten
+        // A ball whose path runs into the keeper's body is always stopped: a fluffed save bounces off it, never through.
+        // (Judged on the path, since the save is judged a moment before the ball arrives.)
+        const along = (rel.x * b.vel.x + rel.z * b.vel.z) / Math.max(ballSpeed, 1e-6);
+        const passBy = Math.sqrt(Math.max(0, bd * bd - along * along));
+        const blocked = this.mode !== 'tutorial' && passBy < 0.26 * this.stats.scale + b.radius;
+        const fluffed = Math.random() > pSave;
+        if (fluffed && !blocked) return; // beaten
         best.match.saves++;
         this.events.push({ type: 'save', side: best.side, player: best.info });
         const dir = best.side === 0 ? 1 : -1; // away from our own goal
         // Good Handling catches more; the rest are parried.
-        if (bd > easy * best.mul.catch || ballSpeed > this.stats.power * 1.05 * best.mul.catch) {
+        if (fluffed || bd > easy * best.mul.catch || ballSpeed > this.stats.power * 1.05 * best.mul.catch) {
           // Parry: the ball flies back out towards the pitch, not into the net.
           let sideways = Math.sign(b.pos.z - best.pos.z) || (Math.random() < 0.5 ? -1 : 1);
-          if (this.mode === 'match' && Math.random() < 0.4) {
-            // Tipped round the post: out over the goal line for a corner.
-            sideways = Math.sign(b.pos.z) || sideways;
+          if (this.mode === 'match' && Math.abs(b.pos.z) > this.goalWidth * 0.3 && Math.random() < 0.4) {
+            // A shot heading for the corner is tipped round the post, out over the goal line for a corner. (Only a
+            // wide one: tipping a central shot backwards would knock it into the keeper's own net.)
+            sideways = Math.sign(b.pos.z);
             b.vel = v(-dir * ballSpeed * rand(0.25, 0.4), sideways * ballSpeed * rand(0.5, 0.7));
           } else b.vel = v(dir * ballSpeed * rand(0.15, 0.35), sideways * ballSpeed * rand(0.45, 0.7));
           b.vy = rand(1, 3);
