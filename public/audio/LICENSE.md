@@ -17,6 +17,6 @@ software. The SoundFont itself is not included here.
 
 Spoken by the **Kokoro-82M** text-to-speech model (Apache-2.0,
 https://github.com/hexgrad/kokoro, run with
-https://github.com/thewh1teagle/kokoro-onnx), voice `bm_george`, from the script
+https://github.com/thewh1teagle/kokoro-onnx), voice `am_fenrir`, spoken phrase by phrase with pauses, from the script
 in `tools/audio/commentary_script.json`. The lines were written for the game;
 generated speech carries no extra licence terms. The model is not included here.
