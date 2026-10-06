@@ -11,7 +11,7 @@
 .club-squad { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin: 14px 0; }
 .club-player { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
 .club-player.is-sub { opacity: .8; }
-.club-num { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 18px; background: #f26a1b; color: #fff; border: 3px solid #13233a; }
+.club-num { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 18px; background: #f26a1b; color: #13233a; border: 3px solid #13233a; }
 .club-name { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
 .club-name small { color: #4a5a73; }
 .club-player .chip-sub { margin-left: auto; }
