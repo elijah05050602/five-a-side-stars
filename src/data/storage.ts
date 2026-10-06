@@ -9,7 +9,7 @@ const KEY = 'five-a-side-stars:v1';
 
 interface SaveFile {
   teams: Team[];
-  settings: { sound: boolean; music: boolean; reduceMotion: boolean; halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard'; tutorialDone: boolean };
+  settings: { sound: boolean; music: boolean; commentary: boolean; musicVolume: number; voiceVolume: number; sfxVolume: number; reduceMotion: boolean; halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard'; tutorialDone: boolean };
   progress?: Progress;
   league?: LeagueState | null;
   career?: CareerState | null;
@@ -19,7 +19,7 @@ let cache: SaveFile | null = null;
 
 function fresh(): SaveFile {
   const prefersLess = typeof window !== 'undefined' && 'matchMedia' in window && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  return { teams: starterTeams(), settings: { sound: true, music: true, reduceMotion: prefersLess, halfLengthSeconds: 120, difficulty: 'normal', tutorialDone: false } };
+  return { teams: starterTeams(), settings: { sound: true, music: true, commentary: true, musicVolume: 0.7, voiceVolume: 1, sfxVolume: 1, reduceMotion: prefersLess, halfLengthSeconds: 120, difficulty: 'normal', tutorialDone: false } };
 }
 
 export function loadSave(): SaveFile {

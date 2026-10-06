@@ -1,12 +1,19 @@
+import { getSettings } from '../data/storage';
+
 /**
- * One shared Web Audio context for music, effects and the crowd, with a
- * compressor on the end so a goal roar on top of the tune never clips.
+ * One shared Web Audio context for music, effects, the crowd and the
+ * commentator, with a compressor on the end so a goal roar on top of the tune
+ * never clips. Each kind of sound has its own volume bus, set from the settings.
  * Browsers only let audio start after a tap or key press, so `audioContext()`
  * is called from gestures and `resume()` is retried on every call.
  */
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let noiseBuf: AudioBuffer | null = null;
+
+export type AudioChannel = 'music' | 'voice' | 'sfx';
+const buses: Partial<Record<AudioChannel, GainNode>> = {};
+const buffers = new Map<string, Promise<AudioBuffer | null>>();
 
 export function audioContext(): AudioContext | null {
   try {
@@ -34,6 +41,47 @@ export function audioContext(): AudioContext | null {
 /** Where every sound plugs in. Only valid after audioContext() returned a context. */
 export function masterBus(): GainNode {
   return master!;
+}
+
+/** The volume a channel should play at right now: its on/off switch times its slider. */
+export function channelLevel(ch: AudioChannel): number {
+  const s = getSettings();
+  if (ch === 'music') return s.music ? s.musicVolume : 0;
+  if (ch === 'voice') return s.commentary ? s.voiceVolume : 0;
+  return s.sound ? s.sfxVolume : 0;
+}
+
+/** The gain node for music, commentary or effects. Only valid after audioContext() returned a context. */
+export function channelBus(ch: AudioChannel): GainNode {
+  let g = buses[ch];
+  if (!g) {
+    g = ctx!.createGain();
+    g.gain.value = channelLevel(ch);
+    g.connect(master!);
+    buses[ch] = g;
+  }
+  return g;
+}
+
+/** Re-read the volume settings, gliding each bus to its new level. */
+export function applyVolumes(): void {
+  if (!ctx) return;
+  for (const ch of Object.keys(buses) as AudioChannel[]) buses[ch]!.gain.setTargetAtTime(channelLevel(ch), ctx.currentTime, 0.05);
+}
+
+/** Fetch and decode a file from public/ once; resolves null if it cannot be loaded or played. */
+export function loadAudio(path: string): Promise<AudioBuffer | null> {
+  let p = buffers.get(path);
+  if (!p) {
+    const c = audioContext();
+    if (!c) return Promise.resolve(null);
+    p = fetch(`${import.meta.env.BASE_URL}${path}`)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.statusText))))
+      .then((data) => new Promise<AudioBuffer>((resolve, reject) => { void c.decodeAudioData(data, resolve, reject); }))
+      .catch(() => { buffers.delete(path); return null; });
+    buffers.set(path, p);
+  }
+  return p;
 }
 
 /** Two seconds of white noise, shared by the crowd, rain, drums and ball thumps. */

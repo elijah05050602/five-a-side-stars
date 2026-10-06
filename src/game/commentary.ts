@@ -84,25 +84,35 @@ export const scoreText = (s: readonly [number, number]) => `${s[0]}-${s[1]}`;
  * Pick the right line for a goal from the score after it, who scored and how.
  * `scorerGoals` counts this goal, `minute` is on the 0..40 shown clock.
  */
-export function goalLine(o: {
+export interface GoalInfo {
   score: readonly [number, number]; side: Side; scorer: string; team: string; ownGoal: boolean; minute: number; scorerGoals: number;
   penalty?: boolean; longRange?: boolean; mode: 'match' | 'shootout' | 'training'; rocket?: boolean;
-}, rng: () => number = Math.random): string {
-  const vars = { score: scoreText(o.score), scorer: o.scorer, team: o.team };
-  if (o.mode === 'training') return line(o.rocket ? 'goalRocket' : 'goalTraining', vars, rng);
-  if (o.mode === 'shootout') return line('goalShootout', vars, rng);
-  if (o.ownGoal) return line('goalOwn', vars, rng);
-  if (o.scorerGoals === 3) return line('goalHatTrick', vars, rng);
-  if (o.minute >= 37) return line('goalLate', vars, rng);
-  if (o.penalty) return line('goalPenalty', vars, rng);
-  if (o.longRange) return line('goalLongRange', vars, rng);
-  if (o.scorerGoals === 2 && rng() < 0.6) return line('goalBrace', vars, rng);
+}
+
+/** Which kind of goal line fits, from the score after it, who scored and how. */
+export function goalKey(o: GoalInfo, rng: () => number = Math.random): LineKey {
+  if (o.mode === 'training') return o.rocket ? 'goalRocket' : 'goalTraining';
+  if (o.mode === 'shootout') return 'goalShootout';
+  if (o.ownGoal) return 'goalOwn';
+  if (o.scorerGoals === 3) return 'goalHatTrick';
+  if (o.minute >= 37) return 'goalLate';
+  if (o.penalty) return 'goalPenalty';
+  if (o.longRange) return 'goalLongRange';
+  if (o.scorerGoals === 2 && rng() < 0.6) return 'goalBrace';
   const us = o.score[o.side], them = o.score[1 - o.side];
-  if (us + them === 1) return line('goalOpener', vars, rng);
-  if (us === them) return line('goalEqualiser', vars, rng);
-  if (us < them) return line('goalReply', vars, rng);
-  if (us - them >= 3) return line('goalExtend', vars, rng);
-  return line('goalLead', vars, rng);
+  if (us + them === 1) return 'goalOpener';
+  if (us === them) return 'goalEqualiser';
+  if (us < them) return 'goalReply';
+  if (us - them >= 3) return 'goalExtend';
+  return 'goalLead';
+}
+
+/**
+ * Pick the right line for a goal from the score after it, who scored and how.
+ * `scorerGoals` counts this goal, `minute` is on the 0..40 shown clock.
+ */
+export function goalLine(o: GoalInfo, rng: () => number = Math.random): string {
+  return line(goalKey(o, rng), { score: scoreText(o.score), scorer: o.scorer, team: o.team }, rng);
 }
 
 /**
@@ -133,10 +143,17 @@ export class Commentator {
   private saidTwoPlayer = false;
   private lastSaveShooter: string | null = null;
   private readonly goalsBy = new Map<string, number>();
+  /** Told about every line said, with the score when the line calls for it, so a voice can speak it. */
+  onSay: ((key: LineKey, score?: readonly [number, number]) => void) | null = null;
 
   constructor(private readonly conditions: Conditions = { weather: 'clear', time: 'day' }, private readonly rng: () => number = Math.random) {}
 
   private teamName(sim: MatchSim, side: Side): string { return sim.teams[side].name; }
+
+  private say(key: LineKey, vars: Record<string, string | number>, score?: readonly [number, number]): string {
+    this.onSay?.(key, score);
+    return line(key, vars, this.rng);
+  }
 
   /** One line per event (or null), in the order the events came. */
   onEvents(sim: MatchSim, events: SimEvent[]): (string | null)[] {
@@ -154,9 +171,9 @@ export class Commentator {
     switch (ev.type) {
       case 'kickoff': {
         if (sim.mode !== 'match') return null;
-        if (this.afterGoal) { this.afterGoal = false; return line('kickoffAfterGoal', { team: this.teamName(sim, ev.side ?? 0) }, rng); }
-        if (sim.half === 2) return line('kickoffSecond', { score: scoreText(sim.score) }, rng);
-        return line('kickoffFirst', { home: sim.teams[0].name, away: sim.teams[1].name }, rng);
+        if (this.afterGoal) { this.afterGoal = false; return this.say('kickoffAfterGoal', { team: this.teamName(sim, ev.side ?? 0) }); }
+        if (sim.half === 2) return this.say('kickoffSecond', { score: scoreText(sim.score) });
+        return this.say('kickoffFirst', { home: sim.teams[0].name, away: sim.teams[1].name });
       }
       case 'shot': {
         const b = sim.ball;
@@ -167,13 +184,13 @@ export class Commentator {
         const shooter = this.watch && this.watch.side !== ev.side ? this.watch.shooterName : null;
         this.lastSaveShooter = shooter;
         this.watch = null;
-        return shooter ? line('saveFromShooter', { keeper: ev.player?.name ?? 'the keeper', shooter }, rng) : line('save', { keeper: ev.player?.name ?? 'the keeper' }, rng);
+        return shooter ? this.say('saveFromShooter', { keeper: ev.player?.name ?? 'the keeper', shooter }) : this.say('save', { keeper: ev.player?.name ?? 'the keeper' });
       }
       case 'miss': {
         // Shoot-out only: the sim raises this when a penalty is missed or saved.
         const shooter = this.watch?.shooterName ?? 'the taker';
         this.watch = null;
-        return line('shootoutMiss', { shooter }, rng);
+        return this.say('shootoutMiss', { shooter });
       }
       case 'goal': {
         const g = sim.goals[sim.goals.length - 1];
@@ -186,27 +203,29 @@ export class Commentator {
         if (!g.ownGoal) this.goalsBy.set(key, n);
         const longRange = !!w && Math.abs(sim.goalX(g.side) - w.from.x) > sim.length * 0.4;
         const rocket = sim.mode === 'training' && Math.hypot(sim.ball.vel.x, sim.ball.vel.z) > sim.stats.power * 0.95;
-        return goalLine({ score: sim.score, side: g.side, scorer: g.scorer.name, team: this.teamName(sim, g.side), ownGoal: g.ownGoal, minute: g.minute, scorerGoals: n, penalty: sim.ball.penaltyShot && sim.mode === 'match', longRange, mode: sim.mode === 'tutorial' ? 'training' : sim.mode, rocket }, rng);
+        const info: GoalInfo = { score: sim.score, side: g.side, scorer: g.scorer.name, team: this.teamName(sim, g.side), ownGoal: g.ownGoal, minute: g.minute, scorerGoals: n, penalty: sim.ball.penaltyShot && sim.mode === 'match', longRange, mode: sim.mode === 'tutorial' ? 'training' : sim.mode, rocket };
+        const scoreCall = info.mode === 'match' ? sim.score : undefined;
+        return this.say(goalKey(info, rng), { score: scoreText(info.score), scorer: info.scorer, team: info.team }, scoreCall);
       }
       case 'foul': {
         const team = this.teamName(sim, (1 - ev.side!) as Side);
         const offender = ev.player?.name ?? 'someone';
-        return line(ev.kind === 'penalty' ? 'penalty' : 'foul', { team, offender }, rng);
+        return this.say(ev.kind === 'penalty' ? 'penalty' : 'foul', { team, offender });
       }
       case 'halftime': {
         const [h, a] = sim.score;
-        if (h === a) return line('halftimeLevel', { score: scoreText(sim.score) }, rng);
+        if (h === a) return this.say('halftimeLevel', { score: scoreText(sim.score) }, sim.score);
         const leader = h > a ? 0 : 1;
-        return line('halftimeLead', { leader: this.teamName(sim, leader), score: leader === 0 ? `${h}-${a}` : `${a}-${h}` }, rng);
+        return this.say('halftimeLead', { leader: this.teamName(sim, leader), score: leader === 0 ? `${h}-${a}` : `${a}-${h}` }, sim.score);
       }
       case 'fulltime': {
         const [h, a] = sim.score;
-        if (sim.mode === 'training') return line('trainingOver', { points: sim.trainingPoints }, rng);
-        if (sim.mode === 'shootout') return line('shootoutOver', { winner: this.teamName(sim, h > a ? 0 : 1), score: h > a ? `${h}-${a}` : `${a}-${h}` }, rng);
-        if (h === a) return line('fulltimeDraw', { score: scoreText(sim.score) }, rng);
+        if (sim.mode === 'training') return this.say('trainingOver', { points: sim.trainingPoints });
+        if (sim.mode === 'shootout') return this.say('shootoutOver', { winner: this.teamName(sim, h > a ? 0 : 1), score: h > a ? `${h}-${a}` : `${a}-${h}` });
+        if (h === a) return this.say('fulltimeDraw', { score: scoreText(sim.score) }, sim.score);
         const winner = h > a ? 0 : 1;
         const score = winner === 0 ? `${h}-${a}` : `${a}-${h}`;
-        return line(Math.abs(h - a) >= 4 ? 'fulltimeThrashing' : 'fulltimeWin', { winner: this.teamName(sim, winner), score }, rng);
+        return this.say(Math.abs(h - a) >= 4 ? 'fulltimeThrashing' : 'fulltimeWin', { winner: this.teamName(sim, winner), score }, sim.score);
       }
       default:
         return null;
@@ -230,12 +249,12 @@ export class Commentator {
           const keeper = sim.teamOf((1 - w.side) as Side).find((p) => p.isKeeper)?.info.name ?? 'the keeper';
           if (kind === 'gathered' && this.lastSaveShooter === w.shooterName) { this.lastSaveShooter = null; return null; }
           const key: LineKey = kind === 'wide' ? 'missWide' : kind === 'over' ? 'missOver' : kind === 'bar' ? 'missBar' : kind === 'post' ? 'missPost' : 'missGathered';
-          return line(key, { shooter: w.shooterName, keeper }, rng);
+          return this.say(key, { shooter: w.shooterName, keeper });
         }
       }
     }
     if (sim.phase !== 'play' || sim.mode !== 'match') return null;
-    if (!this.saidLastMinute && sim.half === 2 && sim.minute >= 39) { this.saidLastMinute = true; this.quiet = 0; return line('lastMinute', {}, rng); }
+    if (!this.saidLastMinute && sim.half === 2 && sim.minute >= 39) { this.saidLastMinute = true; this.quiet = 0; return this.say('lastMinute', {}); }
     this.quiet += dt;
     if (this.quiet < 18 + rng() * 10) return null;
     this.quiet = 0;
@@ -245,24 +264,24 @@ export class Commentator {
   private quietLine(sim: MatchSim): string {
     const rng = this.rng;
     const roll = rng();
-    if (!this.saidTwoPlayer && sim.config.humanSide2 != null && roll < 0.5) { this.saidTwoPlayer = true; return line('twoPlayer', {}, rng); }
+    if (!this.saidTwoPlayer && sim.config.humanSide2 != null && roll < 0.5) { this.saidTwoPlayer = true; return this.say('twoPlayer', {}); }
     if (roll < 0.22) {
-      if (this.conditions.weather === 'rain') return line('quietRain', {}, rng);
-      if (this.conditions.weather === 'snow') return line('quietSnow', {}, rng);
-      if (this.conditions.time === 'night') return line('quietNight', {}, rng);
-      if (this.conditions.time === 'sunset') return line('quietSunset', {}, rng);
+      if (this.conditions.weather === 'rain') return this.say('quietRain', {});
+      if (this.conditions.weather === 'snow') return this.say('quietSnow', {});
+      if (this.conditions.time === 'night') return this.say('quietNight', {});
+      if (this.conditions.time === 'sunset') return this.say('quietSunset', {});
     }
     const owner: SimPlayer | null = sim.ball.owner;
-    if (!owner) return line('quietLoose', {}, rng);
+    if (!owner) return this.say('quietLoose', {});
     const team = this.teamName(sim, owner.side);
     const vars = { team, owner: owner.info.name };
     const towardGoal = (sim.goalX(owner.side) - owner.pos.x) * (owner.side === 0 ? 1 : -1);
     if (roll > 0.85) {
       const keeper = sim.teamOf(owner.side).find((p) => p.isKeeper);
-      if (keeper) return line('quietKeeper', { keeper: keeper.info.name }, rng);
+      if (keeper) return this.say('quietKeeper', { keeper: keeper.info.name });
     }
-    if (towardGoal < sim.length * 0.3) return line('quietAttack', vars, rng);
-    if (towardGoal > sim.length * 0.7) return line('quietDefence', vars, rng);
-    return line('quietPossession', vars, rng);
+    if (towardGoal < sim.length * 0.3) return this.say('quietAttack', vars);
+    if (towardGoal > sim.length * 0.7) return this.say('quietDefence', vars);
+    return this.say('quietPossession', vars);
   }
 }

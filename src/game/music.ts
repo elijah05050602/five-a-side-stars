@@ -1,14 +1,17 @@
 import { getSettings } from '../data/storage';
-import { audioContext, masterBus, midiToHz, noiseBurst, tone } from './audio';
+import { audioContext, channelBus, loadAudio, midiToHz, noiseBurst, tone } from './audio';
 
 /**
- * The menu tune: a bouncy football-anthem loop made from oscillators and
- * noise, so no audio files are needed. Chords, a lead, an oom-pah bass and a
- * drum kit, in two eight-bar sections. Starts on the first tap or key press
- * (browsers require a gesture) and fades right down during a match.
+ * The menu music: a stadium anthem recorded with real sampled instruments
+ * (public/audio/menu.mp3, made by tools/audio/compose_music.py) played as a
+ * seamless loop, plus short jingles at full time. Starts on the first tap or
+ * key press (browsers require a gesture) and fades right down during a match.
+ * While the recording loads, or if it cannot be played, the same tune plays
+ * on oscillators so there is never silence.
  */
 const BPM = 132;
 const STEPS_PER_BAR = 8; // eighth notes
+const LOOP_SECONDS = 60; // 32 bars at 128 bpm, see compose_music.py
 
 // Chords per bar: [root midi, third, fifth] in a comfortable register.
 const C = [60, 64, 67], G = [59, 62, 67], Am = [57, 60, 64], F = [57, 60, 65];
@@ -35,6 +38,8 @@ const LEAD = [
   86, 0, 0, 0, 84, 0, 0, 0,
 ];
 
+export type Jingle = 'win' | 'draw';
+
 class Music {
   private ctx: AudioContext | null = null;
   private bus: GainNode | null = null;
@@ -43,8 +48,11 @@ class Music {
   private step = 0;
   private playing = false;
   private quiet = false;
+  private track: AudioBufferSourceNode | null = null;
+  private trackGain: GainNode | null = null;
+  private synthGain: GainNode | null = null;
 
-  private get level(): number { return this.quiet ? 0.0 : 0.55; }
+  private get level(): number { return this.quiet ? 0.0 : 1; }
 
   /** Call from a user gesture. Does nothing when music is off in the settings. */
   start(): void {
@@ -55,12 +63,18 @@ class Music {
       this.ctx = c;
       this.bus = c.createGain();
       this.bus.gain.value = 0;
-      this.bus.connect(masterBus());
+      this.bus.connect(channelBus('music'));
+      this.synthGain = c.createGain();
+      this.synthGain.gain.value = 0.55;
+      this.synthGain.connect(this.bus);
     }
     this.bus!.gain.setTargetAtTime(this.level, c.currentTime, 0.4);
     this.playing = true;
+    if (this.track) return;
+    // Oscillator tune until the recording is ready.
     this.nextTime = c.currentTime + 0.05;
     this.timer = window.setInterval(() => this.schedule(), 90);
+    void loadAudio('audio/menu.mp3').then((buf) => { if (buf && this.playing && !this.track) this.playTrack(buf); });
   }
 
   stop(): void {
@@ -68,9 +82,12 @@ class Music {
     this.playing = false;
     window.clearInterval(this.timer);
     if (this.ctx && this.bus) this.bus.gain.setTargetAtTime(0, this.ctx.currentTime, 0.3);
+    const track = this.track;
+    this.track = null;
+    if (track && this.ctx) track.stop(this.ctx.currentTime + 1.5);
   }
 
-  /** Fade right down during a match so the crowd and the whistle carry the mood. */
+  /** Fade right down during a match so the crowd and the commentator carry the mood. */
   setQuiet(quiet: boolean): void {
     this.quiet = quiet;
     if (this.playing && this.ctx && this.bus) this.bus.gain.setTargetAtTime(this.level, this.ctx.currentTime, 0.6);
@@ -79,6 +96,46 @@ class Music {
   /** Apply a settings change immediately. */
   refresh(): void {
     if (getSettings().music) this.start(); else this.stop();
+  }
+
+  /** A short recorded fanfare, played over everything (used at full time). */
+  jingle(kind: Jingle): void {
+    if (!getSettings().music) return;
+    const c = audioContext();
+    if (!c) return;
+    void loadAudio(`audio/${kind}.mp3`).then((buf) => {
+      if (!buf) return;
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      const g = c.createGain();
+      g.gain.value = 0.9;
+      src.connect(g).connect(channelBus('music'));
+      src.start();
+    });
+  }
+
+  /** Fetch the jingles ahead of full time so they play on cue. */
+  preloadJingles(): void {
+    if (!getSettings().music || !audioContext()) return;
+    void loadAudio('audio/win.mp3');
+    void loadAudio('audio/draw.mp3');
+  }
+
+  private playTrack(buf: AudioBuffer): void {
+    const c = this.ctx!;
+    window.clearInterval(this.timer);
+    this.synthGain!.gain.setTargetAtTime(0, c.currentTime, 0.3);
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.loopStart = 0;
+    src.loopEnd = Math.min(buf.duration, LOOP_SECONDS);
+    this.trackGain = c.createGain();
+    this.trackGain.gain.setValueAtTime(0.0001, c.currentTime);
+    this.trackGain.gain.exponentialRampToValueAtTime(0.8, c.currentTime + 1.2);
+    src.connect(this.trackGain).connect(this.bus!);
+    src.start();
+    this.track = src;
   }
 
   private schedule(): void {
@@ -92,7 +149,7 @@ class Music {
   }
 
   private playStep(i: number, at: number, stepDur: number): void {
-    const c = this.ctx!, out = this.bus!;
+    const c = this.ctx!, out = this.synthGain!;
     const bar = Math.floor(i / STEPS_PER_BAR), beat = i % STEPS_PER_BAR;
     const chord = CHORDS[bar], root = ROOTS[bar];
     const sectionB = bar >= 8;
