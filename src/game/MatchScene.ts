@@ -10,7 +10,7 @@ import { toonMaterial } from './toon';
 import { PlayerModel, type AnimState } from './PlayerModel';
 import type { Expression } from './playerFace';
 import type { Kit } from '../data/types';
-import { DIVE_RECOVER, MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side } from './sim';
+import { CROWD_SHOT_AT, DIVE_RECOVER, MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
 import { Commentary } from './voice';
@@ -328,10 +328,11 @@ export class MatchScene {
   /**
    * Camera sits above and "south" of the focus point, looking down at a tilt. On an upright
    * screen it can instead sit behind the player's own goal, so the pitch runs up the screen.
+   * `close` below 1 brings it in (to watch a goal celebration up close).
    */
-  private cameraGoal(target: THREE.Vector3): THREE.Vector3 {
+  private cameraGoal(target: THREE.Vector3, close = 1): THREE.Vector3 {
     const aspect = this.camera.aspect;
-    const zoom = CAMERA_HEIGHT_SCALE[getControls().camera.height];
+    const zoom = CAMERA_HEIGHT_SCALE[getControls().camera.height] * close;
     if (this.upfield) {
       // Fit most of the pitch's width across the narrow screen; the camera slides sideways for the rest.
       const height = ((this.sim.width * 0.5) / Math.max(0.42, aspect) + 2) * zoom;
@@ -430,7 +431,8 @@ export class MatchScene {
       const gazeX = ahead ? Math.round(Math.sin(ang) * 2) / 2 : 0;
       const gazeY = ahead && Math.hypot(b.pos.x - p.pos.x, b.pos.z - p.pos.z) < 2.5 * scale ? 0.5 : 0;
       const st: AnimState = { speed, kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, tackle: p.tackleTimer, scale, wobble, mood, gazeX, gazeY, cheer: celebrating === p.side, stepover: p.trickKind === 'stepover' ? p.trickAnim : 0, stepoverDir: p.trickDir,
-        dribble: b.owner === p && !p.isKeeper && this.sim.phase === 'play', recover: Math.min(1, p.recover / DIVE_RECOVER), strafe: -p.vel.x * Math.sin(p.facing) + p.vel.z * Math.cos(p.facing) };
+        dribble: b.owner === p && !p.isKeeper && this.sim.phase === 'play', recover: Math.min(1, p.recover / DIVE_RECOVER), strafe: -p.vel.x * Math.sin(p.facing) + p.vel.z * Math.cos(p.facing),
+        celebrate: celebrating >= 0 ? p.celebrate : null, celebrateT: this.sim.phaseTimer, move: p.move, moveAnim: p.moveAnim, hold: b.owner === p && p.handling };
       m.animate(dt, st);
       const isP1 = p === this.sim.controlled;
       const isP2 = p === this.sim.controlled2;
@@ -440,27 +442,31 @@ export class MatchScene {
 
     // Camera follows a blend of the ball and the controlled player, clamped to the pitch.
     const c1 = this.sim.controlled, c2 = this.sim.controlled2;
-    const focus = c1 && this.sim.phase !== 'goal'
+    // The celebration: watch the scorer and the team-mates piling on.
+    const hero = this.sim.phase === 'goal' && this.sim.phaseTimer > 0.5 ? this.sim.celebrator : null;
+    const focus = hero ? new THREE.Vector3(hero.pos.x, 0, hero.pos.z) : c1 && this.sim.phase !== 'goal'
       ? (c2
         ? new THREE.Vector3(b.pos.x * 0.6 + c1.pos.x * 0.2 + c2.pos.x * 0.2, 0, b.pos.z * 0.6 + c1.pos.z * 0.2 + c2.pos.z * 0.2)
         : new THREE.Vector3(b.pos.x * 0.65 + c1.pos.x * 0.35, 0, b.pos.z * 0.65 + c1.pos.z * 0.35))
       : new THREE.Vector3(b.pos.x, 0, b.pos.z);
     // Set pieces happen out by the lines, so let the camera follow further out for them.
     const wide = this.sim.phase === 'setpiece' ? 1.25 : 1;
-    focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.32 * wide, this.sim.length * 0.32 * wide);
-    focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.2 * wide * wide, this.sim.width * 0.2 * wide * wide);
+    if (!hero) {
+      focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.32 * wide, this.sim.length * 0.32 * wide);
+      focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.2 * wide * wide, this.sim.width * 0.2 * wide * wide);
+    }
     this.camTarget.lerp(focus, 1 - Math.pow(0.02, dt));
-    // After a goal in a match (and after the replay, which plays from 1.1s), swing round to the
-    // scoring team's fans going wild, then back for kick-off.
+    // After a goal in a match the camera follows the scorer's celebration (after the replay, which
+    // plays from 1.1s), then swings round to the scoring team's fans going wild, then back for kick-off.
     const scorer = this.sim.goals[this.sim.goals.length - 1];
-    const crowdShot = this.sim.mode === 'match' && this.sim.phase === 'goal' && this.sim.phaseTimer > 1.2 && scorer
+    const crowdShot = this.sim.mode === 'match' && this.sim.phase === 'goal' && this.sim.phaseTimer > CROWD_SHOT_AT && scorer
       ? this.crowd.celebrationShot(scorer.side) : null;
     if (crowdShot && scorer) {
       this.crowd.celebrate(scorer.side);
       if (!this.celebrated) { this.celebrated = true; this.sfx.play('celebrate'); }
     } else if (this.sim.phase !== 'goal') this.celebrated = false;
     const k = 1 - Math.pow(crowdShot ? 0.01 : 0.02, dt);
-    this.camPos.lerp(crowdShot ? crowdShot.pos : this.cameraGoal(this.camTarget), k);
+    this.camPos.lerp(crowdShot ? crowdShot.pos : this.cameraGoal(this.camTarget, hero ? 0.55 : 1), k);
     this.camLook.lerp(crowdShot ? crowdShot.look : new THREE.Vector3(this.camTarget.x, 0.5, this.camTarget.z), k);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);

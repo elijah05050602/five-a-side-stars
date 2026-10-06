@@ -143,11 +143,33 @@ describe('match engine: goals', () => {
     expect(Math.abs(wide.ball.pos.x)).toBeLessThanOrEqual(wide.length / 2 + RUNOFF_END);
   });
 
+  it('after a goal the scorer celebrates, team-mates pile in and the other side are glum, all reset at kick-off', () => {
+    const sim = cpuMatch();
+    const kicker = sim.players.find((p) => p.side === 0 && !p.isKeeper)!;
+    rollIntoGoal(sim, 0);
+    sim.ball.lastKick = kicker;
+    runUntil(sim, (s) => s.phase === 'goal', 60);
+    expect(sim.celebrator).toBe(kicker);
+    expect(['slide', 'plane']).toContain(kicker.celebrate);
+    for (const p of sim.players) {
+      if (p.side === 0 && p !== kicker) expect(p.celebrate).toBe('huddle');
+      if (p.side === 1) expect(p.celebrate).toBe(p.isKeeper ? 'sit' : 'slump');
+    }
+    // Team-mates run to the scorer.
+    const mate = sim.players.find((p) => p.side === 0 && p !== kicker && !p.isKeeper)!;
+    const before = Math.hypot(mate.pos.x - kicker.pos.x, mate.pos.z - kicker.pos.z);
+    runUntil(sim, (s) => s.phaseTimer > 3, 60 * 5);
+    expect(Math.hypot(mate.pos.x - kicker.pos.x, mate.pos.z - kicker.pos.z)).toBeLessThan(Math.max(1.5, before * 0.5));
+    runUntil(sim, (s) => s.phase === 'kickoff', 60 * 8);
+    expect(sim.celebrator).toBeNull();
+    expect(sim.players.every((p) => p.celebrate === null)).toBe(true);
+  });
+
   it('after a goal the side that conceded kicks off', () => {
     const sim = cpuMatch();
     rollIntoGoal(sim, 0);
     runUntil(sim, (s) => s.phase === 'goal', 60);
-    runUntil(sim, (s) => s.phase === 'kickoff', 60 * 5);
+    runUntil(sim, (s) => s.phase === 'kickoff', 60 * 8);
     expect(sim.phase).toBe('kickoff');
     expect(sim.kickoffSide).toBe(1);
     expect(sim.ball.owner?.side).toBe(1);
@@ -280,6 +302,22 @@ describe('passing and lobs', () => {
     expect(sim.ball.receiver).toBe(mate);
     runUntil(sim, (s) => s.ball.owner !== null, 60 * 4);
     expect(sim.ball.owner).toBe(mate);
+  });
+
+  it('a cross dropping at head height in the box is headed at goal', () => {
+    const { sim, p, mate } = lane();
+    const L = sim.length / 2;
+    mate.pos = { x: L - 3, z: 0 }; mate.speedMul = 0;
+    p.pos = { x: L - 5, z: 4 };
+    const b = sim.ball;
+    b.owner = null; b.pos = { x: L - 3, z: 0.25 }; b.vel = { x: 0, z: -2 }; b.y = 1.0 * sim.stats.scale + 0.2; b.vy = 0;
+    b.lofted = true; b.wasPass = true; b.receiver = mate; b.lastKick = p; b.flightId++;
+    const shots: boolean[] = [];
+    for (let i = 0; i < 30 && !shots.length; i++) { sim.step(1 / 60, IDLE_INPUT); shots.push(...sim.events.filter((e) => e.type === 'shot').map((e) => !!e.header)); sim.events.length = 0; }
+    expect(shots).toEqual([true]);
+    expect(mate.move).toBe('header');
+    expect(sim.ball.lastKick).toBe(mate);
+    expect(sim.ball.vel.x).toBeGreaterThan(0); // towards the goal it attacks
   });
 
   it('a ground pass along the same lane is cut out by the defender', () => {

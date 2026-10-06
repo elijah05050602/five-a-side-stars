@@ -47,6 +47,47 @@ describe('keeper dives', () => {
   });
 });
 
+describe('keeper handling', () => {
+  /** A gentle shot straight at side 0's keeper, so it is caught rather than parried. */
+  function catchable(y: number) {
+    const sim = cpuMatch({ halfSeconds: 120 });
+    sim.phase = 'play';
+    const keeper = sim.players.find((p) => p.side === 0 && p.isKeeper)!;
+    const own = sim.ownGoalX(0);
+    for (const p of sim.players) if (p !== keeper) { p.pos = { x: 10, z: 6 }; p.speedMul = 0; }
+    keeper.pos = { x: own + 0.7, z: 0 };
+    const b = sim.ball;
+    b.owner = null; b.y = y; b.vy = 0;
+    b.pos = { x: own + 4, z: 0 };
+    b.vel = { x: -5, z: 0 };
+    b.lastKick = sim.players.find((p) => p.side === 1 && !p.isKeeper)!;
+    b.wasPass = false;
+    b.flightId++;
+    return { sim, keeper };
+  }
+
+  it('catches a shot in the hands, holds it up in front and then throws or kicks it out', () => {
+    const { sim, keeper } = catchable(0.5);
+    runUntil(sim, (s) => s.ball.owner === keeper, 120);
+    expect(sim.ball.owner).toBe(keeper);
+    expect(keeper.handling).toBe(true);
+    expect(['catchChest', 'catchHigh', 'scoop']).toContain(keeper.move);
+    runUntil(sim, () => false, 20);
+    expect(sim.ball.y).toBeGreaterThan(0.4 * sim.stats.scale);
+    runUntil(sim, (s) => s.ball.owner !== keeper, 60 * 6);
+    expect(sim.ball.lastKick).toBe(keeper);
+    expect(['throw', 'punt']).toContain(keeper.move);
+    expect(keeper.handling).toBe(false);
+  });
+
+  it('a ball rolled along the grass is scooped up', () => {
+    const { sim, keeper } = catchable(0);
+    sim.ball.vel = { x: -3.6, z: 0 };
+    runUntil(sim, (s) => s.ball.owner === keeper, 120);
+    expect(keeper.move).toBe('scoop');
+  });
+});
+
 describe('pass back to the keeper', () => {
   function backPass() {
     const sim = cpuMatch({ halfSeconds: 120 });
@@ -76,6 +117,15 @@ describe('pass back to the keeper', () => {
     expect(saves).toBe(0);
     expect(dived).toBe(false);
     expect(sim.score).toEqual([0, 0]);
+  });
+
+  it('a pass back stays at the keeper\'s feet rather than in their hands', () => {
+    const { sim, keeper, p } = backPass();
+    sim.pass(p, { x: -1, z: -0.1 });
+    runUntil(sim, (s) => s.ball.owner === keeper, 60 * 4);
+    expect(keeper.handling).toBe(false);
+    runUntil(sim, () => false, 20);
+    expect(sim.ball.y).toBeLessThan(0.05);
   });
 
   it('the keeper then gives it away to a team-mate', () => {
