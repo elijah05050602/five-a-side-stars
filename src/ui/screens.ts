@@ -1,5 +1,6 @@
 import { AGE_STATS } from '../data/ageGroups';
 import { soundSettings, wireSoundSettings } from './soundSettings';
+import { graphicsSettings, wireGraphicsSettings } from './graphicsSettings';
 import { applyVolumes } from '../game/audio';
 import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode } from '../data/defaults';
 import { deleteTeam, getCareer, getLeague, getSettings, getTeam, getTeams, resetAll, saveTeam, setCareer, setLeague, updateSettings } from '../data/storage';
@@ -1244,6 +1245,7 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
         <h2>Settings</h2>
         ${soundSettings()}
         <label class="toggle"><input type="checkbox" id="pa-motion" ${s.reduceMotion ? 'checked' : ''}/> Reduce motion (no confetti or wobbling, calmer animations)</label>
+        ${graphicsSettings()}
       </div>
       <div class="card">
         <h2>About this game</h2>
@@ -1265,6 +1267,7 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
   wireSoundSettings(root);
+  wireGraphicsSettings(root);
   root.querySelector<HTMLInputElement>('#pa-motion')!.addEventListener('change', (e) => { updateSettings({ reduceMotion: (e.target as HTMLInputElement).checked }); applyMotionSetting(); });
   root.querySelector('#pa-reset')!.addEventListener('click', () => {
     if (confirm('Delete every team, sticker and setting on this device and start again?')) { resetAll(); applyVolumes(); music.refresh(); router.go({ name: 'menu' }); }

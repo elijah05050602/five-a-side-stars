@@ -140,9 +140,9 @@ export class Crowd {
   private partySide: 0 | 1 | null = null;
   private confettiDue = 0;
 
-  constructor(private readonly sim: MatchSim, opts: { touch: boolean }) {
+  constructor(private readonly sim: MatchSim, opts: { lite: boolean }) {
     this.calm = getSettings().reduceMotion;
-    const lite = opts.touch;
+    const lite = opts.lite;
     const idle = (): SideMood => ({ mood: 'idle', prev: 'idle', since: 99, left: 0 });
     this.moods = [idle(), idle(), idle()];
 
@@ -188,13 +188,14 @@ export class Crowd {
     }
 
     // Parts. Geometries are built around the joint they turn about.
-    const bodyGeo = new THREE.CapsuleGeometry(0.17, 0.16, 4, 10);
+    // Lite crowds (phones) use rounder-cornered, lower-poly parts: the fans are small on screen.
+    const bodyGeo = lite ? new THREE.CapsuleGeometry(0.17, 0.16, 2, 7) : new THREE.CapsuleGeometry(0.17, 0.16, 4, 10);
     const legGeo = new THREE.BoxGeometry(0.28, 1, 0.16).translate(0, -0.5, 0);
-    const headGeo = new THREE.SphereGeometry(0.2, 12, 10);
-    const hairGeo = new THREE.SphereGeometry(0.212, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55).rotateX(-0.3);
-    const armGeo = new THREE.CapsuleGeometry(0.058, 0.28, 3, 6).translate(0, -0.19, 0);
+    const headGeo = lite ? new THREE.SphereGeometry(0.2, 9, 7) : new THREE.SphereGeometry(0.2, 12, 10);
+    const hairGeo = new THREE.SphereGeometry(0.212, lite ? 9 : 12, lite ? 5 : 8, 0, Math.PI * 2, 0, Math.PI * 0.55).rotateX(-0.3);
+    const armGeo = new THREE.CapsuleGeometry(0.058, 0.28, lite ? 1 : 3, lite ? 5 : 6).translate(0, -0.19, 0);
     // The face: a cap of sphere just proud of the head's front, with flat UVs like the players' face patch.
-    const faceGeo = new THREE.SphereGeometry(0.203, 14, 10, Math.PI / 2 - 1.0, 2.0, 0.95, 1.55);
+    const faceGeo = new THREE.SphereGeometry(0.203, lite ? 8 : 14, lite ? 6 : 10, Math.PI / 2 - 1.0, 2.0, 0.95, 1.55);
     {
       const pos = faceGeo.attributes.position, uv = faceGeo.attributes.uv;
       const half = 0.135, top = 0.1, bottom = -0.155;

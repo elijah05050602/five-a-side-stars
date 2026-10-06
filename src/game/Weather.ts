@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { GraphicsProfile } from './graphics';
 import { floodlightPositions, grassTexture } from './Pitch';
 
 /**
@@ -76,7 +77,8 @@ export class Weather {
   private time = 0;
   private readonly fogDistance: [number, number];
 
-  constructor(private readonly scene: THREE.Scene, private readonly dims: { length: number; width: number }, readonly conditions: Conditions, lowDetail: boolean) {
+  constructor(private readonly scene: THREE.Scene, private readonly dims: { length: number; width: number }, readonly conditions: Conditions, gfx: Pick<GraphicsProfile, 'liteWeather' | 'spotlights'>) {
+    const lowDetail = gfx.liteWeather;
     const look = lookFor(conditions);
     scene.background = new THREE.Color(look.sky);
     const poor = conditions.weather === 'rain' || conditions.weather === 'snow' || (conditions.weather === 'cloudy' && conditions.time !== 'sunset');
@@ -95,7 +97,7 @@ export class Weather {
     });
     scene.add(this.group);
 
-    if (conditions.time === 'night') this.buildNight(lowDetail);
+    if (conditions.time === 'night') this.buildNight(lowDetail, gfx.spotlights);
     if (conditions.time === 'sunset') this.buildSun('#ffd27a', 1.9, new THREE.Vector3(-90, 16, 20));
     if (conditions.time === 'day' && conditions.weather === 'clear') this.buildSun('#fff6c8', 2.2, new THREE.Vector3(-40, 70, 30));
     if (conditions.weather === 'cloudy' || conditions.weather === 'rain') this.buildCloudShadows(conditions.weather === 'rain' ? 10 : 6);
@@ -114,7 +116,7 @@ export class Weather {
     this.group.add(glow, sun);
   }
 
-  private buildNight(lowDetail: boolean): void {
+  private buildNight(lowDetail: boolean, spotlights: boolean): void {
     // Stars on a big sphere, far enough that fog does not touch them.
     const n = lowDetail ? 250 : 500;
     const pos = new Float32Array(n * 3);
@@ -131,16 +133,23 @@ export class Weather {
     this.buildSun('#fff7d6', 1.6, new THREE.Vector3(60, 60, -70));
     // Floodlights: lamps glow and a spotlight from each tower washes the pitch.
     for (const [x, , z] of floodlightPositions(this.dims.length, this.dims.width)) {
-      const lamp = new THREE.SpotLight(0xf3f7ff, lowDetail ? 22 : 30, 80, Math.PI / 4.2, 0.6, 1.1);
-      lamp.position.set(x, 9.5, z);
-      lamp.target.position.set(x * 0.15, 0, z * 0.15);
-      this.group.add(lamp, lamp.target);
+      if (spotlights) {
+        const lamp = new THREE.SpotLight(0xf3f7ff, lowDetail ? 22 : 30, 80, Math.PI / 4.2, 0.6, 1.1);
+        lamp.position.set(x, 9.5, z);
+        lamp.target.position.set(x * 0.15, 0, z * 0.15);
+        this.group.add(lamp, lamp.target);
+      }
       const beam = new THREE.Mesh(new THREE.ConeGeometry(2.2, 6, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07, depthWrite: false, side: THREE.DoubleSide, fog: false }));
       beam.position.set(x - Math.sign(x) * 1.2, 7, z - Math.sign(z) * 1.2);
       beam.lookAt(x * 0.15, 0, z * 0.15);
       beam.rotateX(Math.PI / 2);
       this.group.add(beam);
     }
+    // Without the spotlights (Low graphics), brighten the existing lights instead: a flat floodlit wash costs nothing per pixel.
+    if (!spotlights) this.scene.traverse((o) => {
+      if (o instanceof THREE.HemisphereLight) { o.intensity += 0.9; o.color.lerp(new THREE.Color(0xf3f7ff), 0.5); }
+      else if (o instanceof THREE.DirectionalLight && o.castShadow) { o.intensity += 0.9; o.color.lerp(new THREE.Color(0xf3f7ff), 0.5); }
+    });
     this.scene.traverse((o) => { if (o.userData.lamp && o instanceof THREE.Mesh) (o.material as THREE.MeshStandardMaterial).emissiveIntensity = 2.5; });
   }
 
@@ -203,12 +212,15 @@ export class Weather {
     const apronTex = grassTexture(1, '#e9eef2', '#e9eef2');
     apronTex.wrapS = apronTex.wrapT = THREE.RepeatWrapping;
     apronTex.repeat.set(6, 6);
+    // Leaf materials are shared between trees, so whiten each one only once.
+    const leaves = new Set<THREE.MeshToonMaterial>();
     this.scene.traverse((o) => {
       if (!(o instanceof THREE.Mesh)) return;
       const mat = o.material as THREE.MeshStandardMaterial;
       if (o.userData.grass) { mat.map = o.userData.grass === 'apron' ? apronTex : snowTex; mat.needsUpdate = true; }
-      if (o.userData.leaves) { mat.color.lerp(new THREE.Color('#e9eef2'), 0.6); }
+      if (o.userData.leaves) leaves.add(o.material as THREE.MeshToonMaterial);
     });
+    for (const mat of leaves) mat.color.lerp(new THREE.Color('#e9eef2'), 0.6);
   }
 
   update(dt: number): void {
