@@ -1,0 +1,136 @@
+import { getCareer, getLeague, getTeam, saveTeam, setCareer, setLeague, setTournament } from '../../data/storage';
+import { applyCareerMatch, careerAge, playerOfTheMatch, seasonName, type GrowthEvent } from '../../game/career';
+import type { MatchResult } from '../../game/MatchScene';
+import { getProgress, recordCareer, type Sticker } from '../../data/progress';
+import { applyLeagueResult, roundJobs, tierInfo, yourPosition } from '../../game/league';
+import { applyResult, cupAheadRequest, currentFixture, type TournamentState } from '../../game/tournament';
+import { inBackground, type CupAhead, type SimOutcome } from '../../game/background';
+import { esc } from '../hud';
+import { badgeSvg } from '../kitPreview';
+import { topBar, wire, ordinal, stickerBanner, growthList } from './shared';
+import type { Router, Screen, StartOptions } from '../screens';
+
+function pensRow(res: boolean[], total: number): string {
+  return `<span class="pens-row">${Array.from({ length: Math.max(total, res.length) }, (_, i) => res[i] === undefined ? '<i class="pen pen-todo"></i>' : res[i] ? '<i class="pen pen-goal">⚽</i>' : '<i class="pen pen-miss">✕</i>').join('')}</span>`;
+}
+
+/** What the results screen shows beyond the score, worked out once when the match finished. */
+export interface ResultSummary {
+  stickers: Sticker[];
+  /** Where the league or career table stands after this match. */
+  tableNote?: string;
+  /** Stars the career players earned in this match. */
+  growth?: GrowthEvent[];
+}
+
+/** Computer matches played in the background during the player's own (see playAhead). */
+export interface Ahead {
+  /** The rest of a league round: which round, and one result per fixture (null for the player's own). */
+  round?: { index: number; outcomes: (SimOutcome | null)[] };
+  cup?: CupAhead;
+}
+
+/** Start the computer matches that finish alongside this one (the rest of the league round, the other cup semi) while it is played. */
+export function playAhead(o: StartOptions): Promise<Ahead> {
+  const career = o.career ? getCareer() : null;
+  const ls = o.league ? getLeague() : career?.league ?? null;
+  const you = ls && getTeam(o.league ? ls.teamId : career!.teamId);
+  if (ls && you) {
+    const index = ls.round;
+    return inBackground({ kind: 'round', jobs: roundJobs(ls, you) }).then((res) => (res.kind === 'round' ? { round: { index, outcomes: res.outcomes } } : {}));
+  }
+  const cup = o.tournament && cupAheadRequest(o.tournament);
+  if (cup) return inBackground(cup).then((res) => (res.kind === 'cup' ? { cup: res.ahead } : {}));
+  return Promise.resolve({});
+}
+
+/**
+ * Record a finished match everywhere it counts (the cup bracket, the league table, the career and the
+ * players' stars) and build its results screen. Runs exactly once per match, when it ends, never on a redraw.
+ */
+export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[], ahead: Ahead = {}): Screen {
+  const summary: ResultSummary = { stickers: [...stickers] };
+  if (o.tournament) {
+    applyResult(o.tournament, r, ahead.cup);
+    setTournament(o.tournament);
+  }
+  if (o.career) {
+    const c = getCareer();
+    const you = c && getTeam(c.teamId);
+    if (c && you && !c.done) {
+      const others = ahead.round?.index === c.league.round ? ahead.round.outcomes : undefined;
+      const s = applyCareerMatch(c, you, r, others);
+      saveTeam(you);
+      setCareer(c);
+      const motm3 = Object.values(c.careerStats).some((st) => st.motm >= 3);
+      const boot = Object.values(c.seasonStats).some((st) => st.goals >= 8);
+      summary.stickers.push(...recordCareer({ starUp: s.growth.length > 0, fiveStar: s.fiveStar, motm3, goldenBoot: boot }));
+      summary.tableNote = `${careerAge(c)} · ${seasonName(c)} season · match ${Math.min(c.league.round, c.league.rounds.length)} of ${c.league.rounds.length} · you are ${ordinal(yourPosition(c.league, you))}`;
+      summary.growth = s.growth;
+    }
+  }
+  if (o.league) {
+    const ls = getLeague();
+    const you = ls && getTeam(ls.teamId);
+    if (ls && you) {
+      const others = ahead.round?.index === ls.round ? ahead.round.outcomes : undefined;
+      applyLeagueResult(ls, you, r, others);
+      setLeague(ls);
+      summary.tableNote = `${tierInfo(ls.tier).name} · round ${Math.min(ls.round, ls.rounds.length)} of ${ls.rounds.length} played · you are ${ordinal(yourPosition(ls, you))}`;
+    }
+  }
+  return { name: 'results', result: r, summary, tournament: o.tournament, league: o.league, career: o.career };
+}
+
+export function renderResults(root: HTMLElement, router: Router, r: MatchResult, summary: ResultSummary, tournament?: TournamentState, league?: boolean, career?: boolean): void {
+  const [h, a] = r.score;
+  const stickers = summary.stickers;
+  const leagueNote = summary.tableNote ? `<p class="muted">${esc(summary.tableNote)}</p>` : '';
+  const growthNote = growthList(summary.growth ?? []);
+  let headline = h === a ? "It's a draw!" : h > a ? `${r.home.name} win!` : `${r.away.name} win!`;
+  if (r.mode === 'training') headline = r.trainingPoints >= 10 ? 'Sharp shooting!' : r.trainingPoints >= 5 ? 'Nice work!' : 'Keep practising!';
+  if (r.mode === 'shootout') headline = h > a ? `${r.home.name} win the shoot-out!` : `${r.away.name} win the shoot-out!`;
+  if (tournament && h === a && r.mode === 'match') headline = 'All square! Penalties decide it.';
+  const motm = r.mode === 'match' ? playerOfTheMatch(r) : null;
+  const best = getProgress().trainingBest;
+  const soLen = r.shootout ? Math.max(5, r.shootout[0].length, r.shootout[1].length) : 0;
+  root.innerHTML = `
+    <div class="screen results">
+      ${topBar(r.mode === 'training' ? 'Training over' : r.mode === 'shootout' ? 'Shoot-out over' : 'Full Time', tournament ? 'cup' : league ? 'league' : 'none')}
+      <div class="card results-card">
+        <h2>${esc(headline)}</h2>
+        ${r.mode === 'training' ? `
+          <div class="training-score"><span class="score-big">${r.trainingPoints}</span><span class="muted">points</span></div>
+          <p class="muted">${r.goals.length} goals scored · best ever ${best} points</p>` : `
+          <div class="result-line">
+            <div class="result-team">${badgeSvg(r.home.badge, 64)}<span>${esc(r.home.name)}</span></div>
+            <div class="score-big">${h} – ${a}</div>
+            <div class="result-team">${badgeSvg(r.away.badge, 64)}<span>${esc(r.away.name)}</span></div>
+          </div>`}
+        ${r.shootout ? `<div class="pens">${pensRow(r.shootout[0], soLen)}${pensRow(r.shootout[1], soLen)}</div>` : ''}
+        ${r.mode === 'match' ? `<ul class="goals-list">
+          ${r.goals.length === 0 ? '<li class="muted">No goals this time. The keepers were on fire!</li>' : ''}
+          ${r.goals.map((g) => `<li>${g.side === 0 ? '⚽ ' : ''}<strong>${esc(g.scorer.name)}</strong> #${g.scorer.number}${g.ownGoal ? ' (og)' : ''} <span class="muted">${g.minute}'</span>${g.side === 1 ? ' ⚽' : ''}</li>`).join('')}
+        </ul>` : ''}
+        ${motm ? `<div class="motm">🏆 Player of the match: <strong>${esc(motm.name)}</strong> #${motm.number}</div>` : ''}
+        ${leagueNote}
+        ${growthNote}
+        ${stickerBanner(stickers)}
+        <div class="row">
+          ${tournament ? `<button class="btn btn-primary btn-big" id="r-cup">${tournament.needsShootout ? '🥅 Penalty shoot-out!' : '🏆 Back to the cup'}</button>` : league ? '<button class="btn btn-primary btn-big" id="r-league">📋 Back to the league</button>' : career ? '<button class="btn btn-primary btn-big" id="r-career">🌱 Back to the career</button>' : `<button class="btn btn-primary btn-big" id="r-again">Play again</button>`}
+          <button class="btn btn-ghost btn-big" id="r-menu">Main menu</button>
+        </div>
+      </div>
+    </div>`;
+  wire(root, () => router.go({ name: 'menu' }));
+  root.querySelector('#r-again')?.addEventListener('click', () => router.go({ name: 'setup', homeId: r.home.id, mode: r.mode === 'tutorial' ? 'match' : r.mode }));
+  root.querySelector('#r-cup')?.addEventListener('click', () => {
+    if (tournament!.needsShootout) {
+      const f = currentFixture(tournament!)!;
+      router.startMatch({ home: f.home, away: f.away, difficulty: tournament!.difficulty, halfSeconds: 60, twoPlayer: tournament!.twoPlayer, mode: 'shootout', tournament });
+    } else router.go({ name: 'tournament', state: tournament! });
+  });
+  root.querySelector('#r-league')?.addEventListener('click', () => router.go({ name: 'league' }));
+  root.querySelector('#r-career')?.addEventListener('click', () => router.go({ name: 'career' }));
+  root.querySelector('#r-menu')!.addEventListener('click', () => router.go({ name: 'menu' }));
+}
