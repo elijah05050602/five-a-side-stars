@@ -336,7 +336,8 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .sticker.is-missing { opacity: .6; border-style: dashed; }
 .sticker.is-got { border-color: var(--green); box-shadow: 0 6px 0 rgba(46,184,114,.25); }
 .sticker-unlock { font-size: .75rem; color: var(--blue-dark); font-weight: 700; }
-.sticker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; max-width: 900px; margin: 0 auto; }
+/* A definite width lets auto-fill count columns for the screen in hand, instead of laying out five and scrolling sideways on phones. */
+.sticker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; width: 100%; max-width: 900px; margin: 0 auto; }
 .stats-card { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; max-width: 900px; margin: 0 auto 12px; }
 .stat { display: flex; flex-direction: column; align-items: center; min-width: 80px; }
 .stat strong { font-size: 1.8rem; color: var(--navy); }
@@ -389,7 +390,8 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
 .rung { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; background: rgba(255,255,255,.35); border: 2px solid rgba(27,42,65,.35); }
 .rung.is-reached { background: rgba(255,255,255,.85); color: var(--navy); }
 .rung.is-here { background: var(--navy); color: var(--white); border-color: var(--navy); transform: scale(1.15); }
-.league-body { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; max-width: 900px; margin: 0 auto; align-items: flex-start; }
+/* Full width (not shrink-to-fit), so on phones the table scrolls inside its card instead of pushing the page sideways. */
+.league-body { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 900px; margin: 0 auto; align-items: flex-start; }
 .table-card { flex: 2 1 420px; overflow-x: auto; }
 .next-card { flex: 1 1 260px; display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
 .next-card .vs-mid { text-align: center; }
@@ -450,7 +452,7 @@ body:has(.lobby-root)::before { display: none; }
 .title { display: flex; flex-direction: column; align-items: center; line-height: 0.86; text-transform: uppercase; letter-spacing: 0.02em; }
 .title-goal { font-size: clamp(56px, 11vw, 112px); color: var(--white); text-shadow: 0 2px 0 #fff, 0 4px 0 var(--navy), 0 7px 0 var(--navy), 0 10px 0 var(--navy), 0 13px 0 #111c2c, 0 16px 20px rgba(10,18,30,0.65); }
 .title-rush { font-size: clamp(66px, 13vw, 130px); color: var(--yellow); font-style: italic; margin-top: -2px; letter-spacing: -0.01em; text-shadow: 0 2px 0 #fff6b7, 0 4px 0 #f59e0b, 0 7px 0 #b45309, 0 10px 0 var(--navy), 0 13px 0 var(--navy), 0 16px 24px rgba(0,0,0,0.65); }
-.ribbon { margin-top: 14px; background: var(--navy); color: var(--yellow); border: 3px solid var(--yellow); border-radius: 999px; padding: 6px 20px; font-size: 14px; letter-spacing: 0.14em; font-weight: 700; transform: rotate(-2deg); box-shadow: 0 4px 0 rgba(0,0,0,0.35); }
+.ribbon { margin-top: 14px; max-width: calc(100% - 8px); background: var(--navy); color: var(--yellow); border: 3px solid var(--yellow); border-radius: 999px; padding: 6px 20px; font-size: 14px; letter-spacing: 0.14em; font-weight: 700; transform: rotate(-2deg); box-shadow: 0 4px 0 rgba(0,0,0,0.35); }
 .ribbon span { color: var(--white); }
 .stage { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: center; }
 .mascot { display: flex; flex-direction: column; align-items: center; gap: 12px; }
