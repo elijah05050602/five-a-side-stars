@@ -76,7 +76,7 @@ const router: Router = {
     const mode = o.mode ?? 'match';
     // The rest of the league round (or the other cup semi) is played in the background meanwhile.
     const ahead = playAhead(o);
-    match = new MatchScene(renderer, ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode, cpuLevel: o.cpuLevel, assist: getSettings().beginnerHelp },
+    match = new MatchScene(renderer, ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode, cpuLevel: o.cpuLevel, assist: getSettings().beginnerHelp, supers: mode === 'match' && getSettings().supers !== 'off' },
       (result) => {
         match = null;
         const stickers = recordResult(result);

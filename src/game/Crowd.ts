@@ -401,6 +401,13 @@ export class Crowd {
         this.bump(1);
         this.waveX = Infinity;
         break;
+      case 'super':
+        if (side === null) break;
+        this.set(side, 'cheer', 2.5);
+        this.set(other(side), 'anticipate', 2.5);
+        this.set(2, 'anticipate', 2.5);
+        this.bump(0.9);
+        break;
       case 'save':
         if (side === null) break;
         this.shotWatch = null;
