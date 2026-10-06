@@ -21,4 +21,6 @@ export default tseslint.config(
     },
   },
   { files: ['tools/**/*.mjs', '*.config.{js,ts}', 'e2e/**/*.ts'], languageOptions: { globals: { ...globals.node } } },
+  // The build fills these in when it writes dist/sw.js (tools/sw-precache.ts).
+  { files: ['src/sw-template.js'], languageOptions: { globals: { ...globals.serviceworker, __VERSION__: 'readonly', __FILES__: 'readonly' } } },
 );

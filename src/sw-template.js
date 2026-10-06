@@ -6,12 +6,14 @@ const FILES = __FILES__;
 const PAGE = './index.html';
 const PAGE_TIMEOUT_MS = 3000;
 
-// Fetch every file past the browser's HTTP cache ('reload'), so a stale copy can never be stored
-// under a new version. addAll stores all or nothing, and this worker only takes over once it has all.
+// Check every file with the server before storing it ('no-cache'), so a stale copy in the browser's
+// HTTP cache can never be stored under a new version, while a file the page has just loaded comes
+// back as a cheap "not modified" instead of being downloaded twice. addAll stores all or nothing,
+// and this worker only takes over once it has all.
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(VERSION)
-      .then((cache) => cache.addAll(FILES.map((url) => new Request(url, { cache: 'reload' }))))
+      .then((cache) => cache.addAll(FILES.map((url) => new Request(url, { cache: 'no-cache' }))))
       .then(() => self.skipWaiting()),
   );
 });
