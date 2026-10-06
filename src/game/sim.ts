@@ -107,6 +107,7 @@ export interface SimPlayer {
   stamina: number;
   /** 0..1 shot power being charged while the shoot button is held. */
   charge: number;
+  kickKind: KickKind;
   /** Which way the keeper has committed to for a penalty (0 = not yet). */
   penaltyGuess: number;
   /** 1 when a skill move starts, fading to 0 (drives the animation). */
@@ -133,7 +134,9 @@ export type TrickKind = 'stepover' | 'nutmeg';
 /** Goal celebrations: a knee slide or aeroplane run for the scorer, a huddle for the team, and gloom for the other side. */
 export type Celebration = 'slide' | 'plane' | 'huddle' | 'slump' | 'sit';
 /** One-off moves the models act out: keeper handling, headers and first touches off a high ball. */
-export type MoveKind = 'catchHigh' | 'catchChest' | 'scoop' | 'throw' | 'punt' | 'header' | 'diveHeader' | 'headTrap' | 'chestTrap' | 'thighTrap';
+export type MoveKind = 'catchHigh' | 'catchChest' | 'scoop' | 'throw' | 'punt' | 'header' | 'diveHeader' | 'headTrap' | 'chestTrap' | 'thighTrap' | 'hop' | 'throwIn';
+/** What the last kick was, so the model can swing the leg to match: a big boot for a shot, a quick side-foot for a pass, a scoop for a lob. */
+export type KickKind = 'pass' | 'shot' | 'lob' | 'boot';
 /** Restarts after the ball goes out of play, plus the two the referee gives for fouls. */
 export type SetPieceKind = 'freekick' | 'penalty' | 'corner' | 'throwin' | 'goalkick';
 
@@ -360,7 +363,7 @@ export class MatchSim {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), role: info.position, slot: v(info.position === 'GK' ? 0.03 : 0.33, 0), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, distanceRun: 0, isKeeper: info.position === 'GK',
-          speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, penaltyGuess: 0,
+          speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, kickKind: 'pass', penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
           celebrate: null, move: null, moveAnim: 0, handling: false,
           mul, match: freshMatchStats(),
@@ -981,7 +984,11 @@ export class MatchSim {
       // Big clearance upfield, away from whoever is closest.
       const awayZ = presser ? Math.sign(p.pos.z - presser.pos.z) || 1 : (Math.random() < 0.5 ? -1 : 1);
       const boot = Math.sqrt(p.mul.strength); // Strength: a longer clearance
-      this.kick(p, v(dir, awayZ * rand(0.2, 0.6)), this.stats.power * 0.95 * boot, this.stats.power * 0.35 * boot);
+      const loft = this.stats.power * 0.35 * boot;
+      // A punt is dropped from the hands and met low, so it flies just like a kick off the grass.
+      this.ball.y = 0;
+      this.kick(p, v(dir, awayZ * rand(0.2, 0.6)), this.stats.power * 0.95 * boot, loft);
+      p.kickKind = 'boot';
       if (hands) this.setMove(p, 'punt'); // dropped from the hands and volleyed
     }
   }
@@ -1007,7 +1014,7 @@ export class MatchSim {
 
   private tickMove(p: SimPlayer, dt: number): void {
     // Catches and throws take about half a second; first touches and headers a little less.
-    p.moveAnim = Math.max(0, p.moveAnim - dt * (p.move === 'diveHeader' ? 1.4 : p.move === 'catchHigh' || p.move === 'throw' || p.move === 'punt' ? 1.9 : 2.6));
+    p.moveAnim = Math.max(0, p.moveAnim - dt * (p.move === 'diveHeader' ? 1.4 : p.move === 'hop' ? 3.2 : p.move === 'catchHigh' || p.move === 'throw' || p.move === 'punt' ? 1.9 : 2.6));
     if (p.moveAnim <= 0) p.move = null;
   }
 
@@ -1513,6 +1520,8 @@ export class MatchSim {
               this.awardFoul(p, o);
               return;
             }
+            // Beaten head-on: the dribbler hops over the outstretched leg.
+            if (!won && facingDot < 0 && !o.move) this.setMove(o, 'hop');
             if (won) {
               // Ball changes hands and squirts loose a little.
               p.match.tackles++;
@@ -1631,7 +1640,7 @@ export class MatchSim {
     const n = norm(dir);
     b.owner = null;
     b.vel = v(n.x * speed, n.z * speed);
-    // Struck from off the ground (a keeper's punt from the hands): flatter, so it lands where it would have from the grass.
+    // Struck off the ground (a punt from the hands, a volley off a first touch): flatter, so it lands where it would have from the grass.
     b.vy = loft > 0 && b.y > 0.05 ? loft - b.y / ((2 * loft) / 9.81) : loft;
     b.lastTouch = p;
     b.lastKick = p;
@@ -1642,6 +1651,7 @@ export class MatchSim {
     b.lofted = false;
     p.kickCooldown = 0.35;
     p.kickAnim = 1;
+    p.kickKind = 'pass';
     p.handling = false;
     p.facing = Math.atan2(n.z, n.x);
     if (this.phase === 'kickoff') this.phase = 'play';
@@ -1859,7 +1869,9 @@ export class MatchSim {
     const a = Math.atan2(dir.z, dir.x) + rand(-wobble, wobble);
     const speed = clamp(1.8 + d * 0.55, 3, this.stats.power * 0.55 * (long ? p.mul.strength : 1));
     this.kick(p, v(Math.cos(a), Math.sin(a)), speed, 1.2);
+    this.ball.vy = 1.2; // released overhead and up, not flattened like a kick off the ground
     p.kickAnim = 0; // thrown, not kicked
+    this.setMove(p, 'throwIn');
     this.ball.wasPass = mate !== null;
     this.ball.receiver = mate;
     this.ball.y = Math.max(this.ball.y, this.throwHeight());
@@ -1880,6 +1892,7 @@ export class MatchSim {
     const to = aim ?? v(dir, rand(-0.35, 0.35));
     const boot = Math.sqrt(p.mul.strength); // Strength: a longer goal kick
     this.kick(p, to, this.stats.power * 0.95 * powerMul * boot, this.stats.power * 0.33 * powerMul * boot);
+    p.kickKind = 'boot';
   }
 
   // ---------- skill moves ----------
@@ -1987,6 +2000,7 @@ export class MatchSim {
     const power = this.stats.power * clamp(0.85 + d / this.length, 0.95, 1.25) * powerMul * (p.info.special === 'power' ? 1.18 : 1) * p.mul.power;
     const loft = power * rand(0.06, 0.2) * (powerMul > 1 ? 1.3 : 1);
     this.kick(p, dir, power, loft);
+    p.kickKind = 'shot';
     p.match.shots++;
     this.ball.penaltyShot = penalty;
     this.events.push({ type: 'shot', side: p.side, player: p.info });
@@ -2076,6 +2090,7 @@ export class MatchSim {
     const wobble = (1 - this.stats.control) * 0.3 * p.mul.passWobble;
     const a = Math.atan2(to.z, to.x) + rand(-wobble, wobble);
     this.kick(p, v(Math.cos(a), Math.sin(a)), speed, (9.81 * t) / 2);
+    p.kickKind = 'lob';
     this.ball.wasPass = true;
     this.ball.receiver = mate;
     this.ball.lofted = true;

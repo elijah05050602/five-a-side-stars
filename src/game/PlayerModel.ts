@@ -4,7 +4,7 @@ import { cloneRig, loadPlayerAsset, playerAssetNow, type PlayerAsset } from './p
 import { contrastColour, numberTexture, playerAtlas } from './playerAtlas';
 import { faceTexture, type Expression } from './playerFace';
 import { ProceduralPlayerModel } from './ProceduralPlayerModel';
-import { DIVE_AIR_SHARE, DRIBBLE_STRIDE, SLIDE_AT, type Celebration, type MoveKind } from './sim';
+import { DIVE_AIR_SHARE, DRIBBLE_STRIDE, SLIDE_AT, type Celebration, type KickKind, type MoveKind } from './sim';
 import { graphicsProfile } from './graphics';
 import { addOutline, addSkinnedOutline, smoothOutlineNormals, toonMaterial } from './toon';
 
@@ -53,6 +53,16 @@ export interface AnimState {
   moveAnim?: number;
   /** A keeper with the ball in their hands, held out in front. */
   hold?: boolean;
+  /** What the last kick was (a shot is a big swing, a pass a quick side-foot, a lob a scoop). */
+  kickKind?: KickKind;
+  /** 0..1 while the shoot button is held: the kicking leg draws back. */
+  charge?: number;
+  /** Waiting for the kick-off: up on the toes. */
+  ready?: boolean;
+  /** Holding the ball over the head for a throw-in. */
+  throwIn?: boolean;
+  /** Calling for a pass: an arm up in the air. */
+  call?: boolean;
 }
 
 export const IDLE_STATE: AnimState = { speed: 0, kick: 0, dive: 0, diveDir: 1, stun: 0, tackle: 0, scale: 1, wobble: 0, mood: 'neutral', gazeX: 0, gazeY: 0, cheer: false };
@@ -90,7 +100,12 @@ const TAP_TIME = 0.2;
 const RUN_RIGHT_THROUGH = 0.35;
 /** How far a kneeling kid sinks (the shin length), as a share of their scale. */
 const KNEEL_DROP = 0.17;
+/** Seconds each kind of kick takes, swing and follow-through. */
+const KICK_TIME: Record<KickKind, number> = { pass: 0.3, shot: 0.45, lob: 0.42, boot: 0.5 };
+/** How high the kicking leg swings through after the ball, in radians from straight down. */
+const KICK_SWING: Record<KickKind, number> = { pass: 0.95, shot: 1.55, lob: 1.25, boot: 1.75 };
 
+const UP = new THREE.Vector3(0, 1, 0);
 const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
 /**
@@ -167,6 +182,26 @@ export class PlayerModel {
   private root: THREE.Object3D | null = null;
   private readonly rootRest = new THREE.Vector3();
   private slide = 0;
+  /** The current tackle: a slide along the grass when running at it, else a standing poke. */
+  private slideFast = false;
+  private slideTime = 0.42;
+  /** Seconds left on the current kick, and which kind it is. */
+  private kickT = 0;
+  private kickKind: KickKind = 'pass';
+  /** Builds up while sprinting; a tired kid who stops puts their hands on their knees. */
+  private fatigue = 0;
+  private breath = 0;
+  /** Blend weights for the waiting bounce, the throw-in hold, calling for the ball and stepping round on the spot. */
+  private readyW = 0;
+  private throwW = 0;
+  private callW = 0;
+  private stepW = 0;
+  private stepT = 0;
+  /** A sharp turn at speed: plant the outside foot and push off. */
+  private turnAcc = 0;
+  private plant = 0;
+  private plantSide = 1;
+  private readonly seed = Math.random() * 10;
   private facing = 0;
   private turn = 0;
   private lean = 0;
@@ -432,7 +467,11 @@ export class PlayerModel {
     const mu = move ? 1 - (st.moveAnim ?? 0) : 0; // 0 → 1 through the move
     if (moveStart && move === 'scoop') this.startOneShot('PickUp', 2.6, false, 0.15);
     if (moveStart && move === 'throw') this.startOneShot('Throw', 1.8, false, 0.3);
-    if (realKick && move !== 'header' && move !== 'throw') { this.tap = 0; this.startOneShot('Unarmed_Melee_Attack_Kick', 2.4, false); }
+    if (realKick && move !== 'header' && move !== 'throw' && move !== 'throwIn') {
+      this.tap = 0;
+      this.kickKind = st.kickKind ?? 'pass';
+      this.kickT = KICK_TIME[this.kickKind];
+    }
     const recovering = (st.recover ?? 0) > 0;
     const committed = diving || (this.isKeeper && recovering);
     if (diving && !this.wasDiving) {
@@ -450,7 +489,11 @@ export class PlayerModel {
     if (sitting && !this.sitting) this.startOneShot('Sit_Floor_Down', 1.3, true);
     if (!sitting && this.sitting && this.oneShot && !committed) this.endOneShot();
     this.sitting = sitting;
-    if (tackling && !this.wasTackling && !kicking) this.slide = 0.42;
+    if (tackling && !this.wasTackling && !kicking) {
+      this.slideFast = norm > 2.2;
+      this.slideTime = this.slideFast ? 0.55 : 0.3;
+      this.slide = this.slideTime;
+    }
     this.wasDiving = diving; this.wasStunned = stunned; this.wasTackling = tackling;
 
     // Locomotion from speed; feet speed follows the kid's actual speed.
@@ -480,15 +523,56 @@ export class PlayerModel {
     if (kicking) lift += 0.07 * scale * Math.sin(st.kick * Math.PI);
     // Dribbling: hunched a little over the ball, watching it.
     if (st.dribble) pitch -= 0.12 * Math.min(1, norm / 2);
-    if (stunned) roll += 0.22 * st.stun * Math.sin(st.stun * Math.PI * 3);
-    if (stepping) roll += (st.stepoverDir ?? 1) * 0.3 * Math.sin((1 - st.stepover!) * Math.PI * 2);
-    if (this.slide > 0) {
-      // Slide tackle: sit back and drop, then spring up.
-      this.slide = Math.max(0, this.slide - dt);
-      const k = Math.sin((1 - this.slide / 0.42) * Math.PI);
-      pitch += 0.8 * k;
-      lift -= 0.16 * scale * k;
+    if (stunned) {
+      // Knocked off the ball: a wobble and a stumble forward.
+      roll += 0.22 * st.stun * Math.sin(st.stun * Math.PI * 3);
+      pitch -= 0.35 * Math.sin(st.stun * Math.PI);
     }
+    if (stepping) roll += (st.stepoverDir ?? 1) * 0.3 * Math.sin((1 - st.stepover!) * Math.PI * 2);
+    let slideK = 0;
+    if (this.slide > 0) {
+      // Slide tackle: sit back and drop onto the grass, then spring up. A standing tackle just leans in.
+      this.slide = Math.max(0, this.slide - dt);
+      slideK = Math.sin((1 - this.slide / this.slideTime) * Math.PI);
+      if (this.slideFast) { pitch += 0.85 * slideK; lift -= 0.24 * scale * slideK; }
+      else pitch -= 0.15 * slideK;
+    }
+    // Kicks: a shot leans over the ball and hops through it, a lob leans back under it.
+    let kickU = -1;
+    if (this.kickT > 0) {
+      this.kickT = Math.max(0, this.kickT - dt);
+      kickU = 1 - this.kickT / KICK_TIME[this.kickKind];
+      const k = Math.sin(kickU * Math.PI);
+      if (this.kickKind === 'lob') pitch += 0.3 * k;
+      else if (this.kickKind !== 'pass') { pitch -= 0.12 * k; lift += 0.05 * scale * k; }
+    }
+    const charge = this.kickT > 0 ? 0 : st.charge ?? 0;
+    if (charge > 0) pitch -= 0.1 * charge;
+    // Sharp turns at a run: dip, lean in and plant the outside foot.
+    this.turnAcc = this.turnAcc * Math.exp(-dt * 8) + turnRate * dt;
+    if (this.plant <= 0 && Math.abs(this.turnAcc) > 0.9 && norm > 2) { this.plant = 0.26; this.plantSide = Math.sign(this.turnAcc); this.turnAcc = 0; }
+    let plantK = 0;
+    if (this.plant > 0) {
+      this.plant = Math.max(0, this.plant - dt);
+      plantK = Math.sin((1 - this.plant / 0.26) * Math.PI);
+      lift -= 0.06 * scale * plantK;
+      roll += this.plantSide * 0.2 * plantK;
+      pitch += 0.12 * plantK;
+    }
+    // Turning on the spot: little steps round instead of spinning on the studs.
+    const stepping2 = norm < 0.6 && Math.abs(turnRate) > 2.5;
+    this.stepW += ((stepping2 ? 1 : 0) - this.stepW) * Math.min(1, dt * 12);
+    if (this.stepW > 0.01) this.stepT += dt * 16;
+    // Tired after a long sprint: when the kid stops, hands on knees to get their breath back.
+    this.fatigue = THREE.MathUtils.clamp(this.fatigue + dt * (norm > 4.8 ? 0.22 : norm > 1 ? -0.03 : -0.1), 0, 1);
+    const puffed = norm < 0.35 && this.fatigue > 0.5 && !st.hold && !st.ready && !st.throwIn && !st.call && !this.isKeeper && !st.celebrate;
+    this.breath += ((puffed ? 1 : 0) - this.breath) * Math.min(1, dt * (puffed ? 4 : 8));
+    if (this.breath > 0.01) { pitch -= 0.6 * this.breath; lift -= 0.05 * scale * this.breath; }
+    // Waiting for the kick-off: bouncing on the toes.
+    this.readyW += ((st.ready && norm < 0.35 ? 1 : 0) - this.readyW) * Math.min(1, dt * 6);
+    if (this.readyW > 0.01) lift += 0.03 * scale * this.readyW * Math.abs(Math.sin(performance.now() / 140 + this.seed));
+    this.throwW += ((st.throwIn ? 1 : 0) - this.throwW) * Math.min(1, dt * 10);
+    this.callW += ((st.call ? 1 : 0) - this.callW) * Math.min(1, dt * 8);
     if (diving && this.isKeeper) {
       // Keepers fly: launch sideways in an arc, land on their side and stay down for a moment.
       const t = 1 - st.dive;
@@ -511,6 +595,8 @@ export class PlayerModel {
       pitch = -0.35 * Math.sin(u * Math.PI);
     }
     const k = Math.sin(mu * Math.PI); // in and out over a move
+    if (move === 'hop') lift += 0.2 * scale * k; // skipping over the tackle
+    else if (move === 'throwIn') pitch -= 0.3 * k;
     if (move === 'header' || move === 'headTrap') {
       // Spring up to meet it: lean back, then snap the head through the ball.
       lift += (move === 'header' ? 0.24 : 0.12) * scale * k;
@@ -569,6 +655,109 @@ export class PlayerModel {
       this.swingSideways(this.legR, -open);
     }
     this.poseExtras(st, move, mu, k, kneel, ct);
+    if (!cel && !committed) this.footballMoves(move, mu, k, slideK, kickU, charge, plantK);
+  }
+
+  /** Legs and arms for kicks, tackles, hops, throw-ins, catching breath, calling for the ball and turning. */
+  private footballMoves(move: MoveKind | null, mu: number, k: number, slideK: number, kickU: number, charge: number, plantK: number): void {
+    const { legL, legR, shinL, shinR } = this;
+    if (!legL || !legR || !shinL || !shinR) return;
+    if (slideK > 0 && this.slideFast) {
+      // Slide tackle: the right leg shoots out along the grass, the left tucks under, a hand goes down behind.
+      this.aimBone(legR, 1, -0.25, 0.12, slideK, true);
+      this.aimBone(shinR, 1, -0.3, 0.12, slideK, true);
+      this.aimBone(legL, 0.75, -0.6, -0.15, slideK, true);
+      this.aimBone(shinL, -0.7, -0.7, -0.1, slideK, true);
+      this.aimArms(-0.5, -0.8, 0.6, -0.2, -0.3, 1, slideK, true);
+      return;
+    }
+    if (slideK > 0) {
+      // A standing tackle: poke a foot in.
+      this.aimBone(legR, 1, -0.4, 0.15, slideK, true);
+      this.aimBone(shinR, 1, -0.25, 0.15, slideK, true);
+      this.aimArms(0, -0.5, 1, 0, -0.5, 1, 0.5 * slideK);
+      return;
+    }
+    if (kickU >= 0) {
+      // From the strike, the kicking leg swings on up and through, then drops back.
+      const swing = KICK_SWING[this.kickKind];
+      const a = 0.3 + (swing - 0.3) * Math.sin(Math.min(1, kickU / 0.4) * Math.PI * 0.5);
+      const w = kickU < 0.55 ? 1 : 1 - THREE.MathUtils.smoothstep(kickU, 0.55, 1);
+      const bend = this.kickKind === 'pass' ? 0.6 : this.kickKind === 'lob' ? 0.25 : 0;
+      const across = this.kickKind === 'pass' ? -0.25 : 0.08; // a side-foot pass sweeps across the body
+      this.aimBone(legR, Math.sin(a), -Math.cos(a), across, w, true);
+      this.aimBone(shinR, Math.sin(a - bend), -Math.cos(a - bend), across, w, true);
+      this.aimBone(legL, -0.15, -1, -0.1, 0.6 * w, true);
+      const big = this.kickKind === 'pass' ? 0.45 : 0.9;
+      // The arms fly out for balance: the left one forward, the right one back.
+      this.aimArms(0.6, -0.1, 0.8, -0.55, -0.2, 0.8, big * w);
+      return;
+    }
+    if (charge > 0) {
+      // Winding up a shot: the kicking leg draws back, knee bent, the other arm out in front.
+      const a = -1.0 * charge;
+      this.aimBone(legR, Math.sin(a), -Math.cos(a), 0.05, 1, true);
+      this.aimBone(shinR, Math.sin(a - 1.3 * charge), -Math.cos(a - 1.3 * charge), 0.05, 1, true);
+      this.aimArms(0.6, -0.1, 0.8, -0.4, -0.3, 0.8, 0.8 * charge);
+      return;
+    }
+    if (move === 'hop') {
+      // Both feet tucked up to skip over the outstretched leg, arms out.
+      this.aimBone(legL, 0.45, -0.9, -0.1, k, true);
+      this.aimBone(legR, 0.45, -0.9, 0.1, k, true);
+      this.aimBone(shinL, -0.6, -0.8, -0.1, k, true);
+      this.aimBone(shinR, -0.6, -0.8, 0.1, k, true);
+      this.aimArms(0.1, 0.2, 1, 0.1, 0.2, 1, 0.8 * k);
+      return;
+    }
+    if (move === 'throwIn') {
+      // Both hands whip the ball from behind the head over and forward.
+      const a = -0.35 + 2.1 * Math.min(1, mu / 0.6); // from up and back to forward and down
+      const w = mu < 0.6 ? 1 : 1 - (mu - 0.6) / 0.4;
+      this.aimArms(Math.sin(a), Math.cos(a), 0.3, Math.sin(a), Math.cos(a), 0.3, w);
+      return;
+    }
+    if (this.throwW > 0.01) {
+      // Both hands up either side of the head, ball on top (little arms only just reach past the big head).
+      this.aimArms(0, 0.6, 0.9, 0, 0.6, 0.9, this.throwW);
+      this.aimBone(this.foreL, 0, 1, 0.3, this.throwW);
+      this.aimBone(this.foreR, 0, 1, -0.3, this.throwW);
+      return;
+    }
+    if (this.breath > 0.01) {
+      // Bent over, hands on the knees, chest heaving.
+      const b = this.breath;
+      this.aimArms(0.35, -1, 0.3, 0.35, -1, 0.3, b, true);
+      this.aimBone(legL, 0.3, -1, -0.15, b, true);
+      this.aimBone(legR, 0.3, -1, 0.15, b, true);
+      this.aimBone(shinL, -0.15, -1, -0.15, b, true);
+      this.aimBone(shinR, -0.15, -1, 0.15, b, true);
+      if (this.chest) this.swingAbout(this.chest, 0, 0, 1, 0.07 * b * Math.sin(performance.now() / 160 + this.seed));
+      return;
+    }
+    if (this.callW > 0.01) {
+      // Calling for it: the left arm up and out past the big head (so it shows from above), hand waving.
+      const wave = 0.25 * Math.sin(performance.now() / 110 + this.seed);
+      this.aimBone(this.armL, 0.3, 0.75, -0.8, this.callW);
+      this.aimBone(this.foreL, 0.3, 1, -0.45 + wave, this.callW);
+    }
+    if (this.readyW > 0.01) {
+      // On the toes, arms loose and a little out.
+      this.aimArms(0.1, -1, 0.35, 0.1, -1, 0.35, 0.5 * this.readyW * (this.callW > 0.5 ? 0 : 1));
+    }
+    if (plantK > 0) {
+      // The outside foot goes out wide to push off.
+      const out = this.plantSide > 0 ? legL : legR;
+      this.aimBone(out, 0.1, -1, -this.plantSide * 0.5, plantK, true);
+    }
+    if (this.stepW > 0.01) {
+      // Little steps round: one knee up, then the other.
+      const sL = Math.max(0, Math.sin(this.stepT)), sR = Math.max(0, -Math.sin(this.stepT));
+      this.swingAbout(legL, 0, 0, 1, 0.45 * sL * this.stepW);
+      this.swingAbout(shinL, 0, 0, 1, -0.7 * sL * this.stepW);
+      this.swingAbout(legR, 0, 0, 1, 0.45 * sR * this.stepW);
+      this.swingAbout(shinR, 0, 0, 1, -0.7 * sR * this.stepW);
+    }
   }
 
   /** Bone-level touches for celebrations, a keeper's handling, headers and first touches, on top of the clips. */
@@ -624,23 +813,27 @@ export class PlayerModel {
    * Point both arms (upper arm and forearm together) along body-frame directions: x forward, y up,
    * and `outL`/`outR` how far out to that side. w blends from the clip's pose (0) to the aimed pose (1).
    */
-  private aimArms(fl: number, ul: number, outL: number, fr: number, ur: number, outR: number, w: number): void {
+  private aimArms(fl: number, ul: number, outL: number, fr: number, ur: number, outR: number, w: number, level = false): void {
     if (w <= 0) return;
-    this.aimBone(this.armL, fl, ul, -outL, w);
-    this.aimBone(this.foreL, fl, ul, -outL, w);
-    this.aimBone(this.armR, fr, ur, outR, w);
-    this.aimBone(this.foreR, fr, ur, outR, w);
+    this.aimBone(this.armL, fl, ul, -outL, w, level);
+    this.aimBone(this.foreL, fl, ul, -outL, w, level);
+    this.aimBone(this.armR, fr, ur, outR, w, level);
+    this.aimBone(this.foreR, fr, ur, outR, w, level);
   }
 
   private readonly tmpV = new THREE.Vector3();
   private readonly tmpV2 = new THREE.Vector3();
-  /** Turn a bone so it points (towards its first child) along a body-frame direction, blended by w. */
-  private aimBone(bone: THREE.Object3D | null, x: number, y: number, z: number, w: number): void {
+  /**
+   * Turn a bone so it points (towards its first child) along a body-frame direction, blended by w.
+   * `level` measures the direction from the ground instead (facing the same way, but ignoring the body's lean).
+   */
+  private aimBone(bone: THREE.Object3D | null, x: number, y: number, z: number, w: number, level = false): void {
     const child = bone?.children[0];
     const parent = bone?.parent;
     if (!bone || !child || !parent || w <= 0) return;
     const from = child.getWorldPosition(this.tmpV).sub(bone.getWorldPosition(this.tmpV2)).normalize();
-    const to = this.tmpAxis.set(x, y, z).normalize().applyQuaternion(this.body.getWorldQuaternion(this.tmpQ));
+    const frame = level ? this.group.getWorldQuaternion(this.tmpQ).multiply(this.tmpQ2.setFromAxisAngle(UP, -this.facing)) : this.body.getWorldQuaternion(this.tmpQ);
+    const to = this.tmpAxis.set(x, y, z).normalize().applyQuaternion(frame);
     const d = this.tmpQ.setFromUnitVectors(from, to);
     if (w < 1) d.slerp(this.tmpQ2.identity(), 1 - w);
     // world delta d becomes local: q' = Pinv * d * P * q
