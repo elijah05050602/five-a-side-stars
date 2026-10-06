@@ -40,7 +40,7 @@ Pages workflow runs the tests again before it deploys.
 - **Positions and line-ups**: a player can be good in more than one position (tick "Can also play"), and formations put players in spots they can play first. On the squad step, drag a player onto another (or tap one, then the other) to swap them, or drag a sub onto the pitch to bring them on.
 - **Team sheet**: from the squad step of the team builder, download a printable PNG team sheet.
 - **Weather and time of day**: pick sunny, cloudy, rain, snow, sunset or a night game under floodlights on the setup screen, or let the game surprise you.
-- **Commentary and replays**: a commentator who knows the score, calls shots wide, over or off the bar, and an instant slow-motion replay of every goal (off when motion is set to calm).
+- **Commentary and replays**: a commentator who knows the score, calls shots wide, over or off the bar, and an instant replay of every goal: the build-up at normal speed, then the shot and the ball hitting the net in slow motion. Press shoot, pass or lob to skip it (off when motion is set to calm).
 
 While you play a league or career match (or a cup semi-final), the other computer matches are
 played in a background worker, so the table is ready the moment the final whistle goes.

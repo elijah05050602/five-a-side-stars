@@ -30,6 +30,15 @@ export interface SceneOptions {
   weather?: WeatherChoice;
 }
 
+/**
+ * Instant replays show this many frames (60 a second) of play before a goal and this many after it, so the ball
+ * is seen hitting the net. The last REPLAY_SLOW frames before the goal, and the goal, play in slow motion; the
+ * build-up before them at normal speed.
+ */
+const REPLAY_BEFORE = 210;
+const REPLAY_AFTER = 45;
+const REPLAY_SLOW = 90;
+
 /** One recorded frame of the match, used for the instant replay. */
 interface ReplayFrame {
   players: { x: number; z: number; facing: number; speed: number; kick: number; dive: number; diveDir: number; stun: number; recover: number }[];
@@ -79,7 +88,9 @@ export class MatchScene {
   private readonly extras: ReturnType<typeof pitchExtras>;
   /** Rolling record of the last few seconds, oldest first. */
   private readonly history: ReplayFrame[] = [];
-  private replay: { frames: ReplayFrame[]; t: number; wait: number } | null = null;
+  private replay: { frames: ReplayFrame[]; t: number; wait: number; slowFrom: number; hold: number } | null = null;
+  /** Frames filmed since the latest goal, for the end of its replay. */
+  private afterGoal = 0;
   /** The team-mate waving for a pass, chosen afresh every so often. */
   private caller: SimPlayer | null = null;
   private callTimer = 0;
@@ -268,23 +279,28 @@ export class MatchScene {
     this.resize();
   }
 
-  /** Snapshot the sim for the replay buffer (about three seconds kept). */
+  /** Snapshot the sim for the replay buffer (about five seconds kept). */
   private record(): void {
     const b = this.sim.ball;
     this.history.push({
       players: this.sim.players.map((p) => ({ x: p.pos.x, z: p.pos.z, facing: p.facing, speed: Math.hypot(p.vel.x, p.vel.z), kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, recover: Math.min(1, p.recover / DIVE_RECOVER) })),
       ball: { x: b.pos.x, y: b.y, z: b.pos.z, vx: b.vel.x, vz: b.vel.z },
     });
-    if (this.history.length > 170) this.history.shift();
+    if (this.history.length > 300) this.history.shift();
   }
 
-  /** Play the last two and a half seconds back slowly. Returns true while the replay has the screen. */
+  /** Play the build-up back at normal speed, then the shot and the ball hitting the net slowly. Returns true while the replay has the screen. */
   private runReplay(dt: number, scale: number): boolean {
     const r = this.replay;
     if (!r) return false;
     if (r.wait > 0) { r.wait -= dt; return false; }
-    const speed = 0.6;
+    if (!r.frames.length) {
+      // Cut the clip now, once the moments after the goal are filmed too.
+      r.frames = this.history.slice(-(REPLAY_BEFORE + this.afterGoal));
+      r.slowFrom = Math.max(0, r.frames.length - this.afterGoal - REPLAY_SLOW);
+    }
     if (r.t === 0) this.hud.setReplay(true);
+    const speed = Math.floor(r.t * 60) < r.slowFrom ? 1 : 0.55;
     r.t += dt * speed;
     const idx = Math.min(r.frames.length - 1, Math.floor(r.t * 60));
     const f = r.frames[idx];
@@ -297,7 +313,8 @@ export class MatchScene {
     });
     this.ball.update(f.ball.x, f.ball.y, f.ball.z, this.sim.ball.radius, f.ball.vx, f.ball.vz, dt * speed);
     this.camTarget.lerp(new THREE.Vector3(THREE.MathUtils.clamp(f.ball.x, -this.sim.length * 0.4, this.sim.length * 0.4), 0, THREE.MathUtils.clamp(f.ball.z, -this.sim.width * 0.25, this.sim.width * 0.25)), 1 - Math.pow(0.02, dt));
-    if (idx >= r.frames.length - 1) { this.replay = null; this.hud.setReplay(false); }
+    // Hold the last picture a moment before cutting to the celebration.
+    if (idx >= r.frames.length - 1 && (r.hold += dt) > 0.4) { this.replay = null; this.hud.setReplay(false); }
     return true;
   }
 
@@ -410,13 +427,17 @@ export class MatchScene {
     if (input.pause || input2?.pause) this.sim.togglePause();
     // Fixed 60 Hz simulation steps for stable physics. The sim waits while a replay plays.
     const replaying = !!this.replay && this.replay.wait <= 0;
+    // Shoot, pass or lob during a replay skips it (taps during a replay are dropped below, so it kicks nothing).
+    if (replaying && (input.shoot || input.pass || input.lob || input2?.shoot || input2?.pass || input2?.lob)) { this.replay = null; this.hud.setReplay(false); }
     this.acc += dt;
     const step = 1 / 60;
     let steps = 0;
     while (!replaying && this.acc >= step && steps < 8) {
       const once = { shoot: false, pass: false, lob: false, switchPlayer: false, pause: false, trick: false };
       this.sim.step(step, steps === 0 ? input : { ...input, ...once }, input2 ? (steps === 0 ? input2 : { ...input2, ...once }) : undefined);
-      if (this.sim.phase === 'play' || this.sim.phase === 'setpiece' || this.sim.phase === 'kickoff') this.record();
+      const live = this.sim.phase === 'play' || this.sim.phase === 'setpiece' || this.sim.phase === 'kickoff';
+      // Keep filming for a moment after a goal, so its replay shows the ball hit the net.
+      if (live || (this.replay && !this.replay.frames.length && this.afterGoal < REPLAY_AFTER)) { this.record(); if (!live) this.afterGoal++; }
       this.acc -= step;
       steps++;
     }
@@ -432,7 +453,7 @@ export class MatchScene {
       if (ev.type === 'goal') {
         this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, this.sim.score[0], this.sim.score[1]);
         this.extras.nets[ev.side === 0 ? 1 : 0]?.hit(this.sim.ball.pos.z, Math.hypot(this.sim.ball.vel.x, this.sim.ball.vel.z));
-        if (this.sim.mode !== 'training' && !getSettings().reduceMotion && this.history.length > 30) this.replay = { frames: this.history.slice(-125), t: 0, wait: 1.1 };
+        if (this.sim.mode !== 'training' && !getSettings().reduceMotion && this.history.length > 30) { this.replay = { frames: [], t: 0, wait: 1.1, slowFrom: 0, hold: 0 }; this.afterGoal = 0; }
       }
     }
     if (this.coach) {
