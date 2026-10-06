@@ -2,25 +2,25 @@ import { getSettings } from '../data/storage';
 import { audioContext, channelBus, loadAudio } from './audio';
 
 /**
- * Background music: ElevenLabs Music loops, one for the homepage and one for
- * the other screens (made by tools/audio/loop_music.py, see tools/audio/README-elevenlabs.md),
+ * Background music: ElevenLabs Music loops, the home theme on the menu pages
+ * and a matchday groove from match preparation onwards (made by tools/audio/loop_music.py, see tools/audio/README-elevenlabs.md),
  * crossfading as you move between screens, plus short jingles at full time.
  * Starts on the first tap or key press (browsers require a gesture; the loading
  * screen asks for one) and fades right down during a match.
  */
-export type Track = 'home' | 'pages';
+export type Track = 'home' | 'matchday';
 
 /** Loop lengths printed by loop_music.py; each file is a little longer for the crossfade. */
 export const TRACKS: Record<Track, { file: string; loop: number }> = {
-  // The homepage theme: a samba-pop carnival anthem.
+  // The home theme, a samba-pop carnival anthem, on the menu and every page around it.
   home: { file: 'audio/music-home.mp3', loop: 58.071 },
-  // Every other screen keeps the stadium pop-rock anthem from the first ElevenLabs batch.
-  pages: { file: 'audio/music-pages.mp3', loop: 56.255 },
+  // A laid-back funk-pop groove from match preparation onwards (team sheet, then results).
+  matchday: { file: 'audio/music-matchday.mp3', loop: 55.203 },
 };
 
-/** Which loop a screen plays: the home theme on the main menu, the anthem everywhere else. */
+/** Which loop a screen plays: the matchday groove on match preparation and results, the home theme everywhere else. */
 export function trackFor(screen: string): Track {
-  return screen === 'menu' ? 'home' : 'pages';
+  return screen === 'setup' || screen === 'results' ? 'matchday' : 'home';
 }
 
 export type Jingle = 'win' | 'draw';

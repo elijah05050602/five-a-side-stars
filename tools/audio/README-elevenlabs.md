@@ -36,13 +36,15 @@ SoundFont) still works if the audio ever needs rebuilding without an account.
   confident, festive and full of energy from the first second, steady groove all
   the way through, no slow intro, no fade out, crisp modern production.
   Instrumental, no vocals."
-- **pages** (every other screen, `music-pages.mp3`, same steps):
-  "Upbeat, bright stadium pop-rock anthem for a kids' football video game menu,
-  128 BPM with a driving four-on-the-floor kick, stomp-clap percussion and
-  crowd-style "hey" chants, punchy electric guitar riff, bouncy synth bass and a
-  catchy brass and synth lead melody. Joyful, confident and energetic the whole
-  way through with a steady groove and no slow intro, no fade out, crisp modern
-  production. Instrumental."
+- **matchday** (match preparation and results, `music-matchday.mp3`, same steps):
+  "Laid-back, playful funky groove for the team-building and kit-picking
+  screens of a kids' football video game. 100 BPM feel-good funk-pop: tight
+  crisp drums with a head-nodding backbeat, warm clavinet and wah electric
+  guitar, a round bouncy bass line, light marimba and glockenspiel hooks,
+  finger snaps and handclaps. Cheerful, cool and relaxed but still upbeat, like
+  getting ready in the locker room with your friends. Steady groove all the way
+  through, no slow intro, no fade out, crisp modern production. Instrumental,
+  no vocals."
 - **win** (cut with `loop_music.py --sting 7.5`): "Short triumphant victory fanfare sting for a kids' football game:
   bright brass and electric guitar flourish over a big stadium drum fill, cymbal
   crash and cheering crowd, ending on a held major chord. Joyful, celebratory,
