@@ -126,6 +126,11 @@ export interface SimPlayer {
   moveAnim: number;
   /** A keeper who has the ball in their hands (not at their feet from a team-mate's pass back). */
   handling: boolean;
+  /**
+   * A human keeper carrying the ball in their hands to the edge of the box: 0 = not at the line,
+   * 1 = stopped at the line by a push, 2 = the stick was let go, so the next push out drops it to their feet.
+   */
+  edgeHold: 0 | 1 | 2;
   mul: SkillMuls;
   match: PlayerMatchStats;
 }
@@ -323,6 +328,13 @@ export class MatchSim {
   controlledBy: [SimPlayer | null, SimPlayer | null] = [null, null];
   events: SimEvent[] = [];
   private switchHolds: [number, number] = [0, 0];
+  /**
+   * A newly picked player whose human has not touched the stick yet runs for them (presses the ball,
+   * gets back), so a turnover never leaves the new defender standing still waiting for input.
+   */
+  private assist: [boolean, boolean] = [false, false];
+  /** Which side had the ball last frame, to spot the moment the other team wins it. */
+  private lastOwnerSide: Side | null = null;
   setPiece: SetPiece | null = null;
   fouls: [number, number] = [0, 0];
   shootout: Shootout | null = null;
@@ -365,7 +377,7 @@ export class MatchSim {
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, distanceRun: 0, isKeeper: info.position === 'GK',
           speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, kickKind: 'pass', penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
-          celebrate: null, move: null, moveAnim: 0, handling: false,
+          celebrate: null, move: null, moveAnim: 0, handling: false, edgeHold: 0,
           mul, match: freshMatchStats(),
         };
         this.players.push(p);
@@ -585,16 +597,18 @@ export class MatchSim {
       if (p.trickAnim <= 0) p.trickKind = null;
       if (this.keeperCommitted(p)) continue; // mid-dive or getting up: no steering until back on their feet
       const inp = inputs[p.side];
-      if (inp && this.controlledBy[p.side] === p) this.driveHuman(p, inp, dt);
+      if (inp && this.controlledBy[p.side] === p && !this.assisting(p, inp)) this.driveHuman(p, inp, dt);
       else this.driveAI(p, dt);
     }
     this.integratePlayers(dt);
+    this.keepHandsInBox();
     this.updateFacing(dt);
     this.integrateBall(dt);
     this.settleDeadBall(dt);
     this.resolvePossession(dt);
     this.checkGoal();
     this.checkOut();
+    if (this.ball.owner) this.lastOwnerSide = this.ball.owner.side;
   }
 
   /**
@@ -704,12 +718,24 @@ export class MatchSim {
       this.controlledBy[side] = b.owner; // always control the player on the ball (keeper included)
       return;
     }
+    const ownerSide = b.owner ? b.owner.side : null;
+    const turnover = ownerSide !== null && ownerSide !== side && this.lastOwnerSide === side;
+    if (turnover) {
+      // The other team has just won it: hand over to the best defender at once, with no hold-over
+      // from an earlier switch and no favour for the kid who was just tackled.
+      this.switchHolds[side] = 0;
+      const fresh = outfield.filter((p) => p.stunAnim <= 0.2 && p.kickCooldown <= 0);
+      const pool = fresh.length ? fresh : outfield;
+      const pick = this.nearest(pool, v(b.pos.x + b.vel.x * 0.4, b.pos.z + b.vel.z * 0.4)) ?? current;
+      this.select(side, pick);
+      return;
+    }
     if (input.switchPlayer && current) {
       // Jump to the team-mate nearest the ball (other than the current one) and keep them long
       // enough to actually use them before the automatic pick takes over again.
       const others = outfield.filter((p) => p !== current);
       const target = others.length ? this.nearest(others, b.pos) : current;
-      this.controlledBy[side] = target ?? current;
+      this.select(side, target ?? current);
       this.switchHolds[side] = 2.5;
       return;
     }
@@ -723,7 +749,73 @@ export class MatchSim {
       const d = dist(p.pos, ahead);
       if (d < bestD) { best = p; bestD = d; }
     }
-    this.controlledBy[side] = best;
+    this.select(side, best);
+  }
+
+  /** Hands the human a new player; if it is a different one, the computer keeps them moving until the stick is touched. */
+  private select(side: Side, p: SimPlayer | null): void {
+    if (p && p !== this.controlledBy[side]) {
+      this.assist[side] = true;
+      p.think = 0; // decide where to run straight away, not on a stale plan
+    }
+    this.controlledBy[side] = p;
+  }
+
+  /** The keeper's box: the D drawn round their own goal. */
+  boxRadius(): number { return this.width * 0.26; }
+  inOwnBox(p: SimPlayer): boolean {
+    return Math.hypot(p.pos.x - this.ownGoalX(p.side), p.pos.z) <= this.boxRadius() + 0.05;
+  }
+
+  /**
+   * A keeper with the ball in their hands cannot carry it out of the box. The first push out stops them
+   * on the line; let go of the stick and push out again, and they drop it to their feet to dribble on.
+   */
+  private keeperEdge(p: SimPlayer, want: V2, target: V2): V2 {
+    const own = this.ownGoalX(p.side);
+    const r = Math.hypot(p.pos.x - own, p.pos.z);
+    const out = r > 1e-3 ? v((p.pos.x - own) / r, p.pos.z / r) : v(p.side === 0 ? 1 : -1, 0);
+    const push = want.x * out.x + want.z * out.z; // how hard the stick points out of the box
+    const line = this.boxRadius() - 0.1;
+    const atLine = r >= line - 0.15;
+    if (p.edgeHold === 1 && push < 0.25) p.edgeHold = 2; // stick let go (or turned back in): ready for a deliberate second push
+    if (r < line - 1.5) p.edgeHold = 0; // walked well back inside: start over
+    if (!atLine || push < 0.35) return target;
+    if (p.edgeHold === 2) {
+      // Second push: drop it to the feet and play on like an outfield player.
+      p.handling = false;
+      p.edgeHold = 0;
+      this.ball.vy = 0;
+      return target;
+    }
+    p.edgeHold = 1;
+    // Stopped at the line: only the part of the run along the edge is allowed.
+    const along = target.x * out.x + target.z * out.z;
+    const outV = p.vel.x * out.x + p.vel.z * out.z;
+    if (outV > 0) p.vel = v(p.vel.x - out.x * outV, p.vel.z - out.z * outV);
+    return along > 0 ? v(target.x - out.x * along, target.z - out.z * along) : target;
+  }
+
+  /** Never let a keeper with the ball in their hands drift over the edge of the box. */
+  private keepHandsInBox(): void {
+    const o = this.ball.owner;
+    if (!o || !o.isKeeper || !o.handling || this.phase !== 'play') return;
+    const own = this.ownGoalX(o.side);
+    const r = Math.hypot(o.pos.x - own, o.pos.z);
+    const line = this.boxRadius() - 0.1;
+    if (r <= line) return;
+    o.pos = v(own + ((o.pos.x - own) / r) * line, (o.pos.z / r) * line);
+  }
+
+  /** The human has not steered their newly picked player yet, so the computer runs them meanwhile. */
+  private assisting(p: SimPlayer, input: InputState): boolean {
+    const side = p.side;
+    if (!this.assist[side]) return false;
+    if (this.ball.owner === p || this.phase !== 'play' || Math.hypot(input.moveX, input.moveZ) > 0.15) {
+      this.assist[side] = false;
+      return false;
+    }
+    return true;
   }
 
   private driveHuman(p: SimPlayer, input: InputState, _dt: number): void {
@@ -761,7 +853,8 @@ export class MatchSim {
     const sprint = sprinting ? 1.18 : 1;
     const dribble = this.ball.owner === p && p.trickBoost <= 0 ? 0.88 : 1;
     const max = this.stats.speed * sprint * dribble * this.pace(p) * this.trickPace(p);
-    const target = l > 0.05 ? v(want.x * max, want.z * max) : v();
+    let target = l > 0.05 ? v(want.x * max, want.z * max) : v();
+    if (p.isKeeper && p.handling && this.ball.owner === p) target = this.keeperEdge(p, want, target);
     if (l > 0.05) p.runDir = norm(want);
     this.steer(p, target, 22);
     if (l > 0.05 && this.ball.owner === p) p.facing = Math.atan2(want.z, want.x); // off the ball, updateFacing decides
@@ -1389,7 +1482,7 @@ export class MatchSim {
       const toFeet = dist(b.pos, feet);
       // Keepers hold it, set-piece takers and kick-off takers stand on it, and a kid
       // who stops with the ball nearby traps it under their foot.
-      const held = o.isKeeper || this.phase === 'setpiece' || this.phase === 'kickoff';
+      const held = (o.isKeeper && o.handling) || this.phase === 'setpiece' || this.phase === 'kickoff';
       if (held || (speed < 0.9 && toFeet < this.footReach() * 1.6)) {
         const gain = held ? 18 : 9;
         b.vel = v((feet.x - b.pos.x) * gain, (feet.z - b.pos.z) * gain);
@@ -1471,7 +1564,7 @@ export class MatchSim {
     if (this.phase === 'setpiece') return;
     if (b.owner) {
       const o = b.owner;
-      if (o.isKeeper && this.phase !== 'kickoff') return; // a keeper holding the ball cannot be tackled
+      if (o.isKeeper && (o.handling || this.inOwnBox(o)) && this.phase !== 'kickoff') return; // nobody tackles a keeper in their own box; outside it they are fair game
       if (this.mode === 'tutorial') return; // nobody tackles while you learn
       // Between touches the ball is away from the dribbler's feet, and anyone can nick it.
       const exposed = dist(o.pos, b.pos) > this.touchRange(o) + 0.15;
@@ -1493,7 +1586,7 @@ export class MatchSim {
               b.owner = p;
               b.lastTouch = p;
               b.vel = v(p.vel.x, p.vel.z);
-              if (p.isKeeper) { p.handling = true; this.setMove(p, 'scoop'); }
+              if (p.isKeeper) { p.handling = this.inOwnBox(p); if (p.handling) this.setMove(p, 'scoop'); }
               o.kickCooldown = 0.4;
               p.holdTime = 0;
               p.think = p.isKeeper ? 0.8 : 0.1;
@@ -1619,7 +1712,8 @@ export class MatchSim {
       b.lastTouch = best;
       if (best.isKeeper) {
         // Keepers take shots and crosses in their hands (high, at the chest, or scooped off the grass), but a team-mate's pass back stays at their feet.
-        best.handling = !ownPass;
+        // Outside their own box a keeper is just another outfield player: no hands.
+        best.handling = !ownPass && this.inOwnBox(best);
         if (best.handling) this.setMove(best, b.y > 0.9 * sc + 0.45 ? 'catchHigh' : b.y > 0.25 || ballSpeed > 6 ? 'catchChest' : 'scoop');
       } else if (b.y > HEAD_HEIGHT * sc + 0.1) this.setMove(best, 'headTrap');
       else if (b.y > 0.5 * sc + 0.1) this.setMove(best, 'chestTrap');
@@ -1653,6 +1747,7 @@ export class MatchSim {
     p.kickAnim = 1;
     p.kickKind = 'pass';
     p.handling = false;
+    p.edgeHold = 0;
     p.facing = Math.atan2(n.z, n.x);
     if (this.phase === 'kickoff') this.phase = 'play';
     if (this.phase === 'setpiece') { this.phase = 'play'; this.setPiece = null; }

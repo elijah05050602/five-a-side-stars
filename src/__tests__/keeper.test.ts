@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { IDLE_INPUT } from '../game/sim';
-import { cpuMatch, runUntil } from './helpers';
+import { IDLE_INPUT, MatchSim } from '../game/sim';
+import { cpuMatch, runUntil, team } from './helpers';
 
 describe('keeper dives', () => {
   /** A shot from side 1 heading for side 0's goal, well wide of the keeper. */
@@ -135,5 +135,80 @@ describe('pass back to the keeper', () => {
     for (const o of sim.players) o.speedMul = 1;
     runUntil(sim, (s) => s.ball.owner !== keeper, 60 * 6);
     expect(sim.ball.lastKick).toBe(keeper);
+  });
+});
+
+describe('keeper hands stay in the box', () => {
+  /** Side 0's human keeper with the ball in their hands, a few steps inside the box. */
+  function keeperWithBall() {
+    const sim = new MatchSim({ home: team('h', 'Home'), away: team('a', 'Away'), difficulty: 'normal', halfSeconds: 120, humanSide: 0 });
+    sim.phase = 'play';
+    const keeper = sim.players.find((p) => p.side === 0 && p.isKeeper)!;
+    const own = sim.ownGoalX(0);
+    for (const p of sim.players) if (p !== keeper) { p.pos = { x: p.side === 0 ? 6 : 12, z: 6 }; p.speedMul = 0; }
+    keeper.pos = { x: own + 1, z: 0 };
+    keeper.handling = true;
+    sim.ball.owner = keeper; sim.ball.pos = { x: own + 1.3, z: 0 }; sim.ball.vel = { x: 0, z: 0 };
+    return { sim, keeper, own };
+  }
+  const push = { ...IDLE_INPUT, moveX: 1 };
+  const run = (sim: MatchSim, input: typeof IDLE_INPUT, frames: number) => {
+    for (let i = 0; i < frames; i++) { sim.step(1 / 60, input); sim.events.length = 0; }
+  };
+
+  it('the first push out stops the keeper on the line, still holding it', () => {
+    const { sim, keeper, own } = keeperWithBall();
+    run(sim, push, 60 * 4);
+    expect(sim.ball.owner).toBe(keeper);
+    expect(keeper.handling).toBe(true);
+    expect(Math.hypot(keeper.pos.x - own, keeper.pos.z)).toBeLessThanOrEqual(sim.boxRadius());
+  });
+
+  it('let go and push again: the ball drops to their feet and they dribble out', () => {
+    const { sim, keeper, own } = keeperWithBall();
+    run(sim, push, 60 * 3);
+    run(sim, IDLE_INPUT, 10);
+    expect(keeper.handling).toBe(true);
+    run(sim, push, 60);
+    expect(keeper.handling).toBe(false);
+    expect(sim.ball.owner).toBe(keeper);
+    expect(sim.ball.y).toBeLessThan(0.1);
+    expect(Math.hypot(keeper.pos.x - own, keeper.pos.z)).toBeGreaterThan(sim.boxRadius() + 0.5);
+  });
+
+  it('a keeper who wins the ball outside the box has it at their feet', () => {
+    const { sim, keeper, own } = keeperWithBall();
+    keeper.handling = false; sim.ball.owner = null;
+    keeper.pos = { x: own + sim.boxRadius() + 1.5, z: 0 };
+    sim.ball.pos = { x: own + sim.boxRadius() + 1.6, z: 0 }; sim.ball.vel = { x: -1, z: 0 };
+    sim.ball.lastKick = sim.players.find((p) => p.side === 1 && !p.isKeeper)!;
+    run(sim, IDLE_INPUT, 30);
+    expect(sim.ball.owner).toBe(keeper);
+    expect(keeper.handling).toBe(false);
+  });
+});
+
+describe('turnovers', () => {
+  it('when the other team wins it, the new defender is already moving with the stick untouched', () => {
+    const sim = new MatchSim({ home: team('h', 'Home'), away: team('a', 'Away'), difficulty: 'normal', halfSeconds: 120, humanSide: 0 });
+    sim.phase = 'play';
+    const mine = sim.players.filter((p) => p.side === 0 && !p.isKeeper);
+    const dribbler = mine[0];
+    const thief = sim.players.find((p) => p.side === 1 && !p.isKeeper)!;
+    for (const p of sim.players) p.vel = { x: 0, z: 0 };
+    dribbler.pos = { x: 2, z: 0 };
+    thief.pos = { x: 2.6, z: 0 };
+    mine[1].pos = { x: -2, z: 1 };
+    sim.ball.owner = dribbler; sim.ball.pos = { x: 2.3, z: 0 };
+    sim.step(1 / 60, IDLE_INPUT);
+    expect(sim.controlled).toBe(dribbler);
+    // The tackle: the ball goes to the other side and the dribbler is left stumbling.
+    dribbler.stunAnim = 1; dribbler.kickCooldown = 0.5;
+    sim.ball.owner = thief; sim.ball.pos = { x: 2.9, z: 0 };
+    sim.step(1 / 60, IDLE_INPUT);
+    const pick = sim.controlled!;
+    expect(pick).not.toBe(dribbler);
+    for (let i = 0; i < 20; i++) { sim.step(1 / 60, IDLE_INPUT); sim.events.length = 0; }
+    expect(Math.hypot(pick.vel.x, pick.vel.z)).toBeGreaterThan(1);
   });
 });
