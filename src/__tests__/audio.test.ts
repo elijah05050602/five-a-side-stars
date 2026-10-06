@@ -313,6 +313,104 @@ describe('decoding', () => {
   });
 });
 
+describe('music', () => {
+  /** Serve the two loops; each one's bytes arrive only when its gate is opened, so tests can race the switches. */
+  function serveLoops(): Record<'home' | 'matchday', () => void> {
+    const gates = { home: () => undefined, matchday: () => undefined } as Record<'home' | 'matchday', () => void>;
+    for (const [name, seconds] of [['home', 58.071], ['matchday', 55.203]] as const) {
+      files[`audio/music-${name}.mp3`] = () => new Promise((resolve) => { gates[name] = () => resolve(fakeMp3(seconds, 2)); });
+    }
+    return gates;
+  }
+  /** The loops playing now, by length (58.071 s is the home theme, 55.203 s the matchday groove). */
+  const loops = (c: FakeContext) => c.sources.filter((s) => s.loop && s.startedAt !== null && s.stoppedAt === null).map((s) => s.buffer!.duration);
+  const fetches = (name: string) => fetched.filter((u) => u.endsWith(`music-${name}.mp3`)).length;
+
+  async function playingHome() {
+    const gates = serveLoops();
+    const { music } = await import('../game/music');
+    const { audioContext } = await import('../game/audio');
+    const c = audioContext() as unknown as FakeContext;
+    music.setTrack('home');
+    music.start();
+    await settle();
+    gates.home();
+    await settle();
+    expect(loops(c)).toEqual([58.071]);
+    return { gates, music, c };
+  }
+
+  it('a switch while a loop is still decoding plays only the loop the screen wants', async () => {
+    const gates = serveLoops();
+    const { music } = await import('../game/music');
+    const { audioContext } = await import('../game/audio');
+    const c = audioContext() as unknown as FakeContext;
+    music.setTrack('home');
+    music.start();
+    await settle();
+    music.setTrack('matchday'); // on to match preparation before the home theme has arrived
+    await settle();
+    gates.matchday();
+    await settle();
+    expect(loops(c)).toEqual([55.203]);
+    gates.home(); // arrives late: never starts
+    await settle();
+    expect(loops(c)).toEqual([55.203]);
+  });
+
+  it('switching away and straight back keeps the loop playing and never starts the other', async () => {
+    const { gates, music, c } = await playingHome();
+    music.setTrack('matchday');
+    await settle();
+    music.setTrack('home');
+    gates.matchday();
+    await settle();
+    expect(loops(c)).toEqual([58.071]);
+  });
+
+  it('keeps only the playing loop decoded, decoding the other again when it is wanted', async () => {
+    const { gates, music, c } = await playingHome();
+    music.setTrack('matchday');
+    await settle();
+    gates.matchday();
+    await settle();
+    expect(loops(c)).toEqual([55.203]); // the home theme is fading out and stopping
+    expect(fetches('home')).toBe(1);
+    music.setTrack('home'); // back to the menu: the home theme is fetched and decoded again
+    await settle();
+    expect(fetches('home')).toBe(2);
+    gates.home();
+    await settle();
+    expect(loops(c)).toEqual([58.071]);
+    music.setTrack('matchday');
+    await settle();
+    expect(fetches('matchday')).toBe(2);
+  });
+
+  it('music switched off while a loop decodes starts nothing, and lets the decoded loops go', async () => {
+    const { updateSettings } = await import('../data/storage');
+    const { gates, music, c } = await playingHome();
+    updateSettings({ music: false });
+    music.refresh();
+    expect(loops(c)).toEqual([]);
+    updateSettings({ music: true });
+    music.refresh();
+    await settle();
+    expect(fetches('home')).toBe(2); // let go while music was off, so decoded again
+    music.setTrack('matchday');
+    await settle();
+    updateSettings({ music: false });
+    music.refresh();
+    gates.matchday();
+    await settle();
+    expect(loops(c)).toEqual([]);
+    updateSettings({ music: true });
+    music.refresh();
+    await settle();
+    expect(fetches('matchday')).toBe(2);
+  });
+});
+
 describe('match sounds', () => {
   it('fades out, then stops and unplugs the looping crowd and weather when the match ends', async () => {
     vi.useFakeTimers();

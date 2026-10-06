@@ -193,13 +193,22 @@ export function loadAudio(path: string, rate?: number): Promise<AudioBuffer | nu
   if (!p) {
     const c = audioContext();
     if (!c) return Promise.resolve(null);
-    p = fetch(`${import.meta.env.BASE_URL}${path}`)
+    const loading: Promise<AudioBuffer | null> = fetch(`${import.meta.env.BASE_URL}${path}`)
       .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.statusText))))
       .then((data) => decode(c, data, rate))
-      .catch(() => { buffers.delete(path); return null; });
-    buffers.set(path, p);
+      .catch(() => { if (buffers.get(path) === loading) buffers.delete(path); return null; });
+    buffers.set(path, loading);
+    p = loading;
   }
   return p;
+}
+
+/**
+ * Forget a decoded file so its memory can go once nothing is playing it. The
+ * next loadAudio() of it fetches it again (from the cache) and decodes it.
+ */
+export function releaseAudio(path: string): void {
+  buffers.delete(path);
 }
 
 /**
