@@ -245,24 +245,37 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 .confetti i { position: absolute; top: -20px; width: 12px; height: 18px; border-radius: 3px; animation: fall linear forwards; }
 @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
 
-.touch-controls { position: absolute; inset: 0; pointer-events: none; display: none; --tc-size: 1; --tc-opacity: 1; --tc-btn: 1; }
-@media (pointer: coarse) { .touch-controls { display: block; } }
-.joystick { position: absolute; left: 24px; bottom: 24px; width: calc(140px * var(--tc-size)); height: calc(140px * var(--tc-size)); border-radius: 50%; background: rgba(255,255,255,0.3); border: 3px solid rgba(255,255,255,0.7); pointer-events: auto; touch-action: none; opacity: var(--tc-opacity); }
+.touch-controls { position: absolute; inset: 0; pointer-events: none; display: none; --tc-size: 1; --tc-opacity: 1; --tc-btn: 1; --u: calc(1px * var(--tc-size) * var(--tc-btn)); }
+@media (pointer: coarse) {
+  .touch-controls { display: block; }
+  /* The rings round Shoot and Sprint show power and puff on a phone; keyboard and controller players keep the bars. */
+  #hud-player-box .bar { display: none; }
+}
+/* A touch anywhere in the lower left brings the joystick to the thumb. */
+.joy-area { position: absolute; left: 0; bottom: 0; width: 48%; height: 68%; pointer-events: auto; touch-action: none; }
+.joystick { position: absolute; left: 24px; bottom: 24px; width: calc(140px * var(--tc-size)); height: calc(140px * var(--tc-size)); border-radius: 50%; background: rgba(255,255,255,0.3); border: 3px solid rgba(255,255,255,0.7); pointer-events: none; opacity: var(--tc-opacity); }
 .joy-knob { position: absolute; left: 50%; top: 50%; width: calc(64px * var(--tc-size)); height: calc(64px * var(--tc-size)); transform-origin: center; margin: calc(-32px * var(--tc-size)) 0 0 calc(-32px * var(--tc-size)); border-radius: 50%; background: var(--yellow); border: 3px solid var(--navy); pointer-events: none; }
-.action-buttons { position: absolute; right: 20px; bottom: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: calc(12px * var(--tc-size) * var(--tc-btn)); pointer-events: auto; opacity: var(--tc-opacity); }
-.abtn { width: max(44px, calc(84px * var(--tc-size) * var(--tc-btn))); height: max(44px, calc(84px * var(--tc-size) * var(--tc-btn))); border-radius: 50%; border: 3px solid var(--navy); font-family: var(--font); font-weight: 700; font-size: calc(16px * var(--tc-size) * max(var(--tc-btn), 0.85)); color: var(--navy); box-shadow: 0 4px 0 var(--navy); touch-action: none; display: inline-flex; align-items: center; justify-content: center; }
-.abtn.is-down { transform: translateY(3px); box-shadow: 0 1px 0 var(--navy); filter: brightness(0.9); }
-/* Bright fills take the navy label; only the deep red and purple are dark enough for white. */
-.abtn-shoot { background: var(--red); color: var(--white); }
-.abtn-pass { background: var(--blue); }
-.abtn-sprint { background: var(--green); }
-.abtn-switch { background: var(--white); }
-.abtn-trick, .abtn-lob { justify-self: center; width: max(44px, calc(68px * var(--tc-size) * var(--tc-btn))); height: max(44px, calc(68px * var(--tc-size) * var(--tc-btn))); font-size: calc(14px * var(--tc-size) * max(var(--tc-btn), 0.85)); }
-.abtn-trick { background: #8a4fd8; color: var(--white); }
-.abtn-lob { background: #f4a261; }
+/* The buttons sit in an arc round the thumb, biggest in the corner: two columns wide so they fit an upright phone. */
+.action-buttons { position: absolute; right: 20px; bottom: 20px; width: calc(184 * var(--u)); height: calc(232 * var(--u)); pointer-events: none; opacity: var(--tc-opacity); }
+.abtn { --d: 64; --x: 0; --y: 0; position: absolute; right: calc(var(--x) * var(--u)); bottom: calc(var(--y) * var(--u)); width: max(44px, calc(var(--d) * var(--u))); height: max(44px, calc(var(--d) * var(--u))); padding: 0; border-radius: 50%; border: 3px solid var(--navy); font-family: var(--font); font-weight: 700; color: var(--navy); box-shadow: 0 4px 0 var(--navy); touch-action: none; pointer-events: auto; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; line-height: 1; transition: transform 0.08s ease-out; }
+.abtn-ico { font-size: calc(var(--d) * 0.36 * var(--u)); }
+.abtn-txt { font-size: max(10px, calc(var(--d) * 0.17 * var(--u))); margin-top: calc(2 * var(--u)); }
+.abtn.is-down { transform: scale(0.86); box-shadow: 0 1px 0 var(--navy); filter: brightness(0.9); }
+.abtn-shoot { --d: 92; --x: 0; --y: 0; background: var(--red); color: var(--white); }
+.abtn-pass { --d: 76; --x: 104; --y: 6; background: var(--blue); }
+.abtn-sprint { --d: 64; --x: 6; --y: 106; background: var(--green); }
+.abtn-lob { --d: 64; --x: 104; --y: 96; background: #f4a261; }
+.abtn-switch { --d: 52; --x: 14; --y: 180; background: var(--white); }
+.abtn-trick { --d: 52; --x: 118; --y: 170; background: #8a4fd8; color: var(--white); }
+/* Rings that fill: Shoot's power while it is held, and Sprint's puff. */
+.abtn-shoot::before, .abtn-sprint::before { content: ''; position: absolute; inset: -9px; border-radius: 50%; pointer-events: none; -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px)); }
+.abtn-shoot::before { background: conic-gradient(var(--yellow) calc(var(--charge, 0) * 1turn), transparent 0); }
+.abtn-sprint::before { background: conic-gradient(var(--white) calc(var(--stamina, 1) * 1turn), rgba(27,42,65,0.35) 0); }
 /* Left-handed: joystick on the right, buttons mirrored on the left. */
+.touch-controls.is-lefty .joy-area { left: auto; right: 0; }
 .touch-controls.is-lefty .joystick { left: auto; right: 24px; }
-.touch-controls.is-lefty .action-buttons { right: auto; left: 20px; direction: rtl; }
+.touch-controls.is-lefty .abtn { right: auto; left: calc(var(--x) * var(--u)); }
+.touch-controls.is-lefty .action-buttons { right: auto; left: 20px; }
 
 .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(27,42,65,0.45); }
 .overlay[hidden] { display: none; }
@@ -577,7 +590,7 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .touch-preview { position: relative; height: 300px; border-radius: var(--radius); border: 3px solid var(--navy); overflow: hidden; background: linear-gradient(180deg, #4caf50 0, #3d9b42 100%); }
 .touch-preview::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 3px solid rgba(255,255,255,0.6); }
 .touch-preview .touch-controls { display: block; }
-.touch-preview .joystick, .touch-preview .action-buttons { pointer-events: none; }
+.touch-preview .joy-area, .touch-preview .abtn { pointer-events: none; }
 /* An inline link in a sentence: the padding gives it a 44px-tall hit area and the negative margin keeps the line spacing. */
 .link-btn { background: none; border: none; padding: 12px 4px; margin: -12px -4px; font: inherit; font-weight: 700; color: var(--blue-dark); text-decoration: underline; cursor: pointer; min-height: 0; }
 @media (max-width: 640px) {
