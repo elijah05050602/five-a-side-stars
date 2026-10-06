@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { TextureCache } from './renderer';
 
 /**
  * Faces are painted, not modelled: the head's front patch has flat UVs (see
@@ -8,18 +9,26 @@ import * as THREE from 'three';
 export type Expression = 'neutral' | 'happy' | 'focus' | 'ouch' | 'sad' | 'blink';
 
 const SIZE = 160;
-const cache = new Map<string, THREE.CanvasTexture>();
+/** The faces being pulled right now, plus the most recent spares (a kid flicks between a handful). */
+const cache = new TextureCache<THREE.CanvasTexture>(80);
 const NAVY = '#1b2a41';
 
 /**
  * gazeX: -1..1, positive looks towards the kid's own left (the viewer's right
  * when they face you). gazeY: -1 up .. 1 down. Callers quantise both so the
- * cache stays small.
+ * cache stays small. Each call holds the face: hand it back with releaseTexture()
+ * once it is not shown.
  */
 export function faceTexture(skin: string, expr: Expression, gazeX = 0, gazeY = 0, hair = '#3b2314'): THREE.CanvasTexture {
-  const key = `${skin}|${expr}|${gazeX}|${gazeY}|${hair}`;
-  const hit = cache.get(key);
-  if (hit) return hit;
+  return cache.acquire(`${skin}|${expr}|${gazeX}|${gazeY}|${hair}`, () => paintFace(skin, expr, gazeX, gazeY, hair));
+}
+
+/** Dispose every face nobody is pulling. A match calls this when it ends. */
+export function clearFaceCache(): void {
+  cache.clearIdle();
+}
+
+function paintFace(skin: string, expr: Expression, gazeX: number, gazeY: number, hair: string): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = SIZE; c.height = SIZE;
   const ctx = c.getContext('2d')!;
@@ -125,6 +134,5 @@ export function faceTexture(skin: string, expr: Expression, gazeX = 0, gazeY = 0
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.flipY = false;
   tex.anisotropy = 2;
-  cache.set(key, tex);
   return tex;
 }

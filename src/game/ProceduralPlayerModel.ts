@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import type { Kit, Player } from '../data/types';
 import { kitTexture } from './kitTexture';
+import { disposeObject, shared } from './renderer';
 import { addOutline, toonMaterial } from './toon';
 
 /** Models are drawn bigger than their physical size so the kids read clearly from the camera. */
 export const MODEL_SCALE = 1.35;
-const shadowGeo = new THREE.CircleGeometry(0.42, 20);
-const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false });
+const shadowGeo = shared(new THREE.CircleGeometry(0.42, 20));
+const shadowMat = shared(new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false }));
+/** Shirt textures are cached in kitTexture.ts for every kid in that kit and number. */
+const shirtTexture = (kit: Kit, number: number): THREE.CanvasTexture => shared(kitTexture(kit, number));
 
 let faceTex: THREE.CanvasTexture | null = null;
 /** Big friendly eyes, rosy cheeks and a smile, drawn once and shared. */
@@ -35,7 +38,7 @@ function faceTexture(): THREE.CanvasTexture {
   // Smile
   ctx.strokeStyle = '#7a2e2e'; ctx.lineWidth = 6; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(cx - 22, eyeY + 38); ctx.quadraticCurveTo(cx, eyeY + 62, cx + 22, eyeY + 38); ctx.stroke();
-  faceTex = new THREE.CanvasTexture(c);
+  faceTex = shared(new THREE.CanvasTexture(c));
   faceTex.colorSpace = THREE.SRGBColorSpace;
   faceTex.anisotropy = 4;
   return faceTex;
@@ -70,7 +73,7 @@ export class ProceduralPlayerModel {
 
   constructor(player: Player, kit: Kit, scale: number) {
     const s = scale * MODEL_SCALE;
-    this.shirtMat = toonMaterial({ map: kitTexture(kit, player.number) });
+    this.shirtMat = toonMaterial({ map: shirtTexture(kit, player.number) });
     this.sleeveMat = toonMaterial({ color: kit.shirt });
     this.trimMat = toonMaterial({ color: kit.shirt2 });
     this.shortsMat = toonMaterial({ color: kit.shorts });
@@ -164,7 +167,7 @@ export class ProceduralPlayerModel {
   }
 
   setKit(kit: Kit, number: number): void {
-    this.shirtMat.map = kitTexture(kit, number);
+    this.shirtMat.map = shirtTexture(kit, number);
     this.shirtMat.needsUpdate = true;
     this.sleeveMat.color.set(kit.shirt);
     this.trimMat.color.set(kit.shirt2);
@@ -275,10 +278,9 @@ export class ProceduralPlayerModel {
   }
 
   dispose(): void {
-    this.group.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh) m.geometry.dispose();
-    });
+    // All this kid's own, bar the shared shadow, face and outline and the cached shirt texture.
+    disposeObject(this.group);
+    // The hair material is not in the tree when the kid is bald.
     [this.shirtMat, this.sleeveMat, this.trimMat, this.shortsMat, this.socksMat, this.skinMat, this.hairMat, this.bootMat].forEach((m) => m.dispose());
   }
 }

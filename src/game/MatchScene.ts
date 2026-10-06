@@ -8,7 +8,8 @@ import { Commentator } from './commentary';
 import { Weather, resolveConditions, type Conditions, type WeatherChoice } from './Weather';
 import { toonMaterial } from './toon';
 import { PlayerModel, type AnimState } from './PlayerModel';
-import type { Expression } from './playerFace';
+import { clearPlayerAtlasCache } from './playerAtlas';
+import { clearFaceCache, type Expression } from './playerFace';
 import type { Kit } from '../data/types';
 import { CROWD_SHOT_AT, DIVE_RECOVER, MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
@@ -19,7 +20,7 @@ import { getSettings } from '../data/storage';
 import { TutorialCoach } from './tutorial';
 import { batchStatic } from './batchStatic';
 import { graphicsProfile, type GraphicsProfile } from './graphics';
-import { EXPOSURE, TONE_MAPPING } from './renderer';
+import { EXPOSURE, TONE_MAPPING, disposeObject } from './renderer';
 
 export type SimMode = NonNullable<SimConfig['mode']>;
 
@@ -74,6 +75,8 @@ export class MatchScene {
   private readonly voice = new Commentary();
   readonly conditions: Conditions;
   private readonly weather: Weather;
+  private readonly pitch: THREE.Group;
+  private readonly sun: THREE.DirectionalLight;
   private readonly extras: ReturnType<typeof pitchExtras>;
   /** Rolling record of the last few seconds, oldest first. */
   private readonly history: ReplayFrame[] = [];
@@ -138,6 +141,7 @@ export class MatchScene {
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
 
     const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+    this.sun = sun;
     sun.position.set(-12, 30, 18);
     sun.castShadow = gfx.shadowMap;
     sun.shadow.mapSize.set(gfx.shadowSize, gfx.shadowSize);
@@ -154,6 +158,7 @@ export class MatchScene {
     const runoff = this.sim.mode === 'match';
     const pitch = buildPitch({ sceneryShadows: gfx.sceneryShadows, pbr: gfx.pbrGround, length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth, runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0 });
     this.scene.add(pitch);
+    this.pitch = pitch;
     this.extras = pitchExtras(pitch);
     this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, gfx);
     if (gfx.batchScenery) batchStatic(pitch, [...this.extras.nets.map((n) => n.group), this.extras.scoreboard.group]);
@@ -532,6 +537,17 @@ export class MatchScene {
     this.hud.destroy();
     this.models.forEach((m) => m.dispose());
     this.crowd.dispose();
+    // The crowd frees its own meshes but not the textures it borrows from caches (kit shirts, the fans'
+    // faces): this frees their GPU copies too, and they are uploaded again if the next match wants them.
+    disposeObject(this.crowd.group);
+    // The grass, boards, scoreboard, nets and merged stadium; then the ball, the tutorial star and the sun's shadow map.
+    disposeObject(this.pitch);
+    this.ball.dispose();
+    disposeObject(this.marker);
+    this.sun.dispose();
+    // Nobody is wearing a kit or pulling a face now: free the cached ones, bar any still held.
+    clearPlayerAtlasCache();
+    clearFaceCache();
     // The renderer outlives the match: let go of this scene's draw lists and blank the canvas.
     this.renderer.renderLists.dispose();
     this.renderer.info.reset();

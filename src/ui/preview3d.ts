@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { BootStyle, Build, Kit, Player } from '../data/types';
 import { IDLE_STATE, PlayerModel } from '../game/PlayerModel';
+import { disposeObject } from '../game/renderer';
 
 /**
  * One renderer for every preview the builder ever shows. The builder redraws itself on most taps,
@@ -112,6 +113,9 @@ export class KitPreview3D {
     this.canvas.removeEventListener('pointermove', this.onMove);
     this.canvas.removeEventListener('pointerup', this.onUp);
     this.model.dispose();
+    this.scene.remove(this.model.group);
+    // The grass disc and the lights.
+    disposeObject(this.scene);
     // The renderer stays for the next preview: it only lets go of this one's draw lists.
     this.renderer?.renderLists.dispose();
   }

@@ -66,3 +66,115 @@ export function showDrawError(root: HTMLElement): void {
   note.addEventListener('click', () => location.reload());
   root.append(note);
 }
+
+// ---------- freeing GPU memory ----------
+
+const sharedResources = new WeakSet<object>();
+
+/**
+ * Marks a geometry, material or texture that is made once and used by many objects (or by every
+ * match), so disposeObject leaves it alone. Returns it, for use where it is made.
+ */
+export function shared<T extends object>(resource: T): T {
+  sharedResources.add(resource);
+  return resource;
+}
+
+/**
+ * Frees what everything under `root` holds on the GPU: geometries, materials and their textures,
+ * skeletons' bone textures, instanced meshes' buffers and lights' shadow maps. Anything marked
+ * shared(), and every texture a TextureCache handed out, is left for its other users.
+ */
+export function disposeObject(root: THREE.Object3D): void {
+  const done = new Set<object>();
+  const free = (r: { dispose(): void } | null | undefined): void => {
+    if (!r || sharedResources.has(r) || done.has(r)) return;
+    done.add(r);
+    r.dispose();
+  };
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    free(mesh.geometry);
+    const mats = mesh.material === undefined ? [] : Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const m of mats) {
+      if (sharedResources.has(m)) continue;
+      for (const v of Object.values(m)) if ((v as THREE.Texture | null)?.isTexture) free(v as THREE.Texture);
+      free(m);
+    }
+    if ((o as THREE.SkinnedMesh).isSkinnedMesh) free((o as THREE.SkinnedMesh).skeleton);
+    if ((o as THREE.InstancedMesh).isInstancedMesh || (o as THREE.Light).isLight) free(o as THREE.InstancedMesh | THREE.Light);
+  });
+}
+
+// ---------- texture caches ----------
+
+/** Which cache a cached texture belongs to, so whoever holds it can hand it back. */
+const homes = new WeakMap<THREE.Texture, TextureCache<THREE.Texture>>();
+
+/**
+ * Textures painted on demand and shared by everyone who asks for the same key. Each acquire() is a
+ * hold, handed back with releaseTexture(). A texture nobody holds stays cached in case it is wanted
+ * again, but only the `spare` most recently used of those: older ones are disposed, so a long session
+ * in the team builder, or match after match against new teams, cannot fill the memory (phones, and
+ * iOS above all, cap the total canvas memory). A held texture is never disposed.
+ */
+export class TextureCache<T extends THREE.Texture> {
+  /** Least recently used first. */
+  private readonly entries = new Map<string, { tex: T; holds: number }>();
+  private readonly keys = new Map<T, string>();
+
+  constructor(private readonly spare: number) {}
+
+  /** The texture for `key`, painted by make() if it is not cached. Hand it back with releaseTexture(). */
+  acquire(key: string, make: () => T): T {
+    let e = this.entries.get(key);
+    if (e) this.entries.delete(key);
+    else {
+      e = { tex: shared(make()), holds: 0 };
+      this.keys.set(e.tex, key);
+      homes.set(e.tex, this as unknown as TextureCache<THREE.Texture>);
+    }
+    e.holds++;
+    this.entries.set(key, e);
+    this.trim(this.spare);
+    return e.tex;
+  }
+
+  release(tex: T): void {
+    const key = this.keys.get(tex);
+    const e = key === undefined ? undefined : this.entries.get(key);
+    if (!e || e.holds === 0) return;
+    if (--e.holds > 0) return;
+    // Just let go of, so it is the newest of the spares.
+    this.entries.delete(key!);
+    this.entries.set(key!, e);
+    this.trim(this.spare);
+  }
+
+  /** Dispose every texture nobody holds (when a match ends, say). */
+  clearIdle(): void { this.trim(0); }
+
+  /** How many textures are cached, held or not. */
+  get size(): number { return this.entries.size; }
+
+  private trim(spare: number): void {
+    let idle = 0;
+    for (const e of this.entries.values()) if (e.holds === 0) idle++;
+    for (const [key, e] of this.entries) {
+      if (idle <= spare) return;
+      if (e.holds > 0) continue;
+      this.entries.delete(key);
+      this.keys.delete(e.tex);
+      e.tex.dispose();
+      // Safari keeps a canvas's pixels until it is shrunk, long after nothing points at it.
+      const img = e.tex.image as unknown;
+      if (typeof HTMLCanvasElement !== 'undefined' && img instanceof HTMLCanvasElement) { img.width = 0; img.height = 0; }
+      idle--;
+    }
+  }
+}
+
+/** Hand back a texture from a TextureCache (anything else, or null, is ignored). */
+export function releaseTexture(tex: THREE.Texture | null | undefined): void {
+  if (tex) homes.get(tex)?.release(tex);
+}
