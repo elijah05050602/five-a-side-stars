@@ -21,7 +21,7 @@ jobs:
       # Browser tests on the built game: WebGL in software, the Back button, keyboard, offline play.
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-results
