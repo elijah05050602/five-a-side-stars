@@ -54,9 +54,10 @@ works offline and can be added to a phone or tablet home screen.
 
 | Action | Keyboard | Touch |
 | --- | --- | --- |
-| Move | Arrow keys or WASD | Left joystick |
-| Shoot | Hold Space or X, release to shoot | Shoot button (hold for power) |
-| Pass | Z or Enter | Pass button |
+| Move | Arrow keys | Left joystick |
+| Shoot | Hold Space or A, release to shoot | Shoot button (hold for power) |
+| Pass | D, Z or Enter | Pass button |
+| Lob pass / cross | S or V | Lob button |
 | Sprint | Shift | Sprint button |
 | Switch player | Q | Switch button |
 | Pause | Esc or P | Pause button |

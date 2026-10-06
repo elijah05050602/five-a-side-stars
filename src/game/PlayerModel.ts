@@ -4,6 +4,7 @@ import { cloneRig, loadPlayerAsset, playerAssetNow, type PlayerAsset } from './p
 import { contrastColour, numberTexture, playerAtlas } from './playerAtlas';
 import { faceTexture, type Expression } from './playerFace';
 import { ProceduralPlayerModel } from './ProceduralPlayerModel';
+import { DIVE_AIR_SHARE } from './sim';
 import { addOutline, addSkinnedOutline, smoothOutlineNormals, toonMaterial } from './toon';
 
 /** Models are drawn bigger than their physical size so the kids read clearly from the camera. */
@@ -34,6 +35,10 @@ export interface AnimState {
   gazeY: number;
   /** Jump for joy (goal celebration). */
   cheer: boolean;
+  /** A keeper getting up after a dive: 1 as they start, falling to 0 when back on their feet. */
+  recover?: number;
+  /** Sideways speed across the kid's body in m/s (positive = to their right), for a keeper's shuffle. */
+  strafe?: number;
   /** Step-over skill move: 1 as it starts, fading to 0; stepoverDir is which way the feint goes (-1 or 1). */
   stepover?: number;
   stepoverDir?: number;
@@ -65,6 +70,9 @@ type Head = 'Head_plain' | 'Head_short' | 'Head_long';
 const HEAD_FOR: Record<Player['hairStyle'], Head> = { short: 'Head_plain', spiky: 'Head_short', long: 'Head_long', curly: 'Head_plain', afro: 'Head_short', buns: 'Head_short', bald: 'Head_short' };
 /** Body shapes as (width, height, depth) multipliers on the rig. */
 const BUILD_SCALE: Record<Build, [number, number, number]> = { small: [0.9, 0.88, 0.9], regular: [1, 1, 1], tall: [0.96, 1.1, 0.96], sturdy: [1.12, 0.97, 1.12] };
+
+/** Rolled onto their side, the kid's body pivots at the feet, so it is raised this much to lie on the grass rather than in it. */
+const LYING_LIFT = 0.3;
 
 const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -117,6 +125,16 @@ export class PlayerModel {
   private wasDiving = false;
   private wasStunned = false;
   private wasTackling = false;
+  private wasCommitted = false;
+  /** Which way the current dive goes across the kid's body (1 = their right). */
+  private diveSide = 1;
+  private shuffleT = 0;
+  private legL: THREE.Object3D | null = null;
+  private legR: THREE.Object3D | null = null;
+  private armL: THREE.Object3D | null = null;
+  private armR: THREE.Object3D | null = null;
+  private root: THREE.Object3D | null = null;
+  private readonly rootRest = new THREE.Vector3();
   private slide = 0;
   private facing = 0;
   private turn = 0;
@@ -130,6 +148,8 @@ export class PlayerModel {
     this.boots = player.boots ?? '#222222'; this.bootStyle = player.bootStyle ?? 'classic'; this.hairStyle = player.hairStyle ?? 'short'; this.build = player.build ?? 'regular';
     this.isKeeper = player.position === 'GK';
     this.scale = scale;
+    // Yaw first, so roll (x) and pitch (z) stay about the kid's own forward and side axes whichever way they face.
+    this.body.rotation.order = 'YXZ';
     this.material = toonMaterial({ map: this.atlas() });
     this.faceMat = toonMaterial({ map: faceTexture(this.skin, 'neutral', 0, 0, this.hair) });
     this.hairMat = toonMaterial({ color: this.hair });
@@ -210,7 +230,14 @@ export class PlayerModel {
     const idle = this.actions.get('Idle');
     if (idle) { idle.play(); idle.time = Math.random() * idle.getClip().duration; }
     this.loco = 'idle';
-    mixer.addEventListener('finished', (e) => { if (e.action === this.oneShot) this.endOneShot(); });
+    // Held one-shots (a keeper's dive) stay on their last frame until the sim says the dive is over.
+    mixer.addEventListener('finished', (e) => { if (e.action === this.oneShot && !e.action.clampWhenFinished) this.endOneShot(); });
+    this.legL = rig.getObjectByName('upperlegl') ?? null;
+    this.legR = rig.getObjectByName('upperlegr') ?? null;
+    this.armL = rig.getObjectByName('upperarml') ?? null;
+    this.armR = rig.getObjectByName('upperarmr') ?? null;
+    this.root = rig.getObjectByName('root') ?? null;
+    if (this.root) this.rootRest.copy(this.root.position);
     this.setFacing(this.facing);
   }
 
@@ -355,18 +382,28 @@ export class PlayerModel {
     if (stepping && !this.wasStepping && !kicking && !diving) this.startOneShot((st.stepoverDir ?? 1) > 0 ? 'Dodge_Right' : 'Dodge_Left', 2.6, false);
     this.wasStepping = stepping;
     if (kicking && !this.wasKicking) this.startOneShot('Unarmed_Melee_Attack_Kick', 2.4, false);
-    const toRight = st.diveDir * Math.cos(this.facing) > 0;
-    if (diving && !this.wasDiving) this.startOneShot(toRight ? 'Dodge_Right' : 'Dodge_Left', 1.1, true);
-    if (!diving && this.wasDiving && this.oneShot) this.endOneShot();
+    const recovering = (st.recover ?? 0) > 0;
+    const committed = diving || (this.isKeeper && recovering);
+    if (diving && !this.wasDiving) {
+      this.diveSide = st.diveDir * Math.cos(this.facing) > 0 ? 1 : -1;
+      this.startOneShot(this.diveSide > 0 ? 'Dodge_Right' : 'Dodge_Left', 1.1, true);
+    }
+    // The dive pose holds while the keeper lies on the grass and gets up; only then do the feet take over again.
+    if (!committed && this.wasCommitted && this.oneShot) this.endOneShot();
+    this.wasCommitted = committed;
     if (stunned && !this.wasStunned && !diving) this.startOneShot('Hit_A', 1.4, false);
     if (tackling && !this.wasTackling && !kicking) this.slide = 0.42;
     this.wasKicking = kicking; this.wasDiving = diving; this.wasStunned = stunned; this.wasTackling = tackling;
 
     // Locomotion from speed; feet speed follows the kid's actual speed.
-    const want: Loco = st.cheer && norm < 0.8 ? 'cheer' : norm < 0.35 ? 'idle' : norm < 2.4 ? 'walk' : 'run';
+    // A keeper moving across their goal shuffles side-on in the ready stance instead of running.
+    const strafe = this.isKeeper && !committed ? (st.strafe ?? 0) : 0;
+    const shuffling = Math.abs(strafe) / scale > 0.35 && Math.abs(strafe) > st.speed * 0.6;
+    const want: Loco = st.cheer && norm < 0.8 ? 'cheer' : norm < 0.35 || shuffling ? 'idle' : norm < 2.4 ? 'walk' : 'run';
     if (want !== this.loco) this.switchLoco(want);
-    const run = this.actions.get('Running_A'), walk = this.actions.get('Walking_A');
-    if (run) run.setEffectiveTimeScale(THREE.MathUtils.clamp(norm / 4.5, 0.75, 1.8));
+    const run = this.actions.get('Running_B'), walk = this.actions.get('Walking_A');
+    // Running_B swings each arm with the opposite leg; its stride is longer than Running_A's, so it plays a little faster.
+    if (run) run.setEffectiveTimeScale(THREE.MathUtils.clamp(norm / 3.4, 1, 2.4));
     if (walk) walk.setEffectiveTimeScale(THREE.MathUtils.clamp(norm / 1.8, 0.7, 1.5));
     this.mixer.update(dt);
 
@@ -391,17 +428,66 @@ export class PlayerModel {
       lift -= 0.16 * scale * k;
     }
     if (diving && this.isKeeper) {
-      // Keepers fly: roll towards the ball and leave the ground.
-      const t = Math.sin(Math.min(1, (1 - st.dive) * 2) * Math.PI * 0.5);
-      roll += (toRight ? 1 : -1) * t * 1.15;
-      lift += t * 0.28 * scale;
+      // Keepers fly: launch sideways in an arc, land on their side and stay down for a moment.
+      const t = 1 - st.dive;
+      const air = DIVE_AIR_SHARE;
+      if (t < air) {
+        const u = t / air;
+        roll += this.diveSide * 1.35 * Math.sin(u * Math.PI * 0.5);
+        lift += 0.2 * scale * Math.sin(u * Math.PI) + LYING_LIFT * scale * u;
+      } else {
+        roll += this.diveSide * 1.35;
+        lift += LYING_LIFT * scale;
+      }
+      pitch = 0;
+    } else if (recovering && this.isKeeper) {
+      // Getting up: push off the grass, over onto the knees and back to the feet.
+      const u = 1 - (st.recover ?? 0);
+      const up = u * u * (3 - 2 * u);
+      roll += this.diveSide * 1.35 * (1 - up);
+      lift += LYING_LIFT * scale * (1 - up);
+      pitch = -0.35 * Math.sin(u * Math.PI);
     }
     this.body.rotation.x = roll;
     this.body.rotation.z = pitch;
     this.body.position.y = lift;
+
+    if (this.isKeeper && committed) {
+      // The dodge clip side-steps the whole skeleton; the dive itself carries the keeper, so keep it over the spot.
+      if (this.root) this.root.position.copy(this.rootRest);
+      // Both arms stretch up past the head, reaching for the ball, and come down again as they get up.
+      const reach = diving ? Math.min(1, (1 - st.dive) / (DIVE_AIR_SHARE * 0.5)) : 1 - (1 - (st.recover ?? 0)) * 1.6;
+      const r = Math.max(0, reach);
+      if (this.armL && this.armR) { this.swingSideways(this.armL, 2.1 * r); this.swingSideways(this.armR, -2.1 * r); }
+    }
+
+    // Shuffle: little side-steps that open and close the legs, with a hop on each step.
+    if (shuffling && this.legL && this.legR) {
+      this.shuffleT += dt * (5 + 2.2 * Math.abs(strafe) / scale);
+      const open = 0.32 * Math.abs(Math.sin(this.shuffleT));
+      this.body.position.y += 0.035 * scale * Math.abs(Math.cos(this.shuffleT));
+      this.body.rotation.x += Math.sign(strafe) * 0.06;
+      this.swingSideways(this.legL, open);
+      this.swingSideways(this.legR, -open);
+    }
   }
 
-  private clipName(l: Loco): string { return l === 'idle' ? 'Idle' : l === 'walk' ? 'Walking_A' : l === 'run' ? 'Running_A' : 'Cheer'; }
+  private readonly tmpQ = new THREE.Quaternion();
+  private readonly tmpQ2 = new THREE.Quaternion();
+  private readonly tmpAxis = new THREE.Vector3();
+
+  /** Swing a limb out sideways (about the kid's forward axis; positive lifts a left limb, negative a right one) on top of the clip. */
+  private swingSideways(bone: THREE.Object3D, angle: number): void {
+    const parent = bone.parent;
+    if (!parent) return;
+    this.body.updateWorldMatrix(true, true);
+    // The kid's forward (body +x) in world space, then in the leg's parent space.
+    this.tmpAxis.set(1, 0, 0).applyQuaternion(this.body.getWorldQuaternion(this.tmpQ));
+    this.tmpAxis.applyQuaternion(parent.getWorldQuaternion(this.tmpQ2).invert()).normalize();
+    bone.quaternion.premultiply(this.tmpQ.setFromAxisAngle(this.tmpAxis, angle));
+  }
+
+  private clipName(l: Loco): string { return l === 'idle' ? 'Idle' : l === 'walk' ? 'Walking_A' : l === 'run' ? 'Running_B' : 'Cheer'; }
 
   private switchLoco(next: Loco): void {
     const from = this.actions.get(this.clipName(this.loco));
