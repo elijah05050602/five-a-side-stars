@@ -43,3 +43,14 @@ SoundFont) still works if the audio ever needs rebuilding without an account.
 
 After changing any file in `public/audio/`, bump `VERSION` in `public/sw.js` so
 phones fetch the new audio instead of their cached copy.
+
+## Adding lines later
+
+Add the new lines to `commentary_elevenlabs.json`, then
+`python3 tools/audio/split_elevenlabs.py plan batches.json > more.json` keeps
+the recorded batches as they are and appends batches for only the new lines.
+Record those (`take_17.mp3` onwards), add their Scribe boundaries to
+`commentary_cuts.json`, and run `build more.json takes/ ...` as above. Until a
+situation is recorded, `FALLBACK` in `src/game/voice.ts` speaks a similar line
+for big moments, and chatter is shown on the ticker without a voice. Each take
+of ten lines costs about 600 credits on eleven_v3.

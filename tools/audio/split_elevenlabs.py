@@ -10,6 +10,7 @@ caught rather than shipped.
 
 Usage (from the repo root):
   python3 tools/audio/split_elevenlabs.py plan > batches.json   # the prompts to record
+  python3 tools/audio/split_elevenlabs.py plan batches.json > more.json   # only lines added since
   # record each batch's prompt with voice Connor (xtw8E1CXDMtNKx4sgP7u), save as take_<n>.mp3
   python3 tools/audio/split_elevenlabs.py build batches.json takes/ [hints.json]
 
@@ -47,10 +48,20 @@ def script():
     return lines
 
 
-def plan():
-    items = [(k, i, t) for k, v in script().items() for i, t in enumerate(v)]
+def plan(recorded=None):
+    """
+    The prompts to record. Given the batches already recorded, keeps them as
+    they are and adds new batches for only the lines that are not in them, so
+    new lines can be recorded without re-recording the old ones.
+    """
+    old = []
+    if recorded:
+        with open(recorded) as f:
+            old = json.load(f)
+    done = {(k, t) for b in old for k, _, t in b['items']}
+    items = [(k, i, t) for k, v in script().items() for i, t in enumerate(v) if (k, t) not in done]
     batches = [items[n:n + PER_BATCH] for n in range(0, len(items), PER_BATCH)]
-    return [{'items': [list(it) for it in b], 'prompt': ' [long pause] '.join(t for _, _, t in b)} for b in batches]
+    return old + [{'items': [list(it) for it in b], 'prompt': ' [long pause] '.join(t for _, _, t in b)} for b in batches]
 
 
 def load(path):
@@ -153,6 +164,6 @@ def build(batches_path, takes_dir, hints_path=None):
 
 if __name__ == '__main__':
     if sys.argv[1] == 'plan':
-        print(json.dumps(plan(), indent=1))
+        print(json.dumps(plan(sys.argv[2] if len(sys.argv) > 2 else None), indent=1))
     else:
         build(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None)

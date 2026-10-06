@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Commentator, LINES, type LineKey } from '../game/commentary';
-import { pickClip, priority, scoreClip } from '../game/voice';
+import { FALLBACK, pickClip, priority, scoreClip } from '../game/voice';
 import { IDLE_INPUT } from '../game/sim';
 import { cpuMatch } from './helpers';
 import spriteJson from '../../public/audio/commentary.json';
@@ -8,8 +8,11 @@ import spriteJson from '../../public/audio/commentary.json';
 const sprite = spriteJson as unknown as { clips: Record<string, [number, number][]> };
 
 describe('recorded commentary', () => {
-  it('has at least one spoken clip for every commentary line', () => {
-    for (const key of Object.keys(LINES)) expect(sprite.clips[key]?.length, key).toBeGreaterThan(0);
+  it('has spoken clips for every big moment, recorded or borrowed from a similar line', () => {
+    for (const key of Object.keys(LINES) as LineKey[]) {
+      if (priority(key) < 2 && !sprite.clips[key]) continue; // chatter can be shown without a voice
+      expect(sprite.clips[key]?.length ?? sprite.clips[FALLBACK[key] ?? '']?.length, key).toBeGreaterThan(0);
+    }
   });
 
   it('has a score call for every score up to nine goals', () => {
