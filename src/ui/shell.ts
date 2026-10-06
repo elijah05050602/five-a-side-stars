@@ -46,7 +46,7 @@ export function dock(): string {
   return `
     <footer class="dock">
       <div class="dock-keys"><kbd>SPACE</kbd> Kick off <span class="dock-dot">·</span> <kbd>ESC</kbd> Back</div>
-      <div class="dock-right"><span class="dock-chip dock-offline">● PLAYS OFFLINE</span><button class="dock-chip dock-link" id="m-howto">🎓 How to play</button><button class="dock-chip dock-link" data-nav="controls">🎮 Controls</button><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></div>
+      <div class="dock-right"><span class="dock-chip dock-offline">● PLAYS OFFLINE</span><button class="dock-chip dock-link" id="m-howto">🎓 How to play</button><button class="dock-chip dock-link" data-nav="controls">🎮 Controls</button><button class="dock-chip dock-link dock-club" data-club>🦊 Davao Strikers</button><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></div>
     </footer>`;
 }
 

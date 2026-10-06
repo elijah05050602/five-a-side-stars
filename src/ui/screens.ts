@@ -5,7 +5,10 @@ import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, 
 import { STAR_BUDGET, STAR_CAP, fitSkills, randomSkills, skillKeys, skillLabel, starsLeft, starsText, totalStars } from '../data/skills';
 import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, advanceCareer, applyCareerMatch, careerAge, careerSeasonOutcome, careerSeasonOver, createCareer, playerOfTheMatch, seasonName, statRows, type GrowthEvent } from '../game/career';
 import { kitsClash } from '../game/kitTexture';
-import { FORMATIONS, applyFormation, assignSlots, formationById, formationFor } from '../data/formations';
+import { FORMATIONS, applyFormation, assignSlots, canPlay, formationById, formationFor, swapPlayers } from '../data/formations';
+import { wireDragSwap } from './dragSwap';
+import './club.css';
+import { CLUB_COLOURS, CLUB_LOGO_URL, CLUB_NAME, CLUB_TEAM_ID, ensureClubTeam, resetClubTeam } from '../data/club';
 import { contrastColour } from '../game/playerAtlas';
 import type { MatchResult, SimMode } from '../game/MatchScene';
 import { WEATHER_CHOICES, type WeatherChoice } from '../game/Weather';
@@ -62,7 +65,8 @@ export type Screen =
   | { name: 'career' }
   | { name: 'album' }
   | { name: 'parents' }
-  | { name: 'controls' };
+  | { name: 'controls' }
+  | { name: 'club' };
 
 let cleanup: (() => void) | null = null;
 
@@ -85,6 +89,7 @@ export function renderScreen(root: HTMLElement, screen: Screen, router: Router):
     case 'album': return renderAlbum(root, router);
     case 'parents': return renderParents(root, router);
     case 'controls': cleanup = renderControls(root, router, wire); return;
+    case 'club': return renderClub(root, router);
   }
 }
 
@@ -141,7 +146,7 @@ function renderMenu(root: HTMLElement, router: Router): void {
           </div>
         </div>
       </div>
-      ${hasKeyboard ? dock() : '<footer class="dock dock-touch"><button class="dock-chip dock-link" id="m-howto">🎓 How to play</button><button class="dock-chip dock-link" data-nav="controls">🎮 Controls</button><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></footer>'}
+      ${hasKeyboard ? dock() : '<footer class="dock dock-touch"><button class="dock-chip dock-link" id="m-howto">🎓 How to play</button><button class="dock-chip dock-link" data-nav="controls">🎮 Controls</button><button class="dock-chip dock-link dock-club" data-club>🦊 Davao Strikers</button><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></footer>'}
       <p class="version">Goal Rush! v${pkg.version} · works offline once loaded · no accounts, no adverts</p>
     </div>`;
   wireShell(root, router);
@@ -155,9 +160,58 @@ function renderMenu(root: HTMLElement, router: Router): void {
   root.querySelector('#m-teams')!.addEventListener('click', () => router.go({ name: 'teams' }));
   root.querySelector('#m-album')!.addEventListener('click', () => router.go({ name: 'album' }));
   root.querySelector('#m-howto')!.addEventListener('click', () => router.startTutorial());
+  root.querySelector('[data-club]')?.addEventListener('click', () => router.go({ name: 'club' }));
   const onKey = (e: KeyboardEvent) => { if (e.code === 'Space' && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); router.go({ name: 'setup' }); } };
   window.addEventListener('keydown', onKey);
   cleanup = () => window.removeEventListener('keydown', onKey);
+}
+
+// ---------- Davao Strikers FC ----------
+
+/** The club page: play as Davao Strikers FC U7 in any mode. The team is an ordinary saved team, so all of it stays editable. */
+function renderClub(root: HTMLElement, router: Router): void {
+  const team = ensureClubTeam();
+  const order = [...team.players].sort((a, b) => Number(b.starter) - Number(a.starter));
+  root.innerHTML = `
+    <div class="screen club">
+      ${topBar(CLUB_NAME)}
+      <div class="card club-hero" style="--club-orange:${CLUB_COLOURS.orange};--club-navy:${CLUB_COLOURS.navy};--club-cream:${CLUB_COLOURS.cream}">
+        <img class="club-logo" src="${CLUB_LOGO_URL}" alt="${esc(CLUB_NAME)} logo" width="512" height="512" />
+        <div class="club-text">
+          <small>Official club of Goal Rush!</small>
+          <h2>${esc(team.name)} <span class="chip chip-age">${team.ageGroup}</span></h2>
+          <p>Play as the club's Under 7s in their orange and navy kit. Change names, numbers, positions, looks and stars any time in Edit squad.</p>
+          <div class="row club-kits">${kitChip(team.kit, 48)}${kitChip(team.awayKit, 48)}${kitChip(team.keeperKit, 48)}</div>
+        </div>
+      </div>
+      <div class="club-squad">
+        ${order.map((pl) => `
+          <div class="card club-player ${pl.starter ? '' : 'is-sub'}">
+            <span class="club-num">${pl.number}</span>
+            <span class="club-name"><strong>${esc(pl.name)}</strong><small>${canPlay(pl).map((x) => POSITION_LABELS[x]).join(' / ')}</small></span>
+            ${pl.starter ? '' : '<span class="chip chip-sub">Sub</span>'}
+          </div>`).join('')}
+      </div>
+      <div class="club-actions">
+        <button class="btn btn-primary btn-big" data-club-go="match">⚽ Play a match</button>
+        <button class="btn btn-blue" data-club-go="tournament">🏆 Cup</button>
+        <button class="btn btn-blue" data-club-go="league">📋 League</button>
+        <button class="btn btn-blue" data-club-go="shootout">🥅 Penalties</button>
+        <button class="btn btn-ghost" id="c-edit">✏️ Edit squad</button>
+        <button class="btn btn-ghost" id="c-reset" title="Put the club's squad, kits and badge back">↺ Reset to club squad</button>
+      </div>
+    </div>`;
+  wire(root, () => router.go({ name: 'menu' }));
+  root.querySelectorAll<HTMLElement>('[data-club-go]').forEach((b) => b.addEventListener('click', () => {
+    const mode = b.dataset.clubGo as SetupMode;
+    router.go({ name: 'setup', homeId: CLUB_TEAM_ID, mode });
+  }));
+  root.querySelector('#c-edit')!.addEventListener('click', () => router.go({ name: 'builder', teamId: CLUB_TEAM_ID }));
+  root.querySelector('#c-reset')!.addEventListener('click', () => {
+    if (!confirm(`Put ${CLUB_NAME}'s squad, kits and badge back the way the club made them? Your changes to this team will be lost.`)) return;
+    resetClubTeam();
+    renderClub(root, router);
+  });
 }
 
 // ---------- Teams list ----------
@@ -211,6 +265,8 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
   /** Which outfield kit the squad step's preview wears. */
   let squadKit: 'kit' | 'awayKit' = 'kit';
   let selectedPlayer = 0;
+  /** A player tapped on the little pitch, waiting for a second tap to swap with. */
+  let picked: string | null = null;
   let preview: KitPreview3D | null = null;
 
   const render = () => {
@@ -422,14 +478,15 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     const starters = team.players.filter((x) => x.starter).length;
     form.innerHTML = `
       ${formationField()}
-      <p class="muted">Squad of ${team.players.length} (5 to 8). Starters: ${starters} of 5. Tap a player to edit them.</p>
+      <p class="muted">Squad of ${team.players.length} (5 to 8). Starters: ${starters} of 5. Tap a player to edit them, or drag one onto another to swap them.</p>
       <div class="squad-row squad-row-${team.players.length > 5 ? 'wide' : 'five'}">
         ${team.players.map((pl, i) => `
-          <button class="player-card ${i === selectedPlayer ? 'is-active' : ''} ${pl.starter ? '' : 'is-sub'}" data-player="${i}">
+          <button class="player-card ${i === selectedPlayer ? 'is-active' : ''} ${pl.starter ? '' : 'is-sub'} ${picked === pl.id ? 'is-picked' : ''}" data-player="${i}" data-swap="${pl.id}" data-swap-label="${pl.number} ${esc(pl.name)}">
             ${kitChip(pl.position === 'GK' ? team.keeperKit : team[squadKit], 40)}
             <span class="pc-number">${pl.number}</span>
             <span class="pc-name">${esc(pl.name)}</span>
             <span class="chip chip-pos chip-${pl.position.toLowerCase()}">${POSITION_LABELS[pl.position]}</span>
+            ${alsoText(pl)}
             <span class="pc-stars">★ ${totalStars(pl.skills, pl.position)}</span>
             ${pl.starter ? '' : '<span class="chip chip-sub">Sub</span>'}
           </button>`).join('')}
@@ -447,6 +504,9 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
         </div>
         <div class="field"><span>Position</span>
           <div class="pills">${POSITIONS.map((pos) => `<button class="pill ${p.position === pos ? 'is-active' : ''}" data-pos="${pos}">${POSITION_LABELS[pos]}</button>`).join('')}</div>
+        </div>
+        <div class="field"><span>Can also play <small class="muted">tap every position that suits ${esc(p.name || 'them')}</small></span>
+          <div class="pills">${POSITIONS.filter((pos) => pos !== 'GK' && pos !== p.position).map((pos) => `<button class="pill pill-also ${canPlay(p).includes(pos) ? 'is-active' : ''}" data-also="${pos}" aria-pressed="${canPlay(p).includes(pos)}">${canPlay(p).includes(pos) ? '✓ ' : '+ '}${POSITION_LABELS[pos]}</button>`).join('')}</div>
         </div>
         ${skillsField(p, team)}
         <div class="field"><span>Special</span>
@@ -488,7 +548,21 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     form.querySelectorAll<HTMLElement>('[data-boots]').forEach((b) => b.addEventListener('click', () => { p.boots = b.dataset.boots!; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-bootstyle]').forEach((b) => b.addEventListener('click', () => { p.bootStyle = b.dataset.bootstyle as BootStyle; preview?.setLook(p.skin, p.hair, p.hairStyle, p.boots, p.bootStyle); renderSquad(form); }));
     form.querySelectorAll<HTMLElement>('[data-build]').forEach((b) => b.addEventListener('click', () => { p.build = b.dataset.build as Build; preview?.setBuild(p.build); renderSquad(form); }));
-    form.querySelectorAll<HTMLElement>('[data-player]').forEach((b) => b.addEventListener('click', () => { selectedPlayer = Number(b.dataset.player); render(); }));
+    form.querySelectorAll<HTMLElement>('[data-player]').forEach((b) => b.addEventListener('click', () => {
+      // With someone picked on the pitch, tapping a card swaps them; otherwise it opens that player.
+      if (picked && picked !== b.dataset.swap) { swapById(picked, b.dataset.swap!); return; }
+      picked = null;
+      selectedPlayer = Number(b.dataset.player);
+      render();
+    }));
+    form.querySelectorAll<SVGGElement>('[data-pick]').forEach((g) => g.addEventListener('click', () => {
+      const id = g.dataset.pick!;
+      if (picked && picked !== id) { swapById(picked, id); return; }
+      picked = picked === id ? null : id;
+      const i = team.players.findIndex((x) => x.id === id);
+      if (i >= 0) selectedPlayer = i;
+      render();
+    }));
     const nameEl = form.querySelector<HTMLInputElement>('#p-name')!;
     nameEl.addEventListener('input', () => { p.name = nameEl.value; form.querySelectorAll('.pc-name')[selectedPlayer].textContent = p.name; });
     form.querySelector('#p-dice')!.addEventListener('click', () => { p.name = randomPlayerName(); nameEl.value = p.name; form.querySelectorAll('.pc-name')[selectedPlayer].textContent = p.name; });
@@ -504,8 +578,18 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     numEl.addEventListener('input', () => setNum(Number(numEl.value)));
     form.querySelector('#p-num-down')!.addEventListener('click', () => setNum(p.number - 1));
     form.querySelector('#p-num-up')!.addEventListener('click', () => setNum(p.number + 1));
+    form.querySelectorAll<HTMLElement>('[data-also]').forEach((b) => b.addEventListener('click', () => {
+      const pos = b.dataset.also as Position;
+      const now = canPlay(p);
+      const next = now.includes(pos) ? now.filter((x) => x !== pos) : [...now, pos];
+      p.positions = next.length ? next : [p.position];
+      renderSquad(form);
+    }));
     form.querySelectorAll<HTMLElement>('[data-pos]').forEach((b) => b.addEventListener('click', () => {
       const pos = b.dataset.pos as Position;
+      // Their main position changes; the others they can play stay ticked.
+      const also = canPlay(p).filter((x) => x !== p.position && x !== pos);
+      p.positions = [pos, ...also];
       if (pos === 'GK') {
         // Only one keeper: the old keeper swaps into this player's old position.
         const oldGk = team.players.find((x) => x.position === 'GK' && x !== p);
@@ -532,36 +616,64 @@ function renderBuilder(root: HTMLElement, router: Router, teamId?: string): void
     form.querySelectorAll<HTMLElement>('[data-hair]').forEach((b) => b.addEventListener('click', () => { p.hair = b.dataset.hair!; preview?.setLook(p.skin, p.hair); renderSquad(form); }));
   };
 
-  /** Formation picker with a little pitch showing who stands where. */
+  /** Swap two players by id (dragged or tapped on the line-up), keeping the open player open. */
+  const swapById = (fromId: string, toId: string) => {
+    const a = team.players.find((x) => x.id === fromId);
+    const b = team.players.find((x) => x.id === toId);
+    picked = null;
+    if (!a || !b) { render(); return; }
+    const open = team.players[selectedPlayer];
+    swapPlayers(team, a, b);
+    selectedPlayer = Math.max(0, team.players.indexOf(open));
+    // Someone who swapped into or out of goal rates different things: keep the stars inside the budget.
+    for (const x of team.players) x.skills = fitSkills(x, team.ageGroup, !team.career);
+    render();
+  };
+
+  /** Formation picker with a little pitch showing who stands where. Drag (or tap two) players to swap them. */
   const formationField = (): string => {
     const f = formationById(team.formation);
     const five = team.players.filter((x) => x.starter);
+    const subs = team.players.filter((x) => !x.starter);
     const slots = assignSlots(five.filter((x) => x.position !== 'GK'), f);
     const gk = five.find((x) => x.position === 'GK');
+    const pickedPlayer = team.players.find((x) => x.id === picked);
     // The pitch is drawn sideways: our goal on the left, attacking to the right.
-    const dot = (x: number, z: number, label: string, cls: string, title: string) =>
-      `<g class="fm-dot ${cls}" transform="translate(${(x * 2 * 200).toFixed(1)} ${((z + 0.5) * 110).toFixed(1)})"><title>${esc(title)}</title><circle r="11"/><text y="4" text-anchor="middle">${esc(label)}</text></g>`;
+    const dot = (px: number, py: number, pl: Team['players'][number], cls: string, title: string) =>
+      `<g class="fm-dot ${cls} ${picked === pl.id ? 'is-picked' : ''}" transform="translate(${px.toFixed(1)} ${py.toFixed(1)})" data-swap="${pl.id}" data-swap-label="${pl.number} ${esc(pl.name)}" data-pick="${pl.id}" role="button" tabindex="0"><title>${esc(title)}</title><circle r="11"/><text y="4" text-anchor="middle">${pl.number}</text><text y="22" text-anchor="middle" class="fm-name">${esc(pl.name.slice(0, 9))}</text></g>`;
+    const onPitch = (x: number, z: number) => [x * 2 * 200, (z + 0.5) * 110] as const;
+    const outOf = (pl: Team['players'][number], pos: Team['players'][number]['position']) => canPlay(pl).includes(pos) ? '' : ' (out of position)';
     const dots = [
-      ...(gk ? [dot(0.04, 0, String(gk.number), 'fm-gk', `${gk.name}: Keeper`)] : []),
-      ...[...slots].map(([pl, sl]) => dot(sl.x, sl.z, String(pl.number), `fm-${sl.pos.toLowerCase()}`, `${pl.name}: ${POSITION_LABELS[sl.pos]}`)),
+      ...(gk ? [dot(...onPitch(0.04, 0), gk, 'fm-gk', `${gk.name}: Keeper${outOf(gk, 'GK')}`)] : []),
+      ...[...slots].map(([pl, sl]) => dot(...onPitch(sl.x, sl.z), pl, `fm-${sl.pos.toLowerCase()}${outOf(pl, sl.pos) ? ' is-out' : ''}`, `${pl.name}: ${POSITION_LABELS[sl.pos]}${outOf(pl, sl.pos)}`)),
+      ...subs.map((pl, i) => dot(28 + i * 48, 140, pl, 'fm-sub', `${pl.name}: sub`)),
     ].join('');
+    const height = subs.length ? 180 : 126;
     return `
       <div class="field formation-field"><span>Formation <small class="muted">${esc(f.shape)} · ${esc(f.blurb)}</small></span>
         <div class="formation-row">
           <div class="pills formation-pills">${FORMATIONS.map((x) => `<button class="pill ${x.id === f.id ? 'is-active' : ''}" data-formation="${x.id}" title="${esc(x.blurb)}"><strong>${esc(x.name)}</strong> <small>${x.shape}</small></button>`).join('')}</div>
-          <svg class="formation-pitch" viewBox="-14 -8 228 126" aria-label="${esc(f.name)} formation">
+          <svg class="formation-pitch" viewBox="-14 -8 228 ${height}" aria-label="${esc(f.name)} formation" data-swap-instant>
             <rect x="-8" y="0" width="216" height="110" rx="6" class="fm-grass"/>
             <line x1="200" y1="0" x2="200" y2="110" class="fm-line"/><circle cx="200" cy="55" r="16" class="fm-line"/>
             <rect x="-8" y="30" width="34" height="50" class="fm-line"/>
+            ${subs.length ? '<rect x="-8" y="122" width="216" height="46" rx="6" class="fm-bench"/><text x="200" y="143" text-anchor="end" class="fm-bench-label">SUBS</text>' : ''}
             ${dots}
           </svg>
         </div>
-        <p class="muted small">Picking a formation moves your starters into its positions. Strikers attack, wingers run the wings, midfielders link up and defenders guard the goal.</p>
+        <p class="muted small fm-hint">${pickedPlayer ? `Now tap the player to swap with ${esc(pickedPlayer.name)}, or tap ${esc(pickedPlayer.name)} again to cancel.` : 'Drag a player onto another to swap places (or tap one, then the other). Drag a sub onto the pitch to bring them on. Picking a formation moves your starters into its positions, choosing the spots they can play first.'}</p>
       </div>`;
   };
 
+  /** "Also WING · ATT" under a player card: the other positions they can play. */
+  const alsoText = (pl: Team['players'][number]): string => {
+    const also = canPlay(pl).filter((x) => x !== pl.position);
+    return also.length ? `<span class="pc-also">also ${also.join(' · ')}</span>` : '';
+  };
+
   render();
-  cleanup = () => { preview?.dispose(); preview = null; };
+  const unwireDrag = wireDragSwap(root, swapById);
+  cleanup = () => { preview?.dispose(); preview = null; unwireDrag(); };
 }
 
 /** Star ratings for one player: spend the age group's budget, or just read them on a career team. */

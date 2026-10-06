@@ -68,7 +68,10 @@ export interface Player {
   id: string;
   name: string;
   number: number;
+  /** Where they line up right now (set by the formation, dragging, or picking a position). */
   position: Position;
+  /** Every position they are good at, so a formation puts them somewhere they like. Missing means just `position`. */
+  positions?: Position[];
   skin: string;
   hair: string;
   hairStyle: HairStyle;

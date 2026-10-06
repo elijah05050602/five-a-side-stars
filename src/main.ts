@@ -71,3 +71,13 @@ const router: Router = {
 // First visit: straight into the tutorial (with a skip button). Everyone else lands on the menu.
 if (getSettings().tutorialDone) router.go({ name: 'menu' });
 else router.startTutorial();
+
+// Lift the loading screen once the player model is in (or after a few seconds anyway), and not so fast that nobody can read it.
+const boot = document.getElementById('boot');
+if (boot) {
+  const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  Promise.all([wait(1400), Promise.race([loadPlayerAsset().catch(() => undefined), wait(4000)])]).then(() => {
+    boot.classList.add('is-gone');
+    setTimeout(() => boot.remove(), 600);
+  });
+}
