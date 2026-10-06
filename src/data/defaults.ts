@@ -10,9 +10,9 @@ export const KIT_COLOURS = [
   '#ff6fb5', '#ffffff', '#1b2a41', '#8d99ae', '#111111', '#00c2cb', '#ff7a00', '#7bd389',
 ];
 
-const FIRST_NAMES = ['Ava', 'Leo', 'Mia', 'Noah', 'Zoe', 'Kai', 'Isla', 'Max', 'Ruby', 'Finn', 'Nia', 'Theo', 'Elsie', 'Omar', 'Lily', 'Jude', 'Amara', 'Ezra', 'Freya', 'Sami', 'Priya', 'Luca', 'Hana', 'Rafa'];
-const TEAM_WORDS_A = ['Rocket', 'Thunder', 'Sunny', 'Lightning', 'Mighty', 'Flying', 'Super', 'Wild', 'Golden', 'Blue', 'Red', 'Green', 'Comet', 'Jolly'];
-const TEAM_WORDS_B = ['Lions', 'Foxes', 'Tigers', 'Stars', 'Rovers', 'Dragons', 'Owls', 'Sharks', 'Bees', 'Wolves', 'Eagles', 'Pandas', 'Otters', 'Penguins'];
+export const FIRST_NAMES = ['Ava', 'Leo', 'Mia', 'Noah', 'Zoe', 'Kai', 'Isla', 'Max', 'Ruby', 'Finn', 'Nia', 'Theo', 'Elsie', 'Omar', 'Lily', 'Jude', 'Amara', 'Ezra', 'Freya', 'Sami', 'Priya', 'Luca', 'Hana', 'Rafa'];
+export const TEAM_WORDS_A = ['Rocket', 'Thunder', 'Sunny', 'Lightning', 'Mighty', 'Flying', 'Super', 'Wild', 'Golden', 'Blue', 'Red', 'Green', 'Comet', 'Jolly'];
+export const TEAM_WORDS_B = ['Lions', 'Foxes', 'Tigers', 'Stars', 'Rovers', 'Dragons', 'Owls', 'Sharks', 'Bees', 'Wolves', 'Eagles', 'Pandas', 'Otters', 'Penguins'];
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
