@@ -981,7 +981,10 @@ export class MatchSim {
       // Big clearance upfield, away from whoever is closest.
       const awayZ = presser ? Math.sign(p.pos.z - presser.pos.z) || 1 : (Math.random() < 0.5 ? -1 : 1);
       const boot = Math.sqrt(p.mul.strength); // Strength: a longer clearance
-      this.kick(p, v(dir, awayZ * rand(0.2, 0.6)), this.stats.power * 0.95 * boot, this.stats.power * 0.35 * boot);
+      const loft = this.stats.power * 0.35 * boot;
+      // A punt from the hands starts higher, so it goes flatter to land where a kick off the grass would.
+      const y = hands ? this.ball.y : 0;
+      this.kick(p, v(dir, awayZ * rand(0.2, 0.6)), this.stats.power * 0.95 * boot, loft - y / ((2 * loft) / 9.81));
       if (hands) this.setMove(p, 'punt'); // dropped from the hands and volleyed
     }
   }
@@ -1631,8 +1634,7 @@ export class MatchSim {
     const n = norm(dir);
     b.owner = null;
     b.vel = v(n.x * speed, n.z * speed);
-    // Struck from off the ground (a keeper's punt from the hands): flatter, so it lands where it would have from the grass.
-    b.vy = loft > 0 && b.y > 0.05 ? loft - b.y / ((2 * loft) / 9.81) : loft;
+    b.vy = loft;
     b.lastTouch = p;
     b.lastKick = p;
     b.flightId++;

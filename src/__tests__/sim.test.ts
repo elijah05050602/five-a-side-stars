@@ -350,14 +350,15 @@ describe('throw-ins', () => {
     expect(sim.phase).toBe('setpiece');
     // Nobody presses anything, so the referee has the taker throw it after a few seconds.
     const restarts: (number | undefined)[] = [];
-    let played = 0;
+    let played = 0, thrownUp = false;
     for (let i = 0; i < 60 * 15 && played < 30; i++) {
       sim.step(1 / 60, IDLE_INPUT);
       for (const e of sim.events) if (e.type === 'restart') restarts.push(e.side);
       sim.events.length = 0;
-      if (sim.phase === 'play') played++;
+      if (sim.phase === 'play' && played++ === 0) thrownUp = sim.ball.vy > 0;
     }
     expect(played).toBe(30);
+    expect(thrownUp).toBe(true); // lobbed in from over the head, not dropped at the feet
     expect(restarts).toEqual([0]); // just the one throw, to the right side
   });
 });
