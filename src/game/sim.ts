@@ -244,6 +244,8 @@ export const RUNOFF_END = 1.6;
 export const DRIBBLE_STRIDE = 0.38;
 /** Seconds a kick-off taker may wait before the ball is played to a team-mate for them. */
 const KICKOFF_WAIT = 8;
+/** Seconds a keeper may hold the ball in their hands before it is lobbed up to the halfway line for them. */
+export const KEEPER_HOLD_LIMIT = 3;
 /** Seconds a match goal stands before kick-off: the players celebrate, then the camera visits the fans. */
 export const GOAL_HOLD = 6;
 /** When the camera leaves the players' celebration for the fans. */
@@ -596,14 +598,20 @@ export class MatchSim {
       p.trickCooldown = Math.max(0, p.trickCooldown - dt);
       if (p.trickAnim <= 0) p.trickKind = null;
       if (this.keeperCommitted(p)) continue; // mid-dive or getting up: no steering until back on their feet
+      if (p.isKeeper && p.handling && this.ball.owner === p && this.phase === 'play' && p.holdTime > KEEPER_HOLD_LIMIT) {
+        this.keeperAutoLob(p);
+        continue;
+      }
       const inp = inputs[p.side];
       if (inp && this.controlledBy[p.side] === p && !this.assisting(p, inp)) this.driveHuman(p, inp, dt);
       else this.driveAI(p, dt);
     }
     this.integratePlayers(dt);
     this.keepHandsInBox();
+    this.keepKeeperOutOfNet();
     this.updateFacing(dt);
     this.integrateBall(dt);
+    this.keepHeldBallOutOfNet();
     this.settleDeadBall(dt);
     this.resolvePossession(dt);
     this.checkGoal();
@@ -805,6 +813,47 @@ export class MatchSim {
     const line = this.boxRadius() - 0.1;
     if (r <= line) return;
     o.pos = v(own + ((o.pos.x - own) / r) * line, (o.pos.z / r) * line);
+  }
+
+  /** How far in front of their own goal line a keeper on the ball must stay, so the ball they hold never crosses it. */
+  private keeperLineGap(): number { return 0.42 * this.stats.scale + 0.05 + this.ball.radius + 0.1; }
+
+  /** A keeper on the ball cannot be bumped (or walk) back into their own net. */
+  private keepKeeperOutOfNet(): void {
+    const o = this.ball.owner;
+    if (!o || !o.isKeeper || this.phase !== 'play') return;
+    const own = this.ownGoalX(o.side);
+    const dir = o.side === 0 ? 1 : -1; // pointing out of their goal, up the pitch
+    const minX = own + dir * this.keeperLineGap();
+    if ((o.pos.x - minX) * dir >= 0) return;
+    o.pos.x = minX;
+    if (o.vel.x * dir < 0) o.vel = v(0, o.vel.z);
+  }
+
+  /** And the ball in a keeper's possession stays on the pitch side of their goal line, whichever way they face. */
+  private keepHeldBallOutOfNet(): void {
+    const b = this.ball, o = b.owner;
+    if (!o || !o.isKeeper || this.phase !== 'play') return;
+    const own = this.ownGoalX(o.side);
+    const dir = o.side === 0 ? 1 : -1;
+    const minX = own + dir * (b.radius + 0.1);
+    if ((b.pos.x - minX) * dir >= 0) return;
+    b.pos.x = minX;
+    if (b.vel.x * dir < 0) b.vel = v(0, b.vel.z);
+  }
+
+  /** Held it too long: the keeper punts a lob to the team-mate nearest the halfway line. */
+  private keeperAutoLob(p: SimPlayer): void {
+    let mate: SimPlayer | null = null, best = Infinity;
+    for (const m of this.teamOf(p.side)) {
+      if (m === p || m.isKeeper || m.stunAnim > 0) continue;
+      const score = Math.abs(m.pos.x) + Math.abs(m.pos.z - p.pos.z) * 0.3;
+      if (score < best) { best = score; mate = m; }
+    }
+    this.ball.y = 0; // dropped from the hands and volleyed
+    this.lob(p, null, mate ?? v(0, p.pos.z * 0.5));
+    this.setMove(p, 'punt');
+    p.think = 1;
   }
 
   /** The human has not steered their newly picked player yet, so the computer runs them meanwhile. */
@@ -2157,15 +2206,18 @@ export class MatchSim {
    * team-mate (forward runners first), or where the stick points. Nobody can
    * cut it out in the air, but it is slower to arrive and less exact than a pass.
    */
-  lob(p: SimPlayer, aim: V2 | null): void {
+  /** `forced` picks the receiver (or a spot on the pitch) instead of the usual choice. */
+  lob(p: SimPlayer, aim: V2 | null, forced?: SimPlayer | V2): void {
     const goal = v(this.goalX(p.side), 0);
     // Out wide in the final third it is a cross into the box; anywhere else a lofted pass.
-    const crossing = Math.abs(p.pos.z) > this.width * 0.25 && Math.abs(p.pos.x - goal.x) < this.length * 0.4;
+    const crossing = !forced && Math.abs(p.pos.z) > this.width * 0.25 && Math.abs(p.pos.x - goal.x) < this.length * 0.4;
     const spot = v(goal.x - Math.sign(goal.x) * (this.width * 0.26 + 0.6), 0);
     let mate = crossing ? this.crossTarget(p, spot, aim) : null;
-    if (!crossing) mate = this.bestPassTarget(p, aim, true);
+    if (!crossing) mate = forced ? ('info' in forced ? forced : null) : this.bestPassTarget(p, aim, true);
     let to: V2;
-    if (crossing && !mate && !aim) {
+    if (forced && !mate) {
+      to = v((forced as V2).x - p.pos.x, (forced as V2).z - p.pos.z);
+    } else if (crossing && !mate && !aim) {
       to = v(spot.x - p.pos.x, spot.z - p.pos.z); // nobody there yet: put it on the penalty spot for a runner
     } else if (mate) {
       // Aim where the receiver will be when it drops.
