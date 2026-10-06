@@ -247,17 +247,17 @@ function buildFlag(x: number, z: number): THREE.Group {
   return g;
 }
 
-export interface StandLayout { len: number; z0: number; rows: number; rowDepth: number; rowRise: number; baseHeight: number }
+export interface StandLayout { len: number; z0: number; rows: number; rowDepth: number; rowRise: number; baseHeight: number; roofY: number }
 
-/** Where the stand's seat rows are; the crowd (Crowd.ts) sits its fans on these. Row r tops out at baseHeight + r * rowRise, at z0 - r * rowDepth. */
+/** Where the stand's seat rows are; the crowd (Crowd.ts) sits its fans on these. Row r tops out at baseHeight + r * rowRise, at z0 - r * rowDepth. The roof's underside is at roofY. */
 export function standLayout(L: number, W: number): StandLayout {
-  return { len: L * 0.8, z0: -W / 2 - 3.2, rows: 3, rowDepth: 1.2, rowRise: 0.6, baseHeight: 0.6 };
+  return { len: L * 0.8, z0: -W / 2 - 3.2, rows: 3, rowDepth: 1.2, rowRise: 0.6, baseHeight: 0.6, roofY: 3.14 };
 }
 
 /** Three stepped rows of seats under a roof with bunting. The fans themselves are added by Crowd. */
 function buildStand(L: number, W: number): THREE.Group {
   const g = new THREE.Group();
-  const { len, z0, rows, rowDepth, rowRise, baseHeight } = standLayout(L, W);
+  const { len, z0, rows, rowDepth, rowRise, baseHeight, roofY } = standLayout(L, W);
   const stepMat = toonMaterial({ color: 0xb8c4d6 });
   for (let r = 0; r < rows; r++) {
     const h = baseHeight + r * rowRise;
@@ -269,7 +269,7 @@ function buildStand(L: number, W: number): THREE.Group {
   }
   // Roof on two posts, with bunting along the front edge.
   const roof = new THREE.Mesh(new THREE.BoxGeometry(len + 0.6, 0.12, rows * rowDepth + 0.8), toonMaterial({ color: 0x3da5f4 }));
-  roof.position.set(0, 3.2, z0 - (rows - 1) * rowDepth / 2);
+  roof.position.set(0, roofY + 0.06, z0 - (rows - 1) * rowDepth / 2);
   roof.castShadow = true;
   g.add(roof);
   const postMat = toonMaterial({ color: 0x1b2a41 });

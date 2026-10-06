@@ -508,7 +508,7 @@ export class MatchScene {
     // plays from 1.1s), then swings round to the scoring team's fans going wild, then back for kick-off.
     const scorer = this.sim.goals[this.sim.goals.length - 1];
     const crowdShot = this.sim.mode === 'match' && this.sim.phase === 'goal' && this.sim.phaseTimer > CROWD_SHOT_AT && scorer
-      ? this.crowd.celebrationShot(scorer.side) : null;
+      ? this.crowd.celebrationShot(scorer.side, this.camera.aspect < 0.9) : null;
     if (crowdShot && scorer) {
       this.crowd.celebrate(scorer.side);
       if (!this.celebrated) { this.celebrated = true; this.sfx.play('celebrate'); }
