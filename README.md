@@ -35,7 +35,7 @@ Pages workflow runs the tests again before it deploys.
 - **Dribbling**: the ball is not stuck to your boots. Each touch knocks it a little ahead (further when sprinting, closer with good Dribbling), so a defender can nip in between touches.
 - **Sticker album**: finish matches, win cups and hit milestones to collect stickers; some unlock extra badge icons, and those rare ones shine once collected.
 - **Boy or girl**: each player can be a boy or a girl. Girls' faces get eyelashes, and made-up players get a matching name and starting hairstyle; every hairstyle stays open to everyone.
-- **Goal celebrations**: confetti in the scoring team's colours and a pop on the scoreboard (not when motion is set to calm).
+- **Goal celebrations and effects**: confetti in the scoring team's colours and a pop on the scoreboard; big shots leave a streak, and shots, tackles and dives kick up puffs of dust and grass (none of these when motion is set to calm). Floodlights glow at night.
 - **Davao Strikers FC**: Goal Rush! is the club's official football game. The 🦊 Davao Strikers chip on the lobby opens the club page, where you play as their Under 7s (club badge, orange and navy kits, the real squad) in any mode. It is an ordinary saved team, so everything stays editable, and Reset puts the club's squad back.
 - **Positions and line-ups**: a player can be good in more than one position (tick "Can also play"), and formations put players in spots they can play first. On the squad step, drag a player onto another (or tap one, then the other) to swap them, or drag a sub onto the pitch to bring them on.
 - **Team sheet**: from the squad step of the team builder, download a printable PNG team sheet.
