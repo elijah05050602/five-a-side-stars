@@ -8,6 +8,7 @@ import { music, trackFor } from './game/music';
 import { unlockAudio } from './game/audio';
 import { preloadCommentary } from './game/voice';
 import { loadPlayerAsset } from './game/playerAsset';
+import { gameRenderer } from './game/renderer';
 import { renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -44,7 +45,7 @@ const router: Router = {
     document.body.classList.add('in-match');
     music.setQuiet(true);
     const mode = o.mode ?? 'match';
-    match = new MatchScene(canvas, ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode, cpuLevel: o.cpuLevel },
+    match = new MatchScene(gameRenderer(), ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode, cpuLevel: o.cpuLevel },
       (result) => {
         match = null;
         const stickers = recordResult(result);
@@ -66,7 +67,7 @@ const router: Router = {
     canvas.classList.add('is-live');
     document.body.classList.add('in-match');
     music.setQuiet(true);
-    match = new MatchScene(canvas, ui, { home, away, difficulty: 'easy', halfSeconds: 600, humanSide: 0, mode: 'tutorial' },
+    match = new MatchScene(gameRenderer(), ui, { home, away, difficulty: 'easy', halfSeconds: 600, humanSide: 0, mode: 'tutorial' },
       () => leave({ name: 'setup', homeId: home.id }),
       () => leave({ name: 'menu' }));
   },

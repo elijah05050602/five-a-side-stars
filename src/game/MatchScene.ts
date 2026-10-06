@@ -19,6 +19,7 @@ import { getSettings } from '../data/storage';
 import { TutorialCoach } from './tutorial';
 import { batchStatic } from './batchStatic';
 import { graphicsProfile, type GraphicsProfile } from './graphics';
+import { EXPOSURE, TONE_MAPPING } from './renderer';
 
 export type SimMode = NonNullable<SimConfig['mode']>;
 
@@ -53,7 +54,9 @@ export interface MatchResult {
 /**
  * Owns the Three.js scene for one match: builds the pitch and players from the
  * sim, runs the fixed-step loop, follows the action with the camera and drives
- * the HUD. Call dispose() when leaving the match.
+ * the HUD. Call dispose() when leaving the match. The renderer is borrowed (one
+ * for the app's lifetime, see renderer.ts), so it is set up afresh here and
+ * left for the next match afterwards.
  */
 export class MatchScene {
   readonly sim: MatchSim;
@@ -103,7 +106,7 @@ export class MatchScene {
   private frameMs = 16.7;
   private adaptTimer = -3;
 
-  constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, config: SimConfig, private readonly onFinish: (r: MatchResult) => void, private readonly onQuit: () => void, options: SceneOptions = {}) {
+  constructor(renderer: THREE.WebGLRenderer, uiRoot: HTMLElement, config: SimConfig, private readonly onFinish: (r: MatchResult) => void, private readonly onQuit: () => void, options: SceneOptions = {}) {
     this.sim = new MatchSim(config);
     this.conditions = resolveConditions(options.weather ?? 'random');
     this.commentator = new Commentator(this.conditions);
@@ -116,17 +119,20 @@ export class MatchScene {
     const controls = getControls();
     this.input = new Input(twoPlayer ? controls.keys.p1 : controls.keys.solo, twoPlayer ? 0 : 'any', controls.pad);
     this.input2 = twoPlayer ? new Input(controls.keys.p2, 1, controls.pad) : null;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    this.renderer = renderer;
     // The Graphics setting (Auto picks Low on phones) trades detail for a smooth frame rate.
     const gfx = graphicsProfile();
     this.gfx = gfx;
     this.pixelRatio = Math.min(window.devicePixelRatio, gfx.maxPixelRatio);
-    this.renderer.setPixelRatio(this.pixelRatio);
-    this.renderer.shadowMap.enabled = gfx.shadowMap;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    // Everything the match relies on is set here, whatever the last match (or Auto graphics) left behind.
+    renderer.setPixelRatio(this.pixelRatio);
+    renderer.shadowMap.enabled = gfx.shadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = TONE_MAPPING;
+    renderer.toneMappingExposure = EXPOSURE;
+    renderer.setClearColor(0x000000, 1);
+    renderer.info.reset();
     this.scene.background = new THREE.Color('#8fd3ff');
     this.scene.fog = new THREE.Fog('#8fd3ff', 70, 130);
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
@@ -204,7 +210,7 @@ export class MatchScene {
     window.visualViewport?.addEventListener('resize', this.onResize);
     // Phones report the new size late after a turn, so also watch the canvas itself.
     this.resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(this.onResize);
-    this.resizeObserver?.observe(canvas);
+    this.resizeObserver?.observe(renderer.domElement);
     this.resize();
     this.camTarget.set(0, 0, 0);
     this.camPos.copy(this.cameraGoal(this.camTarget));
@@ -526,7 +532,9 @@ export class MatchScene {
     this.hud.destroy();
     this.models.forEach((m) => m.dispose());
     this.crowd.dispose();
-    this.renderer.dispose();
+    // The renderer outlives the match: let go of this scene's draw lists and blank the canvas.
+    this.renderer.renderLists.dispose();
+    this.renderer.info.reset();
     this.renderer.clear();
   }
 }
