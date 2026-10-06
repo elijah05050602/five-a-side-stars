@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { GraphicsProfile } from './graphics';
 import { floodlightPositions, grassTexture } from './Pitch';
 import { disposeObject } from './renderer';
+import { softDot } from './effects';
 
 /**
  * Weather and time of day for a match: sky and fog colours, the sun's colour
@@ -151,6 +152,16 @@ export class Weather {
       for (const light of [this.lights.sky, this.lights.sun]) { light.intensity += 0.9; light.color.lerp(new THREE.Color(0xf3f7ff), 0.5); }
     }
     this.scene.traverse((o) => { if (o.userData.lamp && o instanceof THREE.Mesh) (o.material as THREE.MeshStandardMaterial).emissiveIntensity = 2.5; });
+    // A soft halo round each floodlight head: one additive sprite each, so it costs next to nothing on phones.
+    const heads = new Set<THREE.Object3D>();
+    this.scene.traverse((o) => { if (o.userData.lamp && o.parent) heads.add(o.parent); });
+    for (const head of heads) {
+      head.updateWorldMatrix(true, false);
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDot(), color: 0xfff1cc, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      head.getWorldPosition(halo.position);
+      halo.scale.set(5, 3.4, 1);
+      this.group.add(halo);
+    }
   }
 
   private buildCloudShadows(n: number): void {

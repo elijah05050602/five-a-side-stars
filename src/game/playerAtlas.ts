@@ -82,14 +82,15 @@ function paintAtlas(kit: Kit, look: LookColours, style: BootStyle): THREE.Canvas
   }
 
   // Kit pattern inside the shirt cell. In the model's UVs, v runs down the chest: the top 24% is
-  // the rolled collar (painted in the second colour), the middle is the shirt, and the bottom 44%
+  // the rolled collar (the shirt colour with a thin trim at the neck, so it never reads as a scarf), the middle is the shirt, and the bottom 44%
   // is the tunic ring under the waistband, painted as shorts so the shirt reads as tucked in.
   const [sx, sy] = CELL.shirt;
   const T = C * 0.24, H = C * 0.56;
   ctx.save();
   ctx.translate(sx * C, sy * C);
   ctx.fillStyle = kit.shorts; ctx.fillRect(0, H, C, C - H);
-  ctx.fillStyle = kit.shirt2; ctx.fillRect(0, 0, C, T);
+  ctx.fillStyle = kit.shirt; ctx.fillRect(0, 0, C, T);
+  ctx.fillStyle = kit.shirt2; ctx.fillRect(0, 0, C, T * 0.22);
   ctx.beginPath(); ctx.rect(0, T, C, H - T); ctx.clip();
   ctx.fillStyle = kit.shirt2;
   switch (kit.pattern) {

@@ -11,7 +11,7 @@ import { PlayerModel, type AnimState } from './PlayerModel';
 import { clearPlayerAtlasCache } from './playerAtlas';
 import { clearFaceCache, type Expression } from './playerFace';
 import type { Kit } from '../data/types';
-import { CROWD_SHOT_AT, DIVE_RECOVER, MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side } from './sim';
+import { CROWD_SHOT_AT, DIVE_RECOVER, MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side, type SimEvent } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
 import { Commentary } from './voice';
@@ -21,6 +21,7 @@ import { TutorialCoach } from './tutorial';
 import { batchStatic } from './batchStatic';
 import { graphicsProfile, type GraphicsProfile } from './graphics';
 import { EXPOSURE, TONE_MAPPING, disposeObject } from './renderer';
+import { BallTrail, Puffs } from './effects';
 
 export type SimMode = NonNullable<SimConfig['mode']>;
 
@@ -102,6 +103,12 @@ export class MatchScene {
   private readonly coach: TutorialCoach | null = null;
   private readonly marker = new THREE.Group();
   private readonly gfx: GraphicsProfile;
+  /** The streak behind a rocket of a shot and the dust and grass puffs; none of it when motion is calm. */
+  private readonly trail: BallTrail;
+  private readonly puffs = new Puffs();
+  private readonly calm = getSettings().reduceMotion;
+  /** Players already puffed for the tackle or dive they are in. */
+  private readonly puffed = new Set<SimPlayer>();
   /** Current render resolution; Auto graphics nudges it down while frames are slow. */
   private pixelRatio: number;
   private prCeiling = Infinity;
@@ -183,6 +190,8 @@ export class MatchScene {
     }
     this.ball = new BallModel(this.sim.ball.radius);
     this.scene.add(this.ball.group);
+    this.trail = new BallTrail(this.sim.ball.radius);
+    this.scene.add(this.trail.group, this.puffs.group);
     if (this.sim.mode === 'tutorial') {
       this.coach = new TutorialCoach(this.sim);
       const gold = new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
@@ -419,6 +428,7 @@ export class MatchScene {
       this.sfx.play(ev);
       if (ev.type === 'fulltime') music.jingle(this.fullTimeJingle());
       this.crowd.onEvent(ev);
+      if (!this.calm) this.puffFor(ev);
       if (ev.type === 'goal') {
         this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, this.sim.score[0], this.sim.score[1]);
         this.extras.nets[ev.side === 0 ? 1 : 0]?.hit(this.sim.ball.pos.z, Math.hypot(this.sim.ball.vel.x, this.sim.ball.vel.z));
@@ -443,6 +453,7 @@ export class MatchScene {
     if (quip) this.hud.say(quip);
     this.sfx.update(dt, this.sim);
     this.weather.update(dt);
+    this.effects(dt);
     this.crowd.update(dt);
     for (const n of this.extras.nets) n.update(dt);
 
@@ -531,6 +542,26 @@ export class MatchScene {
     return this.sim.score[me] > this.sim.score[1 - me] ? 'win' : 'draw';
   }
 
+  /** A puff of dust and grass where a ball is struck. */
+  private puffFor(ev: SimEvent): void {
+    if (ev.type === 'shot') this.puffs.burst(this.sim.ball.pos.x, this.sim.ball.pos.z, 5, 0.45 * this.sim.stats.scale + 0.2);
+  }
+
+  /** The ball's streak while a hard shot flies, and puffs as a tackle flies in or a keeper dives. */
+  private effects(dt: number): void {
+    this.puffs.update(dt);
+    const b = this.sim.ball;
+    this.trail.update(dt, this.ball.group.position, !this.calm && !b.owner && Math.hypot(b.vel.x, b.vel.z) > this.sim.stats.power * 1.05);
+    if (this.calm) return;
+    for (const p of this.sim.players) {
+      const busy = p.tackleTimer > 0.25 || p.diveAnim > 0.4;
+      if (busy && !this.puffed.has(p)) {
+        this.puffed.add(p);
+        this.puffs.burst(p.pos.x, p.pos.z, p.diveAnim > 0.4 ? 7 : 4, 0.5 * this.sim.stats.scale + 0.2);
+      } else if (!busy) this.puffed.delete(p);
+    }
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -553,6 +584,8 @@ export class MatchScene {
     // The grass, boards, scoreboard, nets and merged stadium; then the ball, the tutorial star and the sun's shadow map.
     disposeObject(this.pitch);
     this.ball.dispose();
+    disposeObject(this.trail.group);
+    disposeObject(this.puffs.group);
     disposeObject(this.marker);
     this.sun.dispose();
     // Nobody is wearing a kit or pulling a face now: free the cached ones, bar any still held.
