@@ -8,10 +8,11 @@ import { music, trackFor } from './game/music';
 import { unlockAudio } from './game/audio';
 import { preloadCommentary } from './game/voice';
 import { loadPlayerAsset } from './game/playerAsset';
-import { gameRenderer } from './game/renderer';
+import { gameRenderer, showDrawError } from './game/renderer';
 import { renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
 
-const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
+/** The match canvas, looked up each time: it is swapped for a fresh one if its WebGL context is lost. */
+const canvas = (): HTMLCanvasElement => document.getElementById('game-canvas') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLElement;
 let match: MatchScene | null = null;
 
@@ -30,7 +31,7 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
 const router: Router = {
   go(screen: Screen) {
     if (match) { match.dispose(); match = null; }
-    canvas.classList.remove('is-live');
+    canvas().classList.remove('is-live');
     document.body.classList.remove('in-match');
     music.setQuiet(false);
     music.setTrack(trackFor(screen.name));
@@ -41,11 +42,13 @@ const router: Router = {
     if (match) match.dispose();
     ui.innerHTML = '';
     ui.className = 'match-ui';
-    canvas.classList.add('is-live');
+    const renderer = gameRenderer();
+    if (!renderer) { showDrawError(ui); return; }
+    canvas().classList.add('is-live');
     document.body.classList.add('in-match');
     music.setQuiet(true);
     const mode = o.mode ?? 'match';
-    match = new MatchScene(gameRenderer(), ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode, cpuLevel: o.cpuLevel },
+    match = new MatchScene(renderer, ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode, cpuLevel: o.cpuLevel },
       (result) => {
         match = null;
         const stickers = recordResult(result);
@@ -64,10 +67,12 @@ const router: Router = {
     if (match) match.dispose();
     ui.innerHTML = '';
     ui.className = 'match-ui';
-    canvas.classList.add('is-live');
+    const renderer = gameRenderer();
+    if (!renderer) { showDrawError(ui); return; }
+    canvas().classList.add('is-live');
     document.body.classList.add('in-match');
     music.setQuiet(true);
-    match = new MatchScene(gameRenderer(), ui, { home, away, difficulty: 'easy', halfSeconds: 600, humanSide: 0, mode: 'tutorial' },
+    match = new MatchScene(renderer, ui, { home, away, difficulty: 'easy', halfSeconds: 600, humanSide: 0, mode: 'tutorial' },
       () => leave({ name: 'setup', homeId: home.id }),
       () => leave({ name: 'menu' }));
   },

@@ -11,11 +11,17 @@ let shared: THREE.WebGLRenderer | null = null;
 /** The preview drawing with it now; one that is still running stops once a newer one takes over. */
 let current: KitPreview3D | null = null;
 
-function previewRenderer(): THREE.WebGLRenderer {
-  if (!shared) {
+/** The shared renderer, made again (with a new canvas) if its context was lost; null if WebGL will not start at all. */
+function previewRenderer(): THREE.WebGLRenderer | null {
+  if (shared && !shared.getContext().isContextLost()) return shared;
+  try { shared?.dispose(); } catch { /* nothing left to free on a lost context */ }
+  shared = null;
+  try {
     shared = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    shared.outputColorSpace = THREE.SRGBColorSpace;
+  } catch {
+    return null;
   }
+  shared.outputColorSpace = THREE.SRGBColorSpace;
   return shared;
 }
 
@@ -28,9 +34,9 @@ function adopt(placeholder: HTMLCanvasElement, canvas: HTMLCanvasElement): HTMLC
   return canvas;
 }
 
-/** A small spinning 3D player used by the team builder's live kit preview. */
+/** A small spinning 3D player used by the team builder's live kit preview. Without WebGL the box just stays empty. */
 export class KitPreview3D {
-  private readonly renderer: THREE.WebGLRenderer;
+  private readonly renderer: THREE.WebGLRenderer | null;
   private readonly canvas: HTMLCanvasElement;
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
@@ -44,8 +50,8 @@ export class KitPreview3D {
   /** `placeholder` is the screen's canvas: the shared renderer's canvas takes its place. */
   constructor(placeholder: HTMLCanvasElement, player: Player, kit: Kit, private scale: number) {
     this.renderer = previewRenderer();
-    this.canvas = adopt(placeholder, this.renderer.domElement);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.canvas = this.renderer ? adopt(placeholder, this.renderer.domElement) : placeholder;
+    this.renderer?.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6b8f71, 1.4));
     const sun = new THREE.DirectionalLight(0xffffff, 1.8);
@@ -76,14 +82,14 @@ export class KitPreview3D {
 
   private resize(): void {
     const w = this.canvas.clientWidth || 240, h = this.canvas.clientHeight || 300;
-    this.renderer.setSize(w, h, false);
+    this.renderer?.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
 
   private last = 0;
   private frame = (now: number): void => {
-    if (current !== this) return;
+    if (current !== this || !this.renderer) return;
     this.raf = requestAnimationFrame(this.frame);
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
@@ -107,6 +113,6 @@ export class KitPreview3D {
     this.canvas.removeEventListener('pointerup', this.onUp);
     this.model.dispose();
     // The renderer stays for the next preview: it only lets go of this one's draw lists.
-    this.renderer.renderLists.dispose();
+    this.renderer?.renderLists.dispose();
   }
 }
