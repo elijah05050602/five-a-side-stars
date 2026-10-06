@@ -26,6 +26,8 @@ interface Settings {
   reduceMotion: boolean;
   motion: MotionChoice;
   halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard'; tutorialDone: boolean; graphics: GraphicsQuality;
+  /** Beginner help in every match: a gentler computer team and help aiming shots. */
+  beginnerHelp: boolean;
 }
 
 interface SaveFile {
@@ -42,7 +44,7 @@ let cache: SaveFile | null = null;
 const devicePrefersLess = (): boolean => typeof window !== 'undefined' && 'matchMedia' in window && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function freshSettings(): Settings {
-  return { sound: true, music: true, commentary: true, musicVolume: 0.7, voiceVolume: 1, sfxVolume: 1, reduceMotion: devicePrefersLess(), motion: 'auto', halfLengthSeconds: 120, difficulty: 'normal', tutorialDone: false, graphics: 'auto' };
+  return { sound: true, music: true, commentary: true, musicVolume: 0.7, voiceVolume: 1, sfxVolume: 1, reduceMotion: devicePrefersLess(), motion: 'auto', halfLengthSeconds: 120, difficulty: 'normal', tutorialDone: false, graphics: 'auto', beginnerHelp: false };
 }
 
 function fresh(): SaveFile {
@@ -200,6 +202,7 @@ function readSettings(s: Partial<Settings> | undefined): Settings {
     difficulty: oneOf(['easy', 'normal', 'hard'] as const, o.difficulty, d.difficulty),
     // Saves from before the tutorial existed belong to players who already know the controls.
     tutorialDone: bool(o.tutorialDone, true),
+    beginnerHelp: bool(o.beginnerHelp, false),
     graphics: oneOf(['auto', 'low', 'medium', 'high'] as const, o.graphics, d.graphics),
   };
 }

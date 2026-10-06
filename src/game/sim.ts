@@ -222,6 +222,8 @@ export interface SimConfig {
    * 1 is a touch above Hard. When set it overrides `difficulty`.
    */
   cpuLevel?: number;
+  /** Beginner help: a gentler computer team, and the humans' shots are steered towards the goal. */
+  assist?: boolean;
 }
 
 export interface Shootout {
@@ -363,7 +365,9 @@ export class MatchSim {
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
     this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null };
-    this.diff = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.difficulty];
+    const base = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.difficulty];
+    // Beginner help: the computer team runs and thinks slower, tackles and saves softer, and shoots worse from closer in.
+    this.diff = config.assist ? { speed: base.speed * 0.85, think: base.think + 0.3, accuracy: base.accuracy * 0.7, tackle: base.tackle * 0.6, humanTackle: base.humanTackle * 1.3, shootRange: base.shootRange * 0.85 } : base;
     const diff = this.diff;
     ([0, 1] as Side[]).forEach((side) => {
       const team = this.teams[side];
@@ -2130,10 +2134,13 @@ export class MatchSim {
     const goal = v(this.goalX(p.side), 0);
     const isCpu = !this.isHuman(p.side);
     const acc = isCpu ? this.diff.accuracy : 1;
+    // Beginner help steers a human's shot: less wobble, a lighter pull from the stick, and between the posts.
+    const help = !isCpu && !!this.config.assist;
     // Aim at a corner, with a wobble that shrinks with control.
-    const spread = ((1 - this.stats.control) * 0.9 + (isCpu ? (1 - acc) * 0.8 : 0.15)) * p.mul.spread;
+    const spread = ((1 - this.stats.control) * 0.9 + (isCpu ? (1 - acc) * 0.8 : 0.15)) * p.mul.spread * (help ? 0.4 : 1);
     const penalty = this.setPiece?.kind === 'penalty' && this.setPiece.taker === p;
-    let targetZ = clamp(rand(-this.goalWidth / 2, this.goalWidth / 2) * 0.75 + rand(-spread, spread), -this.goalWidth * 0.6, this.goalWidth * 0.6);
+    const wide = this.goalWidth * (help ? 0.4 : 0.6);
+    let targetZ = clamp(rand(-this.goalWidth / 2, this.goalWidth / 2) * 0.75 + rand(-spread, spread), -wide, wide);
     if (penalty) {
       // Penalties go for a corner; the wobble can still send one wide.
       const corner = (Math.random() < 0.5 ? -1 : 1) * (this.goalWidth / 2) * rand(0.55, 0.95);
@@ -2144,11 +2151,18 @@ export class MatchSim {
       // The human's stick biases the shot direction.
       const a = norm(aim);
       const g = norm(dir);
-      dir = norm(v(g.x * 0.55 + a.x * 0.45, g.z * 0.55 + a.z * 0.45));
+      const pull = help ? 0.2 : 0.45;
+      dir = norm(v(g.x * (1 - pull) + a.x * pull, g.z * (1 - pull) + a.z * pull));
+    }
+    if (help) {
+      // ...and wherever the stick points, the shot crosses the line between the posts.
+      const run = goal.x - p.pos.x;
+      const cross = dir.x * run > 0 ? p.pos.z + (dir.z / dir.x) * run : targetZ;
+      dir = norm(v(run, clamp(cross, -wide, wide) - p.pos.z));
     }
     const d = dist(p.pos, goal);
     const power = this.stats.power * clamp(0.85 + d / this.length, 0.95, 1.25) * powerMul * (p.info.special === 'power' ? 1.18 : 1) * p.mul.power;
-    const loft = power * rand(0.06, 0.2) * (powerMul > 1 ? 1.3 : 1);
+    const loft = power * rand(0.06, 0.2) * (powerMul > 1 ? 1.3 : 1) * (help ? 0.75 : 1);
     this.kick(p, dir, power, loft);
     p.kickKind = 'shot';
     p.match.shots++;

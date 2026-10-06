@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { BootStyle, Build, Kit, Player } from '../data/types';
 import { IDLE_STATE, PlayerModel } from '../game/PlayerModel';
-import { disposeObject } from '../game/renderer';
+import { EXPOSURE, TONE_MAPPING, disposeObject } from '../game/renderer';
 
 /**
  * One renderer for every preview the builder ever shows. The builder redraws itself on most taps,
@@ -23,6 +23,9 @@ function previewRenderer(): THREE.WebGLRenderer | null {
     return null;
   }
   shared.outputColorSpace = THREE.SRGBColorSpace;
+  // Tone mapped like a match, so a kit picked here looks the same on the pitch.
+  shared.toneMapping = TONE_MAPPING;
+  shared.toneMappingExposure = EXPOSURE;
   return shared;
 }
 
@@ -54,10 +57,12 @@ export class KitPreview3D {
     this.canvas = this.renderer ? adopt(placeholder, this.renderer.domElement) : placeholder;
     this.renderer?.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6b8f71, 1.4));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.8);
-    sun.position.set(2, 4, 3);
-    this.scene.add(sun);
+    // The same sky light, sun and rim light as a sunny match (MatchScene).
+    const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+    sun.position.set(-12, 30, 18);
+    const rim = new THREE.DirectionalLight(0xbfe3ff, 0.9);
+    rim.position.set(14, 10, -18);
+    this.scene.add(new THREE.HemisphereLight(0xdff3ff, 0x3b7f4e, 1.25), sun, rim);
     const disc = new THREE.Mesh(new THREE.CircleGeometry(0.6, 32), new THREE.MeshStandardMaterial({ color: 0x2eb872 }));
     disc.rotation.x = -Math.PI / 2;
     this.scene.add(disc);

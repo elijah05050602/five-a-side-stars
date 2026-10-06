@@ -82,6 +82,8 @@ function shadowTexture(): THREE.CanvasTexture {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 128, 128);
   shadowTex = shared(new THREE.CanvasTexture(c));
+  // The canvas holds sRGB colours like every other painted texture.
+  shadowTex.colorSpace = THREE.SRGBColorSpace;
   return shadowTex;
 }
 const shadowGeo = shared(new THREE.PlaneGeometry(1.25, 1.0));

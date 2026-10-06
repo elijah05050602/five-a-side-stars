@@ -153,14 +153,16 @@ export class MatchScene {
     // A cool rim light from behind the camera's far side lifts faces and shirt numbers off the grass.
     const rim = new THREE.DirectionalLight(0xbfe3ff, 0.9);
     rim.position.set(14, 10, -18);
-    this.scene.add(sun, rim, new THREE.HemisphereLight(0xdff3ff, 0x3b7f4e, 1.25));
+    const sky = new THREE.HemisphereLight(0xdff3ff, 0x3b7f4e, 1.25);
+    this.scene.add(sun, rim, sky);
 
     const runoff = this.sim.mode === 'match';
     const pitch = buildPitch({ sceneryShadows: gfx.sceneryShadows, pbr: gfx.pbrGround, length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth, runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0 });
     this.scene.add(pitch);
     this.pitch = pitch;
     this.extras = pitchExtras(pitch);
-    this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, gfx);
+    // The weather restyles the sun and the sky light; the rim light keeps its own colour and angle.
+    this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, gfx, { sun, sky });
     if (gfx.batchScenery) batchStatic(pitch, [...this.extras.nets.map((n) => n.group), this.extras.scoreboard.group]);
     this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, 0, 0);
 
