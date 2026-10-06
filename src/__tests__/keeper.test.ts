@@ -158,7 +158,7 @@ describe('keeper hands stay in the box', () => {
 
   it('the first push out stops the keeper on the line, still holding it', () => {
     const { sim, keeper, own } = keeperWithBall();
-    run(sim, push, 60 * 4);
+    run(sim, push, 60 * 2.5);
     expect(sim.ball.owner).toBe(keeper);
     expect(keeper.handling).toBe(true);
     expect(Math.hypot(keeper.pos.x - own, keeper.pos.z)).toBeLessThanOrEqual(sim.boxRadius());
@@ -166,7 +166,7 @@ describe('keeper hands stay in the box', () => {
 
   it('let go and push again: the ball drops to their feet and they dribble out', () => {
     const { sim, keeper, own } = keeperWithBall();
-    run(sim, push, 60 * 3);
+    run(sim, push, 60 * 1.5);
     run(sim, IDLE_INPUT, 10);
     expect(keeper.handling).toBe(true);
     run(sim, push, 60);
@@ -185,6 +185,96 @@ describe('keeper hands stay in the box', () => {
     run(sim, IDLE_INPUT, 30);
     expect(sim.ball.owner).toBe(keeper);
     expect(keeper.handling).toBe(false);
+  });
+});
+
+describe('keeper and their own net', () => {
+  function keeperOnLine() {
+    const sim = new MatchSim({ home: team('h', 'Home'), away: team('a', 'Away'), difficulty: 'normal', halfSeconds: 120, humanSide: 0 });
+    sim.phase = 'play';
+    const keeper = sim.players.find((p) => p.side === 0 && p.isKeeper)!;
+    const own = sim.ownGoalX(0);
+    for (const p of sim.players) if (p !== keeper) { p.pos = { x: p.side === 0 ? 6 : 12, z: 6 }; p.speedMul = 0; }
+    keeper.pos = { x: own + 0.6, z: 0 };
+    keeper.handling = true;
+    sim.ball.owner = keeper; sim.ball.pos = { x: own + 0.9, z: 0 }; sim.ball.vel = { x: 0, z: 0 };
+    return { sim, keeper, own };
+  }
+  const steps = (sim: MatchSim, input: typeof IDLE_INPUT, frames: number, each?: () => void) => {
+    for (let i = 0; i < frames; i++) { each?.(); sim.step(1 / 60, input); sim.events.length = 0; }
+  };
+
+  it('a striker leaning on the keeper cannot shove them, and the ball, over their own line', () => {
+    const { sim, keeper, own } = keeperOnLine();
+    const bully = sim.players.find((p) => p.side === 1 && !p.isKeeper)!;
+    bully.mul.strength = 3;
+    steps(sim, IDLE_INPUT, 120, () => { bully.pos = { x: keeper.pos.x + 0.2, z: keeper.pos.z }; bully.vel = { x: -6, z: 0 }; });
+    expect(sim.score).toEqual([0, 0]);
+    expect(sim.ball.owner).toBe(keeper);
+    expect(sim.ball.pos.x).toBeGreaterThan(own);
+    expect(keeper.pos.x).toBeGreaterThan(own);
+  });
+
+  it('walking backwards into the goal with the ball does not score an own goal', () => {
+    const { sim, keeper, own } = keeperOnLine();
+    steps(sim, { ...IDLE_INPUT, moveX: -1 }, 90);
+    expect(sim.score).toEqual([0, 0]);
+    expect(sim.ball.owner).toBe(keeper);
+    expect(sim.ball.pos.x).toBeGreaterThan(own);
+  });
+
+  it('even dropped to the feet, the keeper cannot dribble it into their own net', () => {
+    const { sim, keeper, own } = keeperOnLine();
+    keeper.handling = false;
+    steps(sim, { ...IDLE_INPUT, moveX: -1 }, 90);
+    expect(sim.score).toEqual([0, 0]);
+    expect(sim.ball.pos.x).toBeGreaterThan(own);
+  });
+});
+
+describe('keeper holding on too long', () => {
+  it('after 3 seconds in the hands it is lobbed to the team-mate nearest the halfway line', () => {
+    const sim = new MatchSim({ home: team('h', 'Home'), away: team('a', 'Away'), difficulty: 'normal', halfSeconds: 120, humanSide: 0 });
+    sim.phase = 'play';
+    const keeper = sim.players.find((p) => p.side === 0 && p.isKeeper)!;
+    const own = sim.ownGoalX(0);
+    const mates = sim.players.filter((p) => p.side === 0 && !p.isKeeper);
+    mates.forEach((m, i) => { m.pos = { x: own + 4 + i * 0.5, z: -5 + i }; m.speedMul = 0; });
+    const middle = mates[3];
+    middle.pos = { x: 0.5, z: 2 };
+    for (const p of sim.players) if (p.side === 1) { p.pos = { x: 12, z: 6 }; p.speedMul = 0; }
+    keeper.pos = { x: own + 1, z: 0 };
+    keeper.handling = true;
+    sim.ball.owner = keeper; sim.ball.pos = { x: own + 1.3, z: 0 }; sim.ball.vel = { x: 0, z: 0 };
+    let t = 0;
+    while (sim.ball.owner === keeper && t < 5) { sim.step(1 / 60, IDLE_INPUT); sim.events.length = 0; t += 1 / 60; }
+    expect(t).toBeGreaterThan(3);
+    expect(t).toBeLessThan(3.2);
+    expect(sim.ball.owner).toBeNull();
+    expect(sim.ball.lofted).toBe(true);
+    expect(sim.ball.receiver).toBe(middle);
+    // It lands out near the halfway line.
+    let landed: number | null = null;
+    for (let i = 0; i < 240 && landed === null; i++) {
+      const before = sim.ball.y;
+      sim.step(1 / 60, IDLE_INPUT); sim.events.length = 0;
+      if (before > 0.05 && sim.ball.y <= 0.01) landed = sim.ball.pos.x;
+    }
+    expect(landed).not.toBeNull();
+    expect(Math.abs(landed!)).toBeLessThan(sim.length * 0.2);
+  });
+
+  it('a keeper with the ball at their feet is not hurried', () => {
+    const sim = new MatchSim({ home: team('h', 'Home'), away: team('a', 'Away'), difficulty: 'normal', halfSeconds: 120, humanSide: 0 });
+    sim.phase = 'play';
+    const keeper = sim.players.find((p) => p.side === 0 && p.isKeeper)!;
+    const own = sim.ownGoalX(0);
+    for (const p of sim.players) if (p !== keeper) { p.pos = { x: p.side === 0 ? 6 : 12, z: 6 }; p.speedMul = 0; }
+    keeper.pos = { x: own + 1, z: 0 };
+    keeper.handling = false;
+    sim.ball.owner = keeper; sim.ball.pos = { x: own + 1.3, z: 0 }; sim.ball.vel = { x: 0, z: 0 };
+    for (let i = 0; i < 60 * 4; i++) { sim.step(1 / 60, IDLE_INPUT); sim.events.length = 0; }
+    expect(sim.ball.owner).toBe(keeper);
   });
 });
 

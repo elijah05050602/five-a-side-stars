@@ -67,6 +67,8 @@ const CONFETTI = ['#ffd23f', '#ff6fb5', '#3da5f4', '#2eb872', '#ffffff', '#ff7a0
 interface Confetto { x: number; y: number; z: number; vx: number; vy: number; vz: number; spin: number; rx: number; ry: number; life: number }
 
 const SEAT_SPACING = 0.55;
+/** Height of an umbrella's tip, and of a flag's top, above the hand holding it, before the fan's size scales it. */
+const UMBRELLA_TOP = 0.74, FLAG_TOP = 0.9;
 const SHOULDER_Y = 0.5, SHOULDER_X = 0.2, HEAD_Y = 0.79, ARM_LEN = 0.38;
 
 const _m = new THREE.Matrix4();
@@ -273,8 +275,8 @@ export class Crowd {
       shade(new THREE.PlaneGeometry(0.46, 0.3).translate(0.23, 0.72, 0), 1),
     ])!;
     const umbrellaGeo = mergeGeometries([
-      shade(new THREE.CylinderGeometry(0.012, 0.012, 0.95, 5).translate(0, 0.47, 0), 0.3),
-      shade(new THREE.ConeGeometry(0.46, 0.2, 8, 1, true).translate(0, 0.98, 0), 1),
+      shade(new THREE.CylinderGeometry(0.012, 0.012, 0.66, 5).translate(0, 0.33, 0), 0.3),
+      shade(new THREE.ConeGeometry(0.34, 0.16, 8, 1, true).translate(0, 0.66, 0), 1),
     ])!;
     const glowGeo = new THREE.CapsuleGeometry(0.038, 0.22, 2, 6).translate(0, 0.12, 0);
     const pompomGeo = new THREE.SphereGeometry(0.06, 7, 6);
@@ -282,15 +284,18 @@ export class Crowd {
 
     let flags = 0, umbrellas = 0, glows = 0, scarves = 0, caps = 0;
     const kitCount = [0, 0];
-    for (const f of this.fans) {
+    this.fans.forEach((f, j) => {
       const teamFan = f.side !== 2;
       if (teamFan && Math.random() < 0.35) f.kit = kitCount[f.side]++;
       if (Math.random() < (teamFan ? (f.kit >= 0 ? 0.15 : 0.5) : 0.1)) f.scarf = scarves++;
       else if (Math.random() < 0.25) f.cap = caps++;
       if (f.side !== 2 && Math.random() < 0.2) f.flag = flags++;
-      if (Math.random() < 0.4) f.umbrella = umbrellas++;
+      // Never two umbrellas side by side, or their canopies poke through each other.
+      const prev = this.fans[j - 1];
+      const nextToUmbrella = prev && prev.y === f.y && f.x - prev.x < SEAT_SPACING * 1.5 && prev.umbrella >= 0;
+      if (!nextToUmbrella && Math.random() < 0.4) f.umbrella = umbrellas++;
       if (Math.random() < 0.45) f.glow = glows++;
-    }
+    });
     this.flags = inst(flagGeo, toonBoth, flags);
     this.umbrellas = inst(umbrellaGeo, toonBoth, umbrellas);
     this.glows = inst(glowGeo, glowMat, glows);
@@ -344,8 +349,14 @@ export class Crowd {
   }
 
   /** Where to put the camera, and what to look at, to see one team's fans celebrate. */
-  celebrationShot(side: 0 | 1): { pos: THREE.Vector3; look: THREE.Vector3 } {
+  celebrationShot(side: 0 | 1, portrait = false): { pos: THREE.Vector3; look: THREE.Vector3 } {
     const x = this.ends[side], { z0, baseHeight } = this.lay;
+    if (portrait) {
+      // A tall, narrow screen only fits a few fans across, so look along the stand from nearer the
+      // halfway line instead: the rows stack up the screen with the roof and bunting along the top.
+      const d = Math.sign(x) || 1;
+      return { pos: new THREE.Vector3(x - d * 4.5, baseHeight + 1.6, z0 + 5.5), look: new THREE.Vector3(x + d * 0.8, baseHeight + 1.3, z0 - 1.2) };
+    }
     return { pos: new THREE.Vector3(x * 0.8, baseHeight + 3.2, z0 + 6.5), look: new THREE.Vector3(x, baseHeight + 0.9, z0 - 1.2) };
   }
 
@@ -628,7 +639,9 @@ export class Crowd {
     const lift = f.rise * 0.2;
     trs(_base, f.x, f.y, f.z, 0, f.yaw, 0, f.size);
     // Torso: hips at the seat, lifted when standing and jumping, leaning forward or back.
-    _torso.multiplyMatrices(_base, trs(_m, 0, lift + hop, 0, f.lean));
+    // The back row jumps no higher than the roof lets them, so heads and hats never poke through it.
+    const up = Math.min(lift + hop, (this.lay.roofY - 0.06 - f.y) / f.size - HEAD_Y - 0.3);
+    _torso.multiplyMatrices(_base, trs(_m, 0, up, 0, f.lean));
 
     this.legs.setMatrixAt(i, _tmp.multiplyMatrices(_torso, _m.compose(_p.set(0, 0.12, 0.02), _q.identity(), _s.set(1, lift + 0.12, 1))));
     _tmp.multiplyMatrices(_torso, trs(_m, 0, 0.34, 0));
@@ -657,9 +670,14 @@ export class Crowd {
       // Props stay upright in the hand, with a bit of sway.
       if (side > 0 && f.flag >= 0) {
         const sway = Math.sin(t * 7 + f.phase) * 0.3 * Math.max(0, (f.rf - 1) / 1.9);
-        this.flags.setMatrixAt(f.flag, trs(_m, _hand.x, _hand.y, _hand.z, 0, f.yaw + 0.4, sway, f.size));
+        const y = Math.min(_hand.y, this.lay.roofY - 0.08 - FLAG_TOP * f.size); // flags stay under the roof too
+        this.flags.setMatrixAt(f.flag, trs(_m, _hand.x, y, _hand.z, 0, f.yaw + 0.4, sway, f.size));
       }
-      if (side < 0 && f.umbrella >= 0) this.umbrellas.setMatrixAt(f.umbrella, trs(_m, _hand.x, _hand.y, _hand.z, 0, 0, -0.18, f.size));
+      if (side < 0 && f.umbrella >= 0) {
+        // Slide the umbrella down in the hand rather than let it poke through the roof when a fan jumps up.
+        const y = Math.min(_hand.y, this.lay.roofY - 0.08 - UMBRELLA_TOP * f.size);
+        this.umbrellas.setMatrixAt(f.umbrella, trs(_m, _hand.x, y, _hand.z, 0, 0, -0.18, f.size));
+      }
       if (f.glow >= 0 && side === (f.flag >= 0 ? -1 : 1)) {
         this.glows.setMatrixAt(f.glow, trs(_m, _hand.x, _hand.y, _hand.z, 0, f.yaw, Math.sin(t * 5 + f.phase) * 0.6, f.size));
       }
