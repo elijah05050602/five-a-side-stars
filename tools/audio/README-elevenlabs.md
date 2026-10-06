@@ -26,14 +26,25 @@ SoundFont) still works if the audio ever needs rebuilding without an account.
 
 `eleven_music_v2_5`, instrumental:
 
-- **menu** (64 s, then `python3 tools/audio/loop_music.py raw.mp3 public/audio/menu.mp3`
-  and copy the printed loop length into `LOOP_SECONDS` in `src/game/music.ts`):
-  "Upbeat, bright stadium pop-rock anthem for a kids' football video game menu,
-  128 BPM with a driving four-on-the-floor kick, stomp-clap percussion and
-  crowd-style "hey" chants, punchy electric guitar riff, bouncy synth bass and a
-  catchy brass and synth lead melody. Joyful, confident and energetic the whole
-  way through with a steady groove and no slow intro, no fade out, crisp modern
-  production. Instrumental."
+- **home** (the homepage, 64 s, then `python3 tools/audio/loop_music.py raw.mp3 public/audio/music-home.mp3`
+  and copy the printed loop length into `TRACKS` in `src/game/music.ts`):
+  "Energetic, sunny football carnival anthem for the home screen of a kids'
+  football video game. 124 BPM samba-pop groove: punchy surdo and stadium kick
+  drums, shakers, timbales and claps, a bouncy slap bass, bright funky electric
+  guitar strums, and a big catchy trumpet and saxophone horn-section melody that
+  kids would hum, with stadium crowd "olé" whoops in the background. Joyful,
+  confident, festive and full of energy from the first second, steady groove all
+  the way through, no slow intro, no fade out, crisp modern production.
+  Instrumental, no vocals."
+- **matchday** (match preparation and results, `music-matchday.mp3`, same steps):
+  "Laid-back, playful funky groove for the team-building and kit-picking
+  screens of a kids' football video game. 100 BPM feel-good funk-pop: tight
+  crisp drums with a head-nodding backbeat, warm clavinet and wah electric
+  guitar, a round bouncy bass line, light marimba and glockenspiel hooks,
+  finger snaps and handclaps. Cheerful, cool and relaxed but still upbeat, like
+  getting ready in the locker room with your friends. Steady groove all the way
+  through, no slow intro, no fade out, crisp modern production. Instrumental,
+  no vocals."
 - **win** (cut with `loop_music.py --sting 7.5`): "Short triumphant victory fanfare sting for a kids' football game:
   bright brass and electric guitar flourish over a big stadium drum fill, cymbal
   crash and cheering crowd, ending on a held major chord. Joyful, celebratory,
@@ -43,7 +54,7 @@ SoundFont) still works if the audio ever needs rebuilding without an account.
   ending on a bright but relaxed major chord. Cheerful, playful, not sad, 128
   BPM pop. Instrumental."
 
-After changing any file in `public/audio/`, bump `VERSION` in `public/sw.js` so
+Each loop costs about 960 credits for 64 s. After changing any file in `public/audio/`, bump `VERSION` in `public/sw.js` so
 phones fetch the new audio instead of their cached copy.
 
 ## Adding lines later

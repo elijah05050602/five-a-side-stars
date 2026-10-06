@@ -1,25 +1,50 @@
 import { getSettings } from '../data/storage';
+import { loadPlayerAsset } from './playerAsset';
 
 /**
  * One shared Web Audio context for music, effects, the crowd and the
  * commentator, with a compressor on the end so a goal roar on top of the tune
  * never clips. Each kind of sound has its own volume bus, set from the settings.
  * Browsers only let audio start after a tap or key press, so `audioContext()`
- * is called from gestures and `resume()` is retried on every call.
+ * is called from gestures and `resume()` is retried on every call. While the
+ * page is hidden the context sleeps (see watchPage), and while music,
+ * commentary and effects are all switched off it is never started at all.
  */
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let noiseBuf: AudioBuffer | null = null;
+let quietTimer = 0;
 
 export type AudioChannel = 'music' | 'voice' | 'sfx';
 const buses: Partial<Record<AudioChannel, GainNode>> = {};
 const buffers = new Map<string, Promise<AudioBuffer | null>>();
 
+/** Is any of music, commentary and effects switched on? With all three off the game leaves the device's audio alone. */
+export function soundOn(): boolean {
+  const s = getSettings();
+  return s.music || s.commentary || s.sound;
+}
+
+/**
+ * iPhones mute Web Audio when the ring/silent switch is on, which reads as "no
+ * music". Declaring a playback session (Safari 17+) lets the game play like a
+ * video does, but that also stops other audio such as a parent's podcast, so
+ * it is only declared while some sound is switched on and handed back
+ * ('auto') once everything is off.
+ */
+function setSession(type: 'playback' | 'auto'): void {
+  const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+  if (session && session.type !== type) try { session.type = type; } catch { /* older browsers */ }
+}
+
 export function audioContext(): AudioContext | null {
   try {
     if (!ctx) {
+      // Everything switched off: no context at all, so a muted game never takes over the audio.
+      if (!soundOn()) return null;
       const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!Ctor) return null;
+      setSession('playback');
       ctx = new Ctor();
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -12;
@@ -30,13 +55,38 @@ export function audioContext(): AudioContext | null {
       master = ctx.createGain();
       master.gain.value = 0.9;
       master.connect(comp).connect(ctx.destination);
+      watchPage();
     }
-    // iPhones report 'interrupted' (not 'suspended') after a call or app switch.
-    if (ctx.state !== 'running' && ctx.state !== 'closed') void ctx.resume().catch(() => undefined);
+    wake();
     return ctx;
   } catch {
     return null;
   }
+}
+
+/** Start the context again if it has stopped, unless the page is hidden or every sound is switched off. */
+function wake(): void {
+  // iPhones report 'interrupted' (not 'suspended') after a call or app switch.
+  if (!ctx || ctx.state === 'running' || ctx.state === 'closed' || document.hidden || !soundOn()) return;
+  setSession('playback');
+  void ctx.resume().catch(() => undefined);
+}
+
+function sleep(): void {
+  if (ctx && ctx.state !== 'closed') void ctx.suspend().catch(() => undefined);
+}
+
+/**
+ * A hidden page draws no frames, so a match stands still, but its looping
+ * crowd would keep droning at its last level (a goal roar from a background
+ * tab) and the menu music would keep playing. So the context sleeps while the
+ * page is hidden or being left, and wakes when it is shown again; if the phone
+ * wants a tap for that, the listeners in unlockAudio() catch the next one.
+ */
+function watchPage(): void {
+  document.addEventListener('visibilitychange', () => (document.hidden ? sleep() : wake()));
+  window.addEventListener('pagehide', sleep);
+  window.addEventListener('pageshow', wake);
 }
 
 const UNLOCK_EVENTS = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const;
@@ -45,13 +95,16 @@ const UNLOCK_EVENTS = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown
  * Browsers only start audio from a real tap or key press, and phones count a
  * finger lifting (touchend / pointerup / click) rather than touching down. So
  * listen to all of them and keep listening until the context is really
- * running, calling `onRunning` each time a gesture gets it going. Also wake
- * the audio again when the game comes back from the background (phones
- * suspend it on a call or app switch).
+ * running, calling `onRunning` each time a gesture gets it going. When the
+ * game comes back from the background (phones suspend the audio on a call or
+ * app switch, and it sleeps while hidden) the next tap starts it again if
+ * waking it without one did not work. While every sound is switched off taps
+ * do nothing; applyVolumes() starts the audio when one is switched back on.
  */
 export function unlockAudio(onRunning: () => void): void {
   let armed = false;
   const tryUnlock = () => {
+    if (!soundOn()) return;
     const c = audioContext();
     if (!c) return;
     // Older iPhones only unlock audio once a sound actually starts inside the gesture.
@@ -86,8 +139,7 @@ export function unlockAudio(onRunning: () => void): void {
   };
   for (const ev of UNLOCK_EVENTS) window.addEventListener(ev, watch, { capture: true, passive: true });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible' || !ctx) return;
-    if (ctx.state !== 'running') { void ctx.resume().catch(() => undefined); arm(); }
+    if (!document.hidden && ctx && ctx.state !== 'running') arm();
   });
 }
 
@@ -116,25 +168,96 @@ export function channelBus(ch: AudioChannel): GainNode {
   return g;
 }
 
-/** Re-read the volume settings, gliding each bus to its new level. */
+/**
+ * Re-read the sound settings, gliding each bus to its new level. Switching a
+ * sound on wakes the audio (making the context if it is the first one);
+ * switching the last one off lets the buses fade, then puts the context to
+ * sleep and hands the audio session back. Call it straight from the tap or
+ * slider that changed the setting (the sound mixer, the console bar's sound
+ * button, Reset), since phones only start audio inside a gesture.
+ */
 export function applyVolumes(): void {
-  if (!ctx) return;
-  for (const ch of Object.keys(buses) as AudioChannel[]) buses[ch]!.gain.setTargetAtTime(channelLevel(ch), ctx.currentTime, 0.05);
+  const c = soundOn() ? audioContext() : ctx;
+  if (!c) return;
+  for (const ch of Object.keys(buses) as AudioChannel[]) buses[ch]!.gain.setTargetAtTime(channelLevel(ch), c.currentTime, 0.05);
+  window.clearTimeout(quietTimer);
+  if (!soundOn()) quietTimer = window.setTimeout(() => { if (!soundOn()) { sleep(); setSession('auto'); } }, 400);
 }
 
-/** Fetch and decode a file from public/ once; resolves null if it cannot be loaded or played. */
-export function loadAudio(path: string): Promise<AudioBuffer | null> {
+let modelWait: Promise<void> | null = null;
+let endModelWait = (): void => undefined;
+
+/**
+ * Downloads that are not needed yet (the commentator's clips, the full-time
+ * jingles) wait for the player model to load, or fail to. On a first visit the
+ * tutorial starts at once and "Tap to Play" waits for the model, so they would
+ * only slow it down. `now` ends the wait, for a sound that is wanted already.
+ */
+export function afterPlayerModel(now = false): Promise<void> {
+  if (!modelWait) {
+    modelWait = new Promise<void>((resolve) => {
+      endModelWait = resolve;
+      loadPlayerAsset().then(() => resolve(), () => resolve());
+    });
+  }
+  if (now) endModelWait();
+  return modelWait;
+}
+
+/**
+ * Fetch and decode a file from public/ once; resolves null if it cannot be
+ * loaded or played. `rate` is for a file recorded below the context's rate:
+ * see decode().
+ */
+export function loadAudio(path: string, rate?: number): Promise<AudioBuffer | null> {
   let p = buffers.get(path);
   if (!p) {
     const c = audioContext();
     if (!c) return Promise.resolve(null);
-    p = fetch(`${import.meta.env.BASE_URL}${path}`)
+    const loading: Promise<AudioBuffer | null> = fetch(`${import.meta.env.BASE_URL}${path}`)
       .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.statusText))))
-      .then((data) => new Promise<AudioBuffer>((resolve, reject) => { void c.decodeAudioData(data, resolve, reject); }))
-      .catch(() => { buffers.delete(path); return null; });
-    buffers.set(path, p);
+      .then((data) => decode(c, data, rate))
+      .catch(() => { if (buffers.get(path) === loading) buffers.delete(path); return null; });
+    buffers.set(path, loading);
+    p = loading;
   }
   return p;
+}
+
+/**
+ * Forget a decoded file so its memory can go once nothing is playing it. The
+ * next loadAudio() of it fetches it again (from the cache) and decodes it.
+ */
+export function releaseAudio(path: string): void {
+  buffers.delete(path);
+}
+
+/**
+ * decodeAudioData turns a file into 32-bit samples at its context's rate (44.1
+ * or 48 kHz), which for a file recorded lower is mostly wasted memory: the
+ * 24 kHz commentary would take about 135 MB at 48 kHz. Given `rate`, the file
+ * is decoded by an offline context at that rate instead, and playback
+ * resamples it on the fly. Browsers that cannot do that (old Safari only makes
+ * offline contexts from 44.1 kHz up) decode with the main context as before.
+ */
+function decode(c: AudioContext, data: ArrayBuffer, rate?: number): Promise<AudioBuffer> {
+  const Offline = window.OfflineAudioContext || (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext }).webkitOfflineAudioContext;
+  if (rate && rate < c.sampleRate && Offline) {
+    try {
+      const offline = new Offline(1, 1, rate);
+      // Decoding takes the bytes, so keep a copy for the main context in case this way fails.
+      const copy = data.slice(0);
+      return decodeWith(offline, data).catch(() => decodeWith(c, copy));
+    } catch { /* no offline context at this rate */ }
+  }
+  return decodeWith(c, data);
+}
+
+function decodeWith(c: BaseAudioContext, data: ArrayBuffer): Promise<AudioBuffer> {
+  return new Promise<AudioBuffer>((resolve, reject) => {
+    // Old Safari only calls back; newer browsers also return a promise, which would report the failure a second time.
+    (c.decodeAudioData(data, resolve, reject) as Promise<AudioBuffer> | undefined)?.catch(() => undefined);
+  });
 }
 
 /** Two seconds of white noise, shared by the crowd, rain, drums and ball thumps. */

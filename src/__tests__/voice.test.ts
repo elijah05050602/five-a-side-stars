@@ -5,7 +5,7 @@ import { IDLE_INPUT } from '../game/sim';
 import { cpuMatch } from './helpers';
 import spriteJson from '../../public/audio/commentary.json';
 
-const sprite = spriteJson as unknown as { clips: Record<string, [number, number][]> };
+const sprite = spriteJson as unknown as { duration: number; clips: Record<string, [number, number][]> };
 
 describe('recorded commentary', () => {
   it('has a spoken clip for every line it can say', () => {
@@ -19,6 +19,12 @@ describe('recorded commentary', () => {
   it('has a score call for every score up to nine goals', () => {
     for (let a = 0; a <= 9; a++) for (let b = 0; b <= 9; b++) expect(sprite.clips[scoreClip([a, b])!], `${a}-${b}`).toBeDefined();
     expect(scoreClip([10, 2])).toBeNull();
+  });
+
+  it('stores the length of the recording it indexes, and every clip ends inside it', () => {
+    // ffprobe's length of public/audio/commentary.mp3; the game refuses a recording that differs by more than half a second.
+    expect(sprite.duration).toBeCloseTo(705.24, 2);
+    for (const [key, clips] of Object.entries(sprite.clips)) for (const [start, d] of clips) expect(start + d, key).toBeLessThan(sprite.duration);
   });
 
   it('clips do not overlap', () => {

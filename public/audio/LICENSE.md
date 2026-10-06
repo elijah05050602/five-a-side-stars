@@ -7,10 +7,10 @@ non-commercial use with attribution to ElevenLabs (this file is that
 attribution); a paid plan adds commercial rights. It is not covered by the
 game's MIT licence. The scripts that rebuild it are in `tools/audio/`.
 
-## Music (`menu.mp3`, `win.mp3`, `draw.mp3`)
+## Music (`music-home.mp3`, `music-matchday.mp3`, `win.mp3`, `draw.mp3`)
 
 Generated for the game with **ElevenLabs Music** (`eleven_music_v2_5`,
-instrumental). `menu.mp3` is cut to a 30-bar seamless loop by
+instrumental). The two `music-*.mp3` tracks are cut to seamless loops by
 `tools/audio/loop_music.py`; the prompts are in
 `tools/audio/README-elevenlabs.md`.
 

@@ -77,6 +77,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         <div class="bar"><span class="bar-label">Power</span><div class="bar-track"><div class="bar-fill bar-power" id="bar-power"></div></div></div>
       </div>
       <div class="hud-banner" id="hud-banner"></div>
+      <div id="hud-live" aria-live="polite" style="position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap"></div>
       <div class="replay-frame" id="replay-frame" hidden><span class="replay-label">▶ REPLAY</span></div>
       <div class="hud-comm" id="hud-comm"><span class="hud-comm-mic">🎙️</span><span id="hud-comm-text"></span></div>
       <div class="touch-controls ${getControls().touch.leftHanded ? 'is-lefty' : ''}" style="--tc-size:${getControls().touch.size};--tc-opacity:${getControls().touch.opacity}">
@@ -118,6 +119,55 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     window.clearTimeout(commTimer);
     commTimer = window.setTimeout(() => comm.classList.remove('show'), Math.min(7000, 2500 + text.length * 60));
   };
+  const live = q('hud-live');
+  /** Tell screen-reader users what just happened (goals, half time, full time). */
+  const announce = (text: string) => {
+    live.textContent = '';
+    window.setTimeout(() => { live.textContent = text; }, 60); // a fresh change, so the same words are read again
+  };
+  const scoreLine = (s: MatchSim) => mode === 'training' ? `${s.trainingPoints} points` : `${home.name} ${s.score[0]}, ${away.name} ${s.score[1]}`;
+
+  // While a card with buttons is up (paused, full time, tutorial done) the keyboard drives the card, not the
+  // game: Tab, Enter, Space and the arrows work as on any page. The pause keys still reach the game.
+  const pauseKeys = new Set(Object.values(getControls().keys).flatMap((m) => m.pause));
+  const cardButtons = () => [...overlay.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')];
+  const primary = () => overlay.querySelector<HTMLElement>('.btn-primary');
+  const onCardKey = (e: KeyboardEvent) => {
+    if (overlay.hidden || !cardButtons().length || pauseKeys.has(e.code)) return;
+    if (!overlay.contains(document.activeElement)) {
+      if (e.key !== 'Tab' && e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      primary()?.focus();
+    }
+    e.stopPropagation();
+  };
+  window.addEventListener('keydown', onCardKey, true);
+  // A controller works the card too: the d-pad or stick moves between buttons, A presses (Start as well, except
+  // on the pause card, where Start already means "keep playing").
+  let padWas = new Set<number>();
+  let stickWas = 0;
+  const cardPad = (s: MatchSim) => {
+    const btns = overlay.hidden ? [] : cardButtons();
+    const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? [...navigator.getGamepads()].filter((g): g is Gamepad => !!g && g.connected) : [];
+    const now = new Set<number>();
+    let stick = 0;
+    for (const g of pads) {
+      g.buttons.forEach((b, i) => { if (b.pressed) now.add(i); });
+      const ay = g.axes[1] ?? 0, ax = g.axes[0] ?? 0;
+      if (Math.abs(ay) > 0.6 || Math.abs(ax) > 0.6) stick = (Math.abs(ay) > Math.abs(ax) ? ay : ax) > 0 ? 1 : -1;
+    }
+    const hit = (i: number) => now.has(i) && !padWas.has(i);
+    const step = hit(12) || hit(14) || (stick < 0 && stickWas >= 0) ? -1 : hit(13) || hit(15) || (stick > 0 && stickWas <= 0) ? 1 : 0;
+    padWas = now;
+    stickWas = stick;
+    if (!btns.length) return;
+    const at = btns.indexOf(document.activeElement as HTMLElement);
+    if (step) { (btns[(Math.max(0, at) + step + btns.length) % btns.length] ?? btns[0]).focus(); return; }
+    if (hit(0) || (hit(9) && s.phase !== 'paused')) (at >= 0 ? btns[at] : primary() ?? btns[0]).click();
+  };
+  /** Put focus on a new card's main button, so Enter, Space or a controller's A press it straight away. */
+  const focusCard = () => primary()?.focus({ preventScroll: true });
+
   const pensH = root.querySelector<HTMLElement>('#pens-h');
   const pensA = root.querySelector<HTMLElement>('#pens-a');
   let bannerTimer = 0;
@@ -148,6 +198,8 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       overlay.querySelector('#tut-play')!.addEventListener('click', () => cb.onFinish());
       overlay.querySelector('#tut-lobby')!.addEventListener('click', () => cb.onQuit());
       root.querySelector<HTMLElement>('#tut-skip')!.hidden = true;
+      focusCard();
+      announce("You're ready! Tutorial complete.");
       return;
     }
     const t = TUTORIAL_TEXT()[c.step];
@@ -203,9 +255,11 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       }));
       overlay.querySelector('#ov-full')?.addEventListener('click', () => { toggleFullscreen(); });
       overlay.querySelector('#ov-quit')!.addEventListener('click', () => cb.onQuit());
+      focusCard();
     } else if (s.phase === 'halftime') {
       overlay.hidden = false;
       overlay.innerHTML = `<div class="card overlay-card"><h2>Half time</h2><p class="score-big">${s.score[0]} – ${s.score[1]}</p><p class="muted">Have an orange slice! Second half coming up.</p></div>`;
+      announce(`Half time. ${scoreLine(s)}.`);
     } else if (s.phase === 'fulltime') {
       overlay.hidden = false;
       overlay.innerHTML = `
@@ -215,7 +269,11 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
           <button class="btn btn-primary" id="ov-finish">See the results</button>
         </div>`;
       overlay.querySelector('#ov-finish')!.addEventListener('click', () => cb.onFinish());
+      focusCard();
+      announce(`${mode === 'training' ? "Time's up" : mode === 'shootout' ? 'Shoot-out over' : 'Full time'}. ${scoreLine(s)}.`);
     } else {
+      // Focus was on the card's button; give it back to the page so the game keys work again.
+      if (overlay.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
       overlay.hidden = true;
       overlay.innerHTML = '';
     }
@@ -245,7 +303,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
           lastTaking = so.taking;
           const human = s.isHuman(so.taking);
           const humanKeeper = s.isHuman((1 - so.taking) as 0 | 1);
-          tip.textContent = s.phase === 'setpiece' ? (human ? `${esc(s.teams[so.taking].short)} to take: hold shoot, aim, release!` : humanKeeper ? 'You are in goal: push left or right to dive!' : `${s.teams[so.taking].short} to take…`) : '';
+          tip.textContent = s.phase === 'setpiece' ? (human ? `${s.teams[so.taking].short} to take: hold shoot, aim, release!` : humanKeeper ? 'You are in goal: push left or right to dive!' : `${s.teams[so.taking].short} to take…`) : '';
         }
       }
       if (s.controlled) {
@@ -267,6 +325,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
           const team = s.teams[ev.side!];
           const own = s.goals[s.goals.length - 1]?.ownGoal;
           showBanner(`<div class="goal-text">GOAL!</div><div class="goal-sub">${esc(ev.player.name)} #${ev.player.number}${own ? ' (own goal)' : ''} · ${esc(team.name)}</div><div class="commentary">${esc(said ?? (own ? 'Oh no, into their own net!' : pickLine(GOAL_LINES)))}</div>`, 3000);
+          announce(`Goal for ${team.name}! ${ev.player.name}${own ? ', own goal' : ''}. ${scoreLine(s)}.`);
           confetti(root, team.kit.shirt, team.kit.shirt2);
         } else if (ev.type === 'save') {
           showBanner(`<div class="save-text">${pickLine(SAVE_LINES)} Great save, ${esc(ev.player?.name ?? 'keeper')}!</div>`, 1200);
@@ -312,10 +371,12 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         if (!(coach && coach.step === 'done')) renderOverlay(s);
       }
       if (coach) renderTutorial(coach);
+      cardPad(s);
     },
     destroy() {
       window.clearTimeout(bannerTimer);
       window.clearTimeout(commTimer);
+      window.removeEventListener('keydown', onCardKey, true);
       root.innerHTML = '';
     },
   };

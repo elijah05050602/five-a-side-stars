@@ -1,56 +1,44 @@
 import { getSettings } from '../data/storage';
-import { audioContext, channelBus, loadAudio, midiToHz, noiseBurst, tone } from './audio';
+import { afterPlayerModel, audioContext, channelBus, loadAudio, releaseAudio } from './audio';
 
 /**
- * The menu music: a stadium pop-rock anthem (public/audio/menu.mp3, made with
- * ElevenLabs Music and looped by tools/audio/loop_music.py) played as a
- * seamless loop, plus short jingles at full time. Starts on the first tap or
- * key press (browsers require a gesture) and fades right down during a match.
- * While the recording loads, or if it cannot be played, a simple tune plays
- * on oscillators so there is never silence.
+ * Background music: ElevenLabs Music loops, the home theme on the menu pages
+ * and a matchday groove from match preparation onwards (made by tools/audio/loop_music.py, see tools/audio/README-elevenlabs.md),
+ * crossfading as you move between screens, plus short jingles at full time.
+ * Starts on the first tap or key press (browsers require a gesture; the loading
+ * screen asks for one) and fades right down during a match.
+ *
+ * Only the loop that is playing stays decoded. Each one is about 20 MB of
+ * samples (21-22 MB at 48 kHz), which matters on older iPhones and iPads next
+ * to the 3D match; the price is decoding the other loop again, from the
+ * cache, when the screens switch between them, which only delays the
+ * crossfade by a fraction of a second.
  */
-const BPM = 132;
-const STEPS_PER_BAR = 8; // eighth notes
-const LOOP_SECONDS = 56.255; // 30 bars at 128 bpm, see tools/audio/loop_music.py
+export type Track = 'home' | 'matchday';
 
-// Chords per bar: [root midi, third, fifth] in a comfortable register.
-const C = [60, 64, 67], G = [59, 62, 67], Am = [57, 60, 64], F = [57, 60, 65];
-const CHORDS = [C, G, Am, F, C, G, F, G, Am, F, C, G, Am, F, G, G];
-const ROOTS = [48, 43, 45, 41, 48, 43, 41, 43, 45, 41, 48, 43, 45, 41, 43, 43];
+/** Loop lengths printed by loop_music.py; each file is a little longer for the crossfade. */
+export const TRACKS: Record<Track, { file: string; loop: number }> = {
+  // The home theme, a samba-pop carnival anthem, on the menu and every page around it.
+  home: { file: 'audio/music-home.mp3', loop: 58.071 },
+  // A laid-back funk-pop groove from match preparation onwards (team sheet, then results).
+  matchday: { file: 'audio/music-matchday.mp3', loop: 55.203 },
+};
+const TRACK_NAMES = Object.keys(TRACKS) as Track[];
 
-// Lead melody, one entry per eighth note, 0 = rest or hold the previous note.
-const LEAD = [
-  76, 79, 76, 72, 74, 76, 0, 0,
-  74, 0, 71, 74, 79, 0, 0, 0,
-  81, 0, 79, 76, 72, 74, 76, 0,
-  77, 0, 76, 74, 72, 0, 0, 0,
-  76, 79, 76, 72, 74, 76, 79, 0,
-  81, 0, 79, 0, 83, 0, 0, 0,
-  81, 79, 77, 76, 74, 0, 76, 0,
-  74, 0, 0, 0, 71, 0, 0, 0,
-  84, 0, 83, 81, 76, 0, 0, 0,
-  81, 0, 79, 77, 72, 0, 0, 0,
-  79, 76, 79, 76, 84, 0, 0, 0,
-  83, 0, 81, 79, 74, 0, 0, 0,
-  84, 0, 83, 81, 76, 0, 79, 0,
-  81, 79, 77, 0, 81, 79, 77, 0,
-  79, 0, 0, 81, 83, 0, 0, 0,
-  86, 0, 0, 0, 84, 0, 0, 0,
-];
+/** Which loop a screen plays: the matchday groove on match preparation and results, the home theme everywhere else. */
+export function trackFor(screen: string): Track {
+  return screen === 'setup' || screen === 'results' ? 'matchday' : 'home';
+}
 
 export type Jingle = 'win' | 'draw';
 
 class Music {
   private ctx: AudioContext | null = null;
   private bus: GainNode | null = null;
-  private timer = 0;
-  private nextTime = 0;
-  private step = 0;
   private playing = false;
   private quiet = false;
-  private track: AudioBufferSourceNode | null = null;
-  private trackGain: GainNode | null = null;
-  private synthGain: GainNode | null = null;
+  private want: Track = 'home';
+  private current: { track: Track; src: AudioBufferSourceNode; gain: GainNode } | null = null;
 
   private get level(): number { return this.quiet ? 0.0 : 1; }
 
@@ -64,27 +52,30 @@ class Music {
       this.bus = c.createGain();
       this.bus.gain.value = 0;
       this.bus.connect(channelBus('music'));
-      this.synthGain = c.createGain();
-      this.synthGain.gain.value = 0.55;
-      this.synthGain.connect(this.bus);
     }
     this.bus!.gain.setTargetAtTime(this.level, c.currentTime, 0.4);
     this.playing = true;
-    if (this.track) return;
-    // Oscillator tune until the recording is ready.
-    this.nextTime = c.currentTime + 0.05;
-    this.timer = window.setInterval(() => this.schedule(), 90);
-    void loadAudio('audio/menu.mp3').then((buf) => { if (buf && this.playing && !this.track) this.playTrack(buf); });
+    this.switchTo(this.want);
   }
 
   stop(): void {
     if (!this.playing) return;
     this.playing = false;
-    window.clearInterval(this.timer);
     if (this.ctx && this.bus) this.bus.gain.setTargetAtTime(0, this.ctx.currentTime, 0.3);
-    const track = this.track;
-    this.track = null;
-    if (track && this.ctx) track.stop(this.ctx.currentTime + 1.5);
+    this.fadeOut(1.5);
+    // No loop needs to stay decoded now (the one fading out keeps its own until it stops).
+    this.release();
+  }
+
+  /** Pick the loop for the screen being shown; crossfades if music is playing. */
+  setTrack(track: Track): void {
+    this.want = track;
+    if (this.playing) this.switchTo(track);
+  }
+
+  /** Fetch a loop ahead of time (e.g. behind the loading screen) so it starts on the first tap. */
+  preload(track: Track = this.want): void {
+    if (getSettings().music) void loadAudio(TRACKS[track].file);
   }
 
   /** Fade right down during a match so the crowd and the commentator carry the mood. */
@@ -114,74 +105,58 @@ class Music {
     });
   }
 
-  /** Fetch the jingles ahead of full time so they play on cue. */
+  /** Fetch the jingles ahead of full time so they play on cue, once the player model is in (see afterPlayerModel). */
   preloadJingles(): void {
     if (!getSettings().music || !audioContext()) return;
-    void loadAudio('audio/win.mp3');
-    void loadAudio('audio/draw.mp3');
+    void afterPlayerModel().then(() => {
+      if (!getSettings().music) return;
+      void loadAudio('audio/win.mp3');
+      void loadAudio('audio/draw.mp3');
+    });
   }
 
-  private playTrack(buf: AudioBuffer): void {
+  private switchTo(track: Track): void {
+    if (this.current?.track === track) return;
+    void loadAudio(TRACKS[track].file).then((buf) => {
+      // Only start it if this is still the loop we want and nothing has beaten us to it.
+      if (buf && this.playing && this.want === track && this.current?.track !== track) {
+        this.fadeOut(1.2);
+        this.playLoop(track, buf);
+      }
+      this.release();
+    });
+  }
+
+  /** Let go of decoded loops nothing needs: only the one playing, and while music is on the one wanted next, are kept. */
+  private release(): void {
+    for (const t of TRACK_NAMES) {
+      if (t !== this.current?.track && !(this.playing && t === this.want)) releaseAudio(TRACKS[t].file);
+    }
+  }
+
+  private fadeOut(seconds: number): void {
+    const cur = this.current, c = this.ctx;
+    this.current = null;
+    if (!cur || !c) return;
+    cur.gain.gain.cancelScheduledValues(c.currentTime);
+    cur.gain.gain.setValueAtTime(cur.gain.gain.value, c.currentTime);
+    cur.gain.gain.linearRampToValueAtTime(0.0001, c.currentTime + seconds);
+    cur.src.stop(c.currentTime + seconds + 0.05);
+  }
+
+  private playLoop(track: Track, buf: AudioBuffer): void {
     const c = this.ctx!;
-    window.clearInterval(this.timer);
-    this.synthGain!.gain.setTargetAtTime(0, c.currentTime, 0.3);
     const src = c.createBufferSource();
     src.buffer = buf;
     src.loop = true;
     src.loopStart = 0;
-    src.loopEnd = Math.min(buf.duration, LOOP_SECONDS);
-    this.trackGain = c.createGain();
-    this.trackGain.gain.setValueAtTime(0.0001, c.currentTime);
-    this.trackGain.gain.exponentialRampToValueAtTime(0.8, c.currentTime + 1.2);
-    src.connect(this.trackGain).connect(this.bus!);
+    src.loopEnd = Math.min(buf.duration, TRACKS[track].loop || buf.duration);
+    const gain = c.createGain();
+    gain.gain.setValueAtTime(0.0001, c.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.8, c.currentTime + 1.2);
+    src.connect(gain).connect(this.bus!);
     src.start();
-    this.track = src;
-  }
-
-  private schedule(): void {
-    const c = this.ctx!;
-    const stepDur = 60 / BPM / 2;
-    while (this.nextTime < c.currentTime + 0.3) {
-      if (!this.quiet) this.playStep(this.step % LEAD.length, this.nextTime, stepDur);
-      this.nextTime += stepDur;
-      this.step++;
-    }
-  }
-
-  private playStep(i: number, at: number, stepDur: number): void {
-    const c = this.ctx!, out = this.synthGain!;
-    const bar = Math.floor(i / STEPS_PER_BAR), beat = i % STEPS_PER_BAR;
-    const chord = CHORDS[bar], root = ROOTS[bar];
-    const sectionB = bar >= 8;
-
-    // Lead: hold a note for as long as the rests that follow it (up to four steps).
-    const m = LEAD[i];
-    if (m) {
-      let hold = 1;
-      while (hold < 4 && LEAD[(i + hold) % LEAD.length] === 0) hold++;
-      const dur = stepDur * hold * 0.92;
-      tone(c, out, at, { freq: midiToHz(m), type: 'square', gain: 0.07, attack: 0.01, decay: dur });
-      tone(c, out, at, { freq: midiToHz(m), type: 'triangle', gain: 0.1, attack: 0.01, decay: dur, detune: 6 });
-    }
-    // Chords: a soft pad on beats 1 and 3, stabs on the off-beats in section B.
-    if (beat === 0 || beat === 4 || (sectionB && (beat === 3 || beat === 7))) {
-      const stab = sectionB && beat % 2 === 1;
-      for (const n of chord) tone(c, out, at, { freq: midiToHz(n), type: 'triangle', gain: stab ? 0.05 : 0.04, attack: stab ? 0.01 : 0.06, decay: stab ? stepDur * 0.6 : stepDur * 1.8 });
-    }
-    // Bass: oom-pah, root then the fifth an octave up.
-    if (beat % 2 === 0) {
-      const n = beat % 4 === 0 ? root : root + 7;
-      tone(c, out, at, { freq: midiToHz(n), type: 'sawtooth', gain: 0.09, attack: 0.01, decay: stepDur * 1.2 });
-      tone(c, out, at, { freq: midiToHz(n - 12), type: 'sine', gain: 0.12, attack: 0.01, decay: stepDur * 1.1 });
-    }
-    // Drums.
-    if (beat === 0 || beat === 4 || (sectionB && beat === 7)) tone(c, out, at, { freq: 120, freqEnd: 40, type: 'sine', gain: 0.4, attack: 0.003, decay: 0.16 });
-    if (beat === 2 || beat === 6) {
-      noiseBurst(c, out, at, { gain: 0.16, decay: 0.12, freq: 1800, q: 0.7 });
-      tone(c, out, at, { freq: 210, freqEnd: 150, type: 'triangle', gain: 0.12, attack: 0.003, decay: 0.1 });
-      if (sectionB) noiseBurst(c, out, at + 0.012, { gain: 0.1, decay: 0.07, freq: 2600, q: 1.4 });
-    }
-    noiseBurst(c, out, at, { gain: beat % 2 === 1 ? 0.045 : 0.025, decay: beat % 2 === 1 ? 0.07 : 0.035, type: 'highpass', freq: 7000, q: 0.5 });
+    this.current = { track, src, gain };
   }
 }
 

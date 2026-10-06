@@ -4,6 +4,7 @@ import { startingFive, uid } from '../data/defaults';
 import { applyLeagueResult, createLeague, seasonOutcome, seasonOver, type LeagueState, type SeasonRecord } from './league';
 import type { MatchResult } from './MatchScene';
 import { freshMatchStats, type PlayerMatchStats } from './sim';
+import type { SimOutcome } from './background';
 
 /**
  * Career mode: one team starts in the Under 5s and plays a year in each age
@@ -174,11 +175,11 @@ export interface CareerMatchSummary {
  * stats, and growth for everyone who played. Mutates both the career and the
  * team; the caller saves them.
  */
-export function applyCareerMatch(c: CareerState, team: Team, r: MatchResult): CareerMatchSummary {
+export function applyCareerMatch(c: CareerState, team: Team, r: MatchResult, others?: (SimOutcome | null)[]): CareerMatchSummary {
   const youHome = r.home.id === team.id;
   const [gf, ga] = youHome ? r.score : [r.score[1], r.score[0]];
   const won = gf > ga, drawn = gf === ga, cleanSheet = ga === 0;
-  applyLeagueResult(c.league, team, r);
+  applyLeagueResult(c.league, team, r, others);
   const motm = playerOfTheMatch(r);
   const growth: GrowthEvent[] = [];
   let fiveStar = false;

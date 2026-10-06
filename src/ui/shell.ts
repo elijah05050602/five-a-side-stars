@@ -1,4 +1,4 @@
-import { getLeague, getSettings, updateSettings } from '../data/storage';
+import { cupInProgress, getLeague, getSettings, updateSettings } from '../data/storage';
 import { music } from '../game/music';
 import { applyVolumes } from '../game/audio';
 import { esc } from './hud';
@@ -42,13 +42,14 @@ export function pageHead(title: string, backLabel = 'Lobby', extra = ''): string
   return `<div class="page-head"><button class="btn btn-ghost btn-back" data-back><span class="btn-back-arrow">←</span> ${esc(backLabel)}</button><h1 class="page-title">${esc(title)}</h1>${extra}</div>`;
 }
 
-/** Keyboard hint dock shown on the lobby for mouse-and-keyboard players. */
-export function dock(): string {
-  return `
+/** The lobby's bottom dock: How to play, Controls, the club and the Parents Zone, plus key hints for keyboard players. */
+export function dock(keyboard: boolean): string {
+  const links = '<button class="dock-chip dock-link" id="m-howto">🎓 How to play</button><button class="dock-chip dock-link" data-nav="controls">🎮 Controls</button><button class="dock-chip dock-link dock-club" data-club>🦊 Davao Strikers</button><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button>';
+  return keyboard ? `
     <footer class="dock">
       <div class="dock-keys"><kbd>SPACE</kbd> Kick off <span class="dock-dot">·</span> <kbd>ESC</kbd> Back</div>
-      <div class="dock-right"><span class="dock-chip dock-offline">● PLAYS OFFLINE</span><button class="dock-chip dock-link" id="m-howto">🎓 How to play</button><button class="dock-chip dock-link" data-nav="controls">🎮 Controls</button><button class="dock-chip dock-link dock-club" data-club>🦊 Davao Strikers</button><button class="dock-chip dock-parents" data-nav="parents">🛡️ Parents Zone 🔒</button></div>
-    </footer>`;
+      <div class="dock-right"><span class="dock-chip dock-offline">● PLAYS OFFLINE</span>${links}</div>
+    </footer>` : `<footer class="dock dock-touch">${links}</footer>`;
 }
 
 export function wireShell(root: HTMLElement, router: Router): void {
@@ -56,7 +57,7 @@ export function wireShell(root: HTMLElement, router: Router): void {
     switch (b.dataset.nav as ShellTab | 'parents' | 'controls') {
       case 'lobby': return router.go({ name: 'menu' });
       case 'squad': return router.go({ name: 'teams' });
-      case 'cup': return router.go({ name: 'setup', mode: 'tournament' });
+      case 'cup': return router.go(cupInProgress() ? { name: 'tournament' } : { name: 'setup', mode: 'tournament' });
       case 'league': return router.go(getLeague() ? { name: 'league' } : { name: 'setup', mode: 'league' });
       case 'album': return router.go({ name: 'album' });
       case 'parents': return router.go({ name: 'parents' });
