@@ -33,6 +33,14 @@ export function pickClip(count: number, last: number | undefined, rng: () => num
   return last !== undefined && i >= last ? i + 1 : i;
 }
 
+/**
+ * A recorded line to fall back on for a newer situation that has no clips of
+ * its own in the sprite yet. Lines with no fallback are just shown, not spoken.
+ */
+export const FALLBACK: Partial<Record<LineKey, LineKey>> = {
+  goalHeader: 'goalLead', goalComeback: 'goalEqualiser', goalTurnaround: 'goalLead', goalTapIn: 'goalLead', missSitter: 'missWide',
+};
+
 let spritePromise: Promise<{ sprite: Sprite; buffer: AudioBuffer } | null> | null = null;
 
 /** Fetch the clips (once). Called on the first tap so the opening kick-off line is ready in time. */
@@ -79,7 +87,7 @@ export class Commentary {
     }
     const c = audioContext();
     if (!c) return;
-    const clips = this.sprite.clips[key];
+    const clips = this.sprite.clips[key]?.length ? this.sprite.clips[key] : this.sprite.clips[FALLBACK[key] ?? ''];
     if (!clips?.length) return;
     const prio = priority(key);
     const now = c.currentTime;

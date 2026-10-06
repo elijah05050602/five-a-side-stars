@@ -33,6 +33,11 @@ describe('commentary lines', () => {
     expect(goalLine({ ...base, score: [1, 0], longRange: true }, first)).toContain('From miles out');
     expect(goalLine({ ...base, score: [1, 0], mode: 'shootout' }, first)).toContain('shoot-out');
     expect(goalLine({ ...base, score: [1, 0], mode: 'training', rocket: true }, first)).toContain('ROCKET');
+    expect(goalLine({ ...base, score: [1, 0], header: true }, first)).toContain('HEADER');
+    expect(goalLine({ ...base, score: [1, 0], closeRange: true }, first)).toContain('Tapped in');
+    expect(goalLine({ ...base, score: [2, 2], wasDown: 2 }, first)).toContain('comeback');
+    expect(goalLine({ ...base, score: [3, 2], wasDown: 1 }, first)).toContain('turned it around');
+    expect(goalLine({ ...base, score: [1, 1], wasDown: 1 }, first)).toContain('levels it up');
   });
 });
 
