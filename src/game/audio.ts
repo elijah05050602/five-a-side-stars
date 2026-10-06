@@ -5,7 +5,8 @@ import { getSettings } from '../data/storage';
  * commentator, with a compressor on the end so a goal roar on top of the tune
  * never clips. Each kind of sound has its own volume bus, set from the settings.
  * Browsers only let audio start after a tap or key press, so `audioContext()`
- * is called from gestures and `resume()` is retried on every call.
+ * is called from gestures and `resume()` is retried on every call. While the
+ * page is hidden the context sleeps (see watchPage).
  */
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -34,13 +35,36 @@ export function audioContext(): AudioContext | null {
       master = ctx.createGain();
       master.gain.value = 0.9;
       master.connect(comp).connect(ctx.destination);
+      watchPage();
     }
-    // iPhones report 'interrupted' (not 'suspended') after a call or app switch.
-    if (ctx.state !== 'running' && ctx.state !== 'closed') void ctx.resume().catch(() => undefined);
+    wake();
     return ctx;
   } catch {
     return null;
   }
+}
+
+/** Start the context again if it has stopped, unless the page is hidden. */
+function wake(): void {
+  // iPhones report 'interrupted' (not 'suspended') after a call or app switch.
+  if (ctx && ctx.state !== 'running' && ctx.state !== 'closed' && !document.hidden) void ctx.resume().catch(() => undefined);
+}
+
+function sleep(): void {
+  if (ctx && ctx.state !== 'closed') void ctx.suspend().catch(() => undefined);
+}
+
+/**
+ * A hidden page draws no frames, so a match stands still, but its looping
+ * crowd would keep droning at its last level (a goal roar from a background
+ * tab) and the menu music would keep playing. So the context sleeps while the
+ * page is hidden or being left, and wakes when it is shown again; if the phone
+ * wants a tap for that, the listeners in unlockAudio() catch the next one.
+ */
+function watchPage(): void {
+  document.addEventListener('visibilitychange', () => (document.hidden ? sleep() : wake()));
+  window.addEventListener('pagehide', sleep);
+  window.addEventListener('pageshow', wake);
 }
 
 const UNLOCK_EVENTS = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const;
@@ -49,9 +73,10 @@ const UNLOCK_EVENTS = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown
  * Browsers only start audio from a real tap or key press, and phones count a
  * finger lifting (touchend / pointerup / click) rather than touching down. So
  * listen to all of them and keep listening until the context is really
- * running, calling `onRunning` each time a gesture gets it going. Also wake
- * the audio again when the game comes back from the background (phones
- * suspend it on a call or app switch).
+ * running, calling `onRunning` each time a gesture gets it going. When the
+ * game comes back from the background (phones suspend the audio on a call or
+ * app switch, and it sleeps while hidden) the next tap starts it again if
+ * waking it without one did not work.
  */
 export function unlockAudio(onRunning: () => void): void {
   let armed = false;
@@ -90,8 +115,7 @@ export function unlockAudio(onRunning: () => void): void {
   };
   for (const ev of UNLOCK_EVENTS) window.addEventListener(ev, watch, { capture: true, passive: true });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible' || !ctx) return;
-    if (ctx.state !== 'running') { void ctx.resume().catch(() => undefined); arm(); }
+    if (!document.hidden && ctx && ctx.state !== 'running') arm();
   });
 }
 
