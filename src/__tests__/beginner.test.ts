@@ -31,6 +31,12 @@ describe('beginner help', () => {
     expect(off).toBeLessThan(0.6);
   });
 
+  it('is the easiest level, whatever difficulty was picked before', () => {
+    const speeds = (s: MatchSim) => s.players.filter((p) => p.side === 1).map((p) => p.speedMul);
+    const fromHard = new MatchSim({ home, away, difficulty: 'hard', halfSeconds: 60, humanSide: 0, mode: 'match', assist: true });
+    expect(speeds(fromHard)).toEqual(speeds(match(true)));
+  });
+
   it('slows the computer team and leaves yours alone', () => {
     const speeds = (s: MatchSim, side: Side) => s.players.filter((p) => p.side === side).map((p) => p.speedMul);
     const off = match(false);
