@@ -20,7 +20,8 @@ import { TutorialCoach } from './tutorial';
 import { batchStatic } from './batchStatic';
 import { graphicsProfile, type GraphicsProfile } from './graphics';
 import { EXPOSURE, TONE_MAPPING, disposeObject } from './renderer';
-import { BallTrail, Puffs } from './effects';
+import { BallTrail, Puffs, SuperAura } from './effects';
+import { SUPERS, type SuperKind } from './supers';
 import { P1_RING, P2_RING, teamRingColours } from './ringColours';
 
 /** Whether the touch buttons are showing (the same test the CSS uses). */
@@ -123,6 +124,16 @@ export class MatchScene {
   private readonly calm = getSettings().reduceMotion;
   /** Players already puffed for the tackle or dive they are in. */
   private readonly puffed = new Set<SimPlayer>();
+  /**
+   * Super skills. Play freezes while the cutscene runs, then goes into slow motion for a moment as the
+   * super lets rip. If a cutscene ever fails, the rest of the match's supers just show their banner.
+   */
+  private readonly aura: SuperAura;
+  private cut: { t: number; dur: number; p: SimPlayer; kind: SuperKind; from: THREE.Vector3; look: THREE.Vector3; angle: number } | null = null;
+  private slowmo = 0;
+  private cutsBroken = false;
+  private readonly superMode = getSettings().supers;
+  private trailColour: number | null = null;
   /** Current render resolution; Auto graphics nudges it down while frames are slow. */
   private pixelRatio: number;
   private prCeiling = Infinity;
@@ -206,6 +217,8 @@ export class MatchScene {
     this.scene.add(this.ball.group);
     this.trail = new BallTrail(this.sim.ball.radius);
     this.scene.add(this.trail.group, this.puffs.group);
+    this.aura = new SuperAura(0.6 + 0.5 * this.sim.stats.scale);
+    this.scene.add(this.aura.group);
     if (this.sim.mode === 'tutorial') {
       this.coach = new TutorialCoach(this.sim);
       const gold = new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
@@ -432,10 +445,14 @@ export class MatchScene {
     const replaying = !!this.replay && this.replay.wait <= 0;
     // Shoot, pass or lob during a replay skips it (taps during a replay are dropped below, so it kicks nothing).
     if (replaying && (input.shoot || input.pass || input.lob || input2?.shoot || input2?.pass || input2?.lob)) { this.replay = null; this.hud.setReplay(false); }
-    this.acc += dt;
+    const cutting = !!this.cut;
+    if (this.cut) this.tickCut(dt, input.shoot || input.pass || input.lob || input.trick || !!input2?.shoot || !!input2?.pass || !!input2?.lob || !!input2?.trick);
+    // Slow motion just after a super's cutscene: the sim runs at under half speed for a moment.
+    this.acc += this.slowmo > 0 ? dt * 0.4 : dt;
+    this.slowmo = Math.max(0, this.slowmo - dt);
     const step = 1 / 60;
     let steps = 0;
-    while (!replaying && this.acc >= step && steps < 8) {
+    while (!replaying && !cutting && this.acc >= step && steps < 8) {
       const once = { shoot: false, pass: false, lob: false, switchPlayer: false, pause: false, trick: false };
       this.sim.step(step, steps === 0 ? input : { ...input, ...once }, input2 ? (steps === 0 ? input2 : { ...input2, ...once }) : undefined);
       const live = this.sim.phase === 'play' || this.sim.phase === 'setpiece' || this.sim.phase === 'kickoff';
@@ -443,11 +460,16 @@ export class MatchScene {
       if (live || (this.replay && !this.replay.frames.length && this.afterGoal < REPLAY_AFTER)) { this.record(); if (!live) this.afterGoal++; }
       this.acc -= step;
       steps++;
+      // A super has been called: show its cutscene before it plays out (the sim waits for it).
+      if (this.sim.superPending && !this.cut) {
+        this.startCut();
+        if (this.cut) { this.acc = 0; break; }
+      }
     }
-    if (replaying) this.acc = 0;
+    if (replaying || cutting) this.acc = 0;
     // The first step has used the taps (a paused sim steps too, and drops them). Taps during a replay
     // are dropped as well, so they do not take the kick-off the moment it ends.
-    if (steps > 0 || replaying) { this.latches[0].clear(); this.latches[1].clear(); }
+    if (steps > 0 || replaying || cutting) { this.latches[0].clear(); this.latches[1].clear(); }
     for (const ev of this.sim.events) {
       this.sfx.play(ev);
       if (ev.type === 'fulltime') music.jingle(this.fullTimeJingle());
@@ -518,7 +540,12 @@ export class MatchScene {
         celebrate: celebrating >= 0 ? p.celebrate : null, celebrateT: this.sim.phaseTimer, move: p.move, moveAnim: p.moveAnim, hold: b.owner === p && p.handling,
         kickKind: p.kickKind, charge: p.charge, ready: this.sim.phase === 'kickoff' && b.owner !== p, call: p === this.caller,
         throwIn: this.sim.phase === 'setpiece' && sp?.kind === 'throwin' && sp.taker === p && b.owner === p };
-      m.animate(dt, st);
+      if (this.cut && p === this.cut.p) {
+        // The hero strikes a pose while everyone else is frozen mid-stride.
+        st.mood = 'happy';
+        if (this.cut.kind === 'rocket') { st.charge = 1; st.kickKind = 'shot'; } else st.cheer = true;
+      }
+      m.animate(this.cut && p !== this.cut.p ? dt * 0.02 : dt, st);
       const isP1 = p === this.sim.controlled;
       const isP2 = p === this.sim.controlled2;
       m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? P1_RING : isP2 ? P2_RING : 0xffffff);
@@ -565,9 +592,79 @@ export class MatchScene {
     this.camLook.lerp(crowdShot ? crowdShot.look : new THREE.Vector3(this.camTarget.x, 0.5, this.camTarget.z), k);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
+    if (this.cut) this.cutCamera();
 
     this.renderer.render(this.scene, this.camera);
   };
+
+  /** A super has been called: start its cutscene, or with "No cutscenes" just its banner. */
+  private startCut(): void {
+    const s = this.sim.superPending;
+    if (!s) return;
+    try {
+      const yours = this.sim.isHuman(s.side);
+      const quick = this.superMode === 'quick' || this.cutsBroken;
+      this.hud.superStart(s.kind, s.p.info, yours, this.sim.teams[s.side].short, quick);
+      if (!this.calm) this.aura.burst(s.p.pos.x, s.p.pos.z, SUPERS[s.kind].hex);
+      if (quick) return;
+      const from = this.camera.position.clone();
+      this.cut = {
+        t: 0, dur: this.calm ? 1.2 : yours ? 2.2 : 1.6, p: s.p, kind: s.kind, from, look: this.camLook.clone(),
+        angle: Math.atan2(from.z - s.p.pos.z, from.x - s.p.pos.x),
+      };
+    } catch (e) { this.cutFailed(e); }
+  }
+
+  /** Time the cutscene (it waits while the game is paused); a tap skips the rest of it. */
+  private tickCut(dt: number, tapped: boolean): void {
+    const c = this.cut!;
+    if (this.sim.phase === 'paused') return;
+    c.t += dt;
+    // A hard stop as well, so nothing can ever leave play frozen.
+    if (c.t >= c.dur || c.t > 4 || (tapped && c.t > 0.5)) this.endCut();
+  }
+
+  private endCut(): void {
+    const c = this.cut;
+    this.cut = null;
+    try { this.hud.superEnd(); } catch { /* the overlay is only decoration */ }
+    // The normal camera eases back from wherever the cutscene left it.
+    this.camPos.copy(this.camera.position);
+    if (c) this.camLook.set(c.p.pos.x, 0.8, c.p.pos.z);
+    if (c && !this.calm) { this.slowmo = 0.9; this.sfx.play('superGo'); }
+  }
+
+  private cutFailed(e: unknown): void {
+    console.warn('Super skill cutscenes switched off for this match after an error', e);
+    this.cutsBroken = true;
+    this.cut = null;
+    try { this.hud.superEnd(); } catch { /* nothing more to undo */ }
+  }
+
+  /** The camera swoops down to the hero and circles them, with a shake as the super fires up. */
+  private cutCamera(): void {
+    const c = this.cut!;
+    try {
+      const k = 0.7 + 0.5 * this.sim.stats.scale;
+      const head = new THREE.Vector3(c.p.pos.x, 0.85 * k, c.p.pos.z);
+      if (!this.calm) {
+        const u = Math.min(1, c.t / c.dur);
+        const a = c.angle + c.t * 0.45;
+        const r = (5.2 - 2.3 * u) * k, h = (2.3 - 0.9 * u) * k;
+        const orbit = new THREE.Vector3(c.p.pos.x + Math.cos(a) * r, h, c.p.pos.z + Math.sin(a) * r);
+        const swoop = 1 - Math.pow(1 - Math.min(1, c.t / 0.45), 3);
+        const pos = c.from.clone().lerp(orbit, swoop);
+        const look = c.look.clone().lerp(head, swoop);
+        const shake = c.t < 0.55 ? 0.12 * k * (1 - c.t / 0.55) : 0;
+        pos.x += (Math.random() - 0.5) * shake;
+        pos.y += (Math.random() - 0.5) * shake;
+        this.camera.position.copy(pos);
+        this.camera.lookAt(look);
+      }
+      const v = head.project(this.camera);
+      this.hud.superFocus((v.x + 1) / 2, (1 - v.y) / 2);
+    } catch (e) { this.cutFailed(e); }
+  }
 
   /** A fanfare when the player wins (or in two-player and training), a warm "well played" otherwise. */
   private fullTimeJingle(): 'win' | 'draw' {
@@ -585,7 +682,17 @@ export class MatchScene {
   private effects(dt: number): void {
     this.puffs.update(dt);
     const b = this.sim.ball;
-    this.trail.update(dt, this.ball.group.position, !this.calm && !b.owner && Math.hypot(b.vel.x, b.vel.z) > this.sim.stats.power * 1.05);
+    // A Rocket Shot streaks orange and a Magic Pass purple, bigger than the usual gold.
+    const colour = b.superShot ? SUPERS.rocket.hex : b.superPass ? SUPERS.magic.hex : null;
+    if (colour !== this.trailColour) { this.trailColour = colour; this.trail.setColour(colour); }
+    this.trail.update(dt, this.ball.group.position, !this.calm && !b.owner && (colour !== null || Math.hypot(b.vel.x, b.vel.z) > this.sim.stats.power * 1.05));
+    // While a super lasts (a dash, a slide, the gloves), its glow stays with the player.
+    const lasting = this.sim.players.find((p) => p.superKind && p.superTime > 0 && p.superKind !== 'rocket' && p.superKind !== 'magic');
+    this.aura.follow(lasting?.pos.x ?? 0, lasting?.pos.z ?? 0, !!lasting && !this.calm);
+    this.aura.update(dt);
+    if (lasting && !this.calm && (lasting.superKind === 'turbo' || lasting.superKind === 'bulldozer') && Math.hypot(lasting.vel.x, lasting.vel.z) > 1) {
+      this.puffs.burst(lasting.pos.x, lasting.pos.z, 1, 0.35 * this.sim.stats.scale + 0.2); // dust kicked up behind them
+    }
     if (this.calm) return;
     for (const p of this.sim.players) {
       const busy = p.tackleTimer > 0.25 || p.diveAnim > 0.4;
@@ -620,6 +727,7 @@ export class MatchScene {
     this.ball.dispose();
     disposeObject(this.trail.group);
     disposeObject(this.puffs.group);
+    disposeObject(this.aura.group);
     disposeObject(this.marker);
     this.sun.dispose();
     // Nobody is wearing a kit or pulling a face now: free the cached ones, bar any still held.

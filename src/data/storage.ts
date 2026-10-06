@@ -28,7 +28,11 @@ interface Settings {
   halfLengthSeconds: number; difficulty: 'easy' | 'normal' | 'hard'; tutorialDone: boolean; graphics: GraphicsQuality;
   /** Beginner help in every match: a gentler computer team and help aiming shots. */
   beginnerHelp: boolean;
+  /** Super skills: on with their cutscenes, on without them, or off. */
+  supers: SuperChoice;
 }
+
+export type SuperChoice = 'full' | 'quick' | 'off';
 
 interface SaveFile {
   teams: Team[];
@@ -44,7 +48,7 @@ let cache: SaveFile | null = null;
 const devicePrefersLess = (): boolean => typeof window !== 'undefined' && 'matchMedia' in window && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function freshSettings(): Settings {
-  return { sound: true, music: true, commentary: true, musicVolume: 0.7, voiceVolume: 1, sfxVolume: 1, reduceMotion: devicePrefersLess(), motion: 'auto', halfLengthSeconds: 120, difficulty: 'normal', tutorialDone: false, graphics: 'auto', beginnerHelp: false };
+  return { sound: true, music: true, commentary: true, musicVolume: 0.7, voiceVolume: 1, sfxVolume: 1, reduceMotion: devicePrefersLess(), motion: 'auto', halfLengthSeconds: 120, difficulty: 'normal', tutorialDone: false, graphics: 'auto', beginnerHelp: false, supers: 'full' };
 }
 
 function fresh(): SaveFile {
@@ -204,6 +208,7 @@ function readSettings(s: Partial<Settings> | undefined): Settings {
     // Saves from before the tutorial existed belong to players who already know the controls.
     tutorialDone: bool(o.tutorialDone, true),
     beginnerHelp: bool(o.beginnerHelp, false),
+    supers: oneOf(['full', 'quick', 'off'] as const, o.supers, d.supers),
     graphics: oneOf(['auto', 'low', 'medium', 'high'] as const, o.graphics, d.graphics),
   };
 }

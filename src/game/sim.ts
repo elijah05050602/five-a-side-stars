@@ -4,6 +4,7 @@ import { startingFive } from '../data/defaults';
 import { assignSlots, formationById } from '../data/formations';
 import { averageStars, skillMul } from '../data/skills';
 import type { InputState } from './input';
+import { SUPER_FILL, SUPER_TIME, type SuperKind } from './supers';
 
 /** Horizontal vector helpers (x along the pitch, z across it). */
 export interface V2 { x: number; z: number }
@@ -134,6 +135,9 @@ export interface SimPlayer {
    * 1 = stopped at the line by a push, 2 = the stick was let go, so the next push out drops it to their feet.
    */
   edgeHold: 0 | 1 | 2;
+  /** The super skill this player is doing, and the seconds of it left. */
+  superKind: SuperKind | null;
+  superTime: number;
   mul: SkillMuls;
   match: PlayerMatchStats;
 }
@@ -174,6 +178,9 @@ export interface SimBall {
   lofted: boolean;
   /** Team-mate whose completed pass set up the current possession; credited with an assist on a goal. */
   assist: SimPlayer | null;
+  /** A Rocket Shot in flight (harder to save), or a Magic Pass (nobody can cut it out). */
+  superShot: boolean;
+  superPass: boolean;
 }
 
 export type Phase = 'kickoff' | 'play' | 'setpiece' | 'goal' | 'halftime' | 'fulltime' | 'paused';
@@ -198,7 +205,7 @@ export interface SetPiece {
 export interface GoalEvent { side: Side; scorer: Player; minute: number; ownGoal: boolean }
 
 export interface SimEvent {
-  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'touch' | 'shot' | 'foul' | 'whistle' | 'miss' | 'restart' | 'trick';
+  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'touch' | 'shot' | 'foul' | 'whistle' | 'miss' | 'restart' | 'trick' | 'super';
   /** foul: the set piece awarded; restart: corner, throw-in or goal kick; trick: the skill move. */
   kind?: SetPieceKind | TrickKind;
   side?: Side;
@@ -207,6 +214,8 @@ export interface SimEvent {
   ok?: boolean;
   /** shot: it was a header. */
   header?: boolean;
+  /** super: which one. */
+  superKind?: SuperKind;
 }
 
 export interface SimConfig {
@@ -227,6 +236,8 @@ export interface SimConfig {
   cpuLevel?: number;
   /** Beginner help: a gentler computer team, and the humans' shots are steered towards the goal. */
   assist?: boolean;
+  /** Super skills are on (a live match only; matches played in the background leave them off). */
+  supers?: boolean;
 }
 
 export interface Shootout {
@@ -358,6 +369,10 @@ export class MatchSim {
   /** The kid leading the goal celebration (null when there is none). */
   celebrator: SimPlayer | null = null;
   private celebrationSpot: V2 = v();
+  /** Each side's star meter, 0 to 1. Full means a super skill is ready. */
+  superMeter: [number, number] = [0, 0];
+  /** A super that has been called. It plays out on the next step, so a cutscene can show it first. */
+  superPending: { p: SimPlayer; kind: SuperKind; side: Side } | null = null;
 
   constructor(readonly config: SimConfig) {
     this.teams = [config.home, config.away];
@@ -367,7 +382,7 @@ export class MatchSim {
     this.goalWidth = this.stats.goalWidth;
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
-    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null };
+    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null, superShot: false, superPass: false };
     // Beginner help (Starter) starts from an Easy computer team, whatever was picked before, and then it runs and
     // thinks slower, tackles and saves softer, and shoots worse from closer in. League play keeps its tier's strength.
     const base = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.assist ? 'easy' : config.difficulty];
@@ -389,7 +404,7 @@ export class MatchSim {
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, distanceRun: 0, isKeeper: info.position === 'GK',
           speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, misread: 0, readFlight: -1, kickKind: 'pass', penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
-          celebrate: null, move: null, moveAnim: 0, handling: false, edgeHold: 0,
+          celebrate: null, move: null, moveAnim: 0, handling: false, edgeHold: 0, superKind: null, superTime: 0,
           mul, match: freshMatchStats(),
         };
         this.players.push(p);
@@ -597,6 +612,18 @@ export class MatchSim {
     if (this.config.humanSide !== null) inputs[this.config.humanSide] = input;
     if (this.config.humanSide2 != null) inputs[this.config.humanSide2] = input2 ?? IDLE_INPUT;
     for (const hs of [0, 1] as Side[]) if (inputs[hs]) this.updateControlledSelection(inputs[hs]!, hs);
+    const eventsBefore = this.events.length;
+    if (this.supersOn) this.safely(() => {
+      if (this.superPending) {
+        const s = this.superPending;
+        this.superPending = null;
+        if (this.phase === 'play') this.runSuper(s.p, s.kind);
+        else this.superMeter[s.side] = 1; // the whistle went first: keep it for later
+      }
+      // With a full meter, the trick button calls the super instead.
+      for (const hs of [0, 1] as Side[]) if (inputs[hs]?.trick && this.callSuper(hs)) inputs[hs] = { ...inputs[hs]!, trick: false };
+      this.cpuSupers();
+    });
     for (const p of this.players) {
       p.kickCooldown = Math.max(0, p.kickCooldown - dt);
       p.tackleTimer = Math.max(0, p.tackleTimer - dt);
@@ -611,6 +638,11 @@ export class MatchSim {
       p.trickBoost = Math.max(0, p.trickBoost - dt);
       p.trickCooldown = Math.max(0, p.trickCooldown - dt);
       if (p.trickAnim <= 0) p.trickKind = null;
+      if (p.superKind) {
+        p.superTime = Math.max(0, p.superTime - dt);
+        if (p.superTime <= 0) p.superKind = null;
+        else if (p.superKind === 'slide' && this.supersOn) { this.safely(() => this.superSlide(p)); continue; }
+      }
       if (this.keeperCommitted(p)) continue; // mid-dive or getting up: no steering until back on their feet
       if (p.isKeeper && p.handling && this.ball.owner === p && this.phase === 'play' && p.holdTime > KEEPER_HOLD_LIMIT) {
         this.keeperAutoLob(p);
@@ -621,6 +653,7 @@ export class MatchSim {
       else this.driveAI(p, dt);
     }
     this.integratePlayers(dt);
+    if (this.supersOn) this.safely(() => this.bulldoze());
     this.keepHandsInBox();
     this.keepKeeperOutOfNet();
     this.updateFacing(dt);
@@ -630,7 +663,157 @@ export class MatchSim {
     this.resolvePossession(dt);
     this.checkGoal();
     this.checkOut();
-    if (this.ball.owner) this.lastOwnerSide = this.ball.owner.side;
+    if (this.ball.owner) {
+      this.lastOwnerSide = this.ball.owner.side;
+      this.ball.superShot = false;
+      this.ball.superPass = false;
+    }
+    if (this.supersOn) this.safely(() => this.fillSupers(dt, eventsBefore));
+  }
+
+  /** Set if super skill code ever fails: they switch off for the rest of the match, and the match carries on. */
+  private supersBroken = false;
+  get supersOn(): boolean { return !!this.config.supers && this.mode === 'match' && !this.supersBroken; }
+
+  private safely(fn: () => void): void {
+    try { fn(); } catch (e) {
+      this.supersBroken = true;
+      this.superPending = null;
+      for (const p of this.players) { p.superKind = null; p.superTime = 0; }
+      console.warn('Super skills switched off for this match after an error', e);
+    }
+  }
+
+  /** The super a side would do right now, and who does it; null when there is nothing to do. */
+  superFor(side: Side): { p: SimPlayer; kind: SuperKind } | null {
+    if (!this.supersOn || this.phase !== 'play' || this.superPending) return null;
+    const o = this.ball.owner;
+    const p = this.controlledBy[side] ?? (o && o.side === side ? o : this.nearestOutfield(this.teamOf(side), this.ball.pos));
+    if (!p) return null;
+    if (o === p) {
+      const byPosition: Record<Position, SuperKind> = { ATT: 'rocket', WING: 'turbo', MID: 'magic', DEF: 'bulldozer', GK: 'magic' };
+      return { p, kind: p.isKeeper ? 'magic' : byPosition[p.info.position] };
+    }
+    if (o && o.side !== side) {
+      if (!p.isKeeper && !(o.isKeeper && o.handling) && dist(p.pos, o.pos) < 7) return { p, kind: 'slide' };
+      const keeper = this.teamOf(side).find((q) => q.isKeeper);
+      return keeper ? { p: keeper, kind: 'gloves' } : null;
+    }
+    return !o && !p.isKeeper ? { p, kind: 'turbo' } : null;
+  }
+
+  superReady(side: Side): boolean { return this.superMeter[side] >= 1 && this.superFor(side) !== null; }
+
+  /** Spend a full meter on a super. It plays out next step. */
+  private callSuper(side: Side): boolean {
+    if (this.superMeter[side] < 1) return false;
+    const s = this.superFor(side);
+    if (!s) return false;
+    this.superMeter[side] = 0;
+    this.superPending = { ...s, side };
+    this.events.push({ type: 'super', side, player: s.p.info, superKind: s.kind });
+    return true;
+  }
+
+  /** How strong the computer side is, 0 (Easy) to 1 (Hard). */
+  private cpuLevel(): number {
+    return this.config.cpuLevel ?? { easy: 0, normal: 0.5, hard: 1 }[this.config.difficulty];
+  }
+
+  /** The meter fills with time on the ball and a bit more for shots, skill moves and saves. A computer team's fills slower. */
+  private fillSupers(dt: number, from: number): void {
+    const rate = (side: Side) => (this.isHuman(side) ? 1 : this.config.assist ? 0 : 0.45 + 0.45 * this.cpuLevel());
+    const add = (side: Side, n: number) => { this.superMeter[side] = Math.min(1, this.superMeter[side] + n * rate(side)); };
+    if (this.phase === 'play' && !this.superPending) for (const side of [0, 1] as Side[]) add(side, dt / SUPER_FILL);
+    for (let i = from; i < this.events.length; i++) {
+      const e = this.events[i];
+      if (e.side === undefined) continue;
+      if (e.type === 'shot') add(e.side, 0.05);
+      else if (e.type === 'trick' && e.ok) add(e.side, 0.1);
+      else if (e.type === 'save') add(e.side, 0.12);
+      else if (e.type === 'goal') add((1 - e.side) as Side, 0.3); // a lift for the team that conceded
+    }
+  }
+
+  /** The computer uses its super when it is worth it. Rocket Shots and Giant Gloves wait for Hard, so young players are not swamped. */
+  private cpuSupers(): void {
+    for (const side of [0, 1] as Side[]) {
+      if (this.isHuman(side) || this.superMeter[side] < 1 || this.superPending) continue;
+      const s = this.superFor(side);
+      if (!s) continue;
+      const b = this.ball;
+      let go: boolean;
+      if (s.kind === 'rocket') go = this.cpuLevel() >= 0.8 && Math.abs(this.goalX(side) - b.pos.x) < this.length * 0.4;
+      else if (s.kind === 'gloves') go = this.cpuLevel() >= 0.8 && Math.abs(this.ownGoalX(side) - b.pos.x) < this.length * 0.3;
+      else if (s.kind === 'slide') go = dist(s.p.pos, b.pos) < 4;
+      else go = Math.random() < this.stepDt * 0.5;
+      if (go) this.callSuper(side);
+    }
+  }
+
+  private runSuper(p: SimPlayer, kind: SuperKind): void {
+    const b = this.ball;
+    p.superKind = kind;
+    p.superTime = SUPER_TIME[kind];
+    if (kind === 'rocket' || kind === 'magic') {
+      p.superTime = 0.5; // long enough for the effects to see it
+      if (b.owner !== p) return;
+      if (kind === 'rocket') {
+        // Low and hard into the corner away from the keeper. It can still be saved, just not often.
+        const keeper = this.teamOf((1 - p.side) as Side).find((q) => q.isKeeper);
+        const corner = (keeper && keeper.pos.z > 0 ? -1 : 1) * this.goalWidth * 0.36;
+        this.kick(p, v(this.goalX(p.side) - p.pos.x, corner - p.pos.z), this.stats.power * 1.6, this.stats.power * 0.05);
+        p.kickKind = 'shot';
+        p.match.shots++;
+        b.superShot = true;
+        this.events.push({ type: 'shot', side: p.side, player: p.info });
+      } else {
+        this.pass(p, v(this.goalX(p.side) - p.pos.x, 0), 1.15, false);
+        b.superPass = true;
+      }
+    } else if (kind === 'slide') p.tackleTimer = 0.8;
+  }
+
+  /** Super Slide: a flying tackle at the ball that always wins it, unless it is in the keeper's hands. */
+  private superSlide(p: SimPlayer): void {
+    const b = this.ball, o = b.owner;
+    if (o === p || (o && o.side === p.side)) { p.superTime = 0; p.superKind = null; return; }
+    this.moveTowards(p, o ? o.pos : b.pos, 1.9);
+    if (dist(p.pos, b.pos) > 0.5 * this.stats.scale + 0.55 || b.y > 0.6 * this.stats.scale + 0.3) return;
+    p.superTime = 0;
+    p.superKind = null;
+    if (o && o.isKeeper && o.handling) return;
+    if (o) { o.stunAnim = 1; o.kickCooldown = 0.7; }
+    b.owner = p;
+    b.lastTouch = p;
+    b.assist = null;
+    b.wasPass = false;
+    b.vel = v(p.vel.x, p.vel.z);
+    p.holdTime = 0;
+    p.match.tackles++;
+  }
+
+  /** A Bulldozer knocks anyone in the way aside. */
+  private bulldoze(): void {
+    for (const p of this.players) {
+      if (p.superKind !== 'bulldozer') continue;
+      for (const q of this.players) {
+        if (q.side === p.side) continue;
+        const d = dist(p.pos, q.pos), reach = p.radius + q.radius + 0.2;
+        if (d >= reach || (q.isKeeper && q.handling)) continue;
+        const n = d > 1e-3 ? norm(v(q.pos.x - p.pos.x, q.pos.z - p.pos.z)) : v(0, 1);
+        q.pos.x += n.x * (reach - d + 0.3);
+        q.pos.z += n.z * (reach - d + 0.3);
+        q.vel = v(n.x * 3, n.z * 3);
+        q.stunAnim = 1;
+        q.kickCooldown = Math.max(q.kickCooldown, 0.6);
+      }
+    }
+  }
+
+  /** A keeper's reach: the Super keeper perk, Diving stars and Giant Gloves. */
+  private reachOf(p: SimPlayer): number {
+    return this.stats.keeperReach * (p.info.special === 'keeper' ? 1.25 : 1) * p.mul.reach * (p.superKind === 'gloves' ? 1.6 : 1);
   }
 
   /**
@@ -1444,7 +1627,8 @@ export class MatchSim {
    */
   pace(p: SimPlayer): number {
     const late = this.mode === 'match' ? clamp(this.clock / (this.config.halfSeconds * 2), 0, 1) : 0;
-    return p.speedMul * (1 - (0.05 * late) / p.mul.stamina);
+    const boost = p.superKind === 'turbo' ? 1.5 : p.superKind === 'bulldozer' ? 1.25 : 1;
+    return p.speedMul * boost * (1 - (0.05 * late) / p.mul.stamina);
   }
 
   /** How far a foot reaches from the body to play the ball. */
@@ -1641,13 +1825,14 @@ export class MatchSim {
       const o = b.owner;
       if (o.isKeeper && (o.handling || this.inOwnBox(o)) && this.phase !== 'kickoff') return; // nobody tackles a keeper in their own box; outside it they are fair game
       if (this.mode === 'tutorial') return; // nobody tackles while you learn
+      if (o.superKind === 'turbo' || o.superKind === 'bulldozer') return; // too quick, or too strong, to tackle
       // Between touches the ball is away from the dribbler's feet, and anyone can nick it.
       const exposed = dist(o.pos, b.pos) > this.touchRange(o) + 0.15;
       for (const p of this.players) {
         if (p.side === o.side || p.kickCooldown > 0) continue;
         const d = dist(p.pos, b.pos);
         if (exposed && p.tackleTimer <= 0) {
-          const kr = this.stats.keeperReach * (p.info.special === 'keeper' ? 1.25 : 1) * p.mul.reach;
+          const kr = this.reachOf(p);
           const reach = p.isKeeper ? kr * 0.75 : controlR;
           if (d < reach && b.y < 0.6 * this.stats.scale + 0.2) {
             const isCpu = !this.isHuman(p.side);
@@ -1711,8 +1896,9 @@ export class MatchSim {
     let best: SimPlayer | null = null, bd = Infinity;
     for (const p of this.players) {
       if (p.kickCooldown > 0) continue;
+      if (b.superPass && b.lastKick && p.side !== b.lastKick.side) continue; // a Magic Pass cannot be cut out
       const d = dist(p.pos, b.pos);
-      const kr = this.stats.keeperReach * (p.info.special === 'keeper' ? 1.25 : 1) * p.mul.reach;
+      const kr = this.reachOf(p);
       const reach = p.isKeeper ? (p.diveAnim > 0 ? kr : p.recover > 0 ? kr * 0.35 : kr * 0.55) : controlR;
       // The intended receiver of a lob can chest or head it down; everyone else needs it at their feet.
       const meantFor = b.wasPass && b.receiver === p;
@@ -1729,7 +1915,7 @@ export class MatchSim {
         // One save attempt per shot, judged at the ball's closest approach. Comfortable
         // balls are caught; the rest is a dive whose odds fall with distance and shot speed.
         if (b.keeperTried === b.flightId) return;
-        const reach = this.stats.keeperReach * (best.info.special === 'keeper' ? 1.25 : 1) * best.mul.reach;
+        const reach = this.reachOf(best);
         const easy = reach * 0.5;
         const rel = v(b.pos.x - best.pos.x, b.pos.z - best.pos.z);
         const closing = rel.x * b.vel.x + rel.z * b.vel.z < 0;
@@ -1739,6 +1925,8 @@ export class MatchSim {
         let pSave = bd < easy ? 0.97 * Math.max(speedFactor, 0.75) : clamp(1 - (bd - easy) / (reach - easy), 0, 1) * speedFactor;
         if (b.penaltyShot) pSave *= bd < easy ? 0.6 : 0.45; // even a keeper who guessed right can be beaten
         pSave *= best.mul.save;
+        if (best.superKind === 'gloves') pSave = Math.min(1, pSave * 1.4 + 0.2);
+        if (b.superShot) pSave *= best.superKind === 'gloves' ? 0.75 : 0.35;
         // A shot from close in leaves the keeper little time, so it is much harder to stop than one from distance.
         const from = b.lastKick ? dist(b.lastKick.pos, best.pos) : 10;
         pSave *= clamp(0.25 + (from / Math.max(ballSpeed, 1)) * 1.4, 0.4, 1);
@@ -1751,7 +1939,8 @@ export class MatchSim {
         // (Judged on the path, since the save is judged a moment before the ball arrives.)
         const along = (rel.x * b.vel.x + rel.z * b.vel.z) / Math.max(ballSpeed, 1e-6);
         const passBy = Math.sqrt(Math.max(0, bd * bd - along * along));
-        const blocked = this.mode !== 'tutorial' && passBy < 0.26 * this.stats.scale + b.radius;
+        // A Rocket Shot is too quick to get the body behind, unless it is struck straight at them.
+        const blocked = this.mode !== 'tutorial' && passBy < (0.26 * this.stats.scale + b.radius) * (b.superShot ? 0.4 : 1);
         const fluffed = Math.random() > pSave;
         if (fluffed && !blocked) return; // beaten
         best.match.saves++;
@@ -1832,6 +2021,8 @@ export class MatchSim {
     b.wasPass = false;
     b.receiver = null;
     b.lofted = false;
+    b.superShot = false;
+    b.superPass = false;
     p.kickCooldown = 0.35;
     p.kickAnim = 1;
     p.kickKind = 'pass';

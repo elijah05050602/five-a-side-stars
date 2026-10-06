@@ -60,7 +60,7 @@ describe('save file', () => {
     expect(t.badge.shape).toBe('shield');
     expect(t.players[0]).toMatchObject({ hairStyle: 'short', boots: '#222222', special: 'none', starter: true });
     expect(t.players[5].starter).toBe(false);
-    expect(getSettings()).toMatchObject({ sound: false, music: true, difficulty: 'normal' });
+    expect(getSettings()).toMatchObject({ sound: false, music: true, difficulty: 'normal', supers: 'full' });
   });
 
   it('starts fresh when the stored JSON is corrupt', () => {

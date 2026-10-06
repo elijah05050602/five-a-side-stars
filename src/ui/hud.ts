@@ -5,6 +5,7 @@ import { TUTORIAL_STEPS, type TutorialCoach, type TutorialStep } from '../game/t
 import { getSettings } from '../data/storage';
 import { CAMERA_HEIGHTS, CAMERA_HEIGHT_LABELS, PORTRAIT_VIEW_LABELS, controlsSentence, firstKey, getControls, moveKeysLabel, saveControls, type CameraHeight, type PortraitView } from '../data/controls';
 import { badgeSvg } from './kitPreview';
+import { SUPERS, type SuperKind } from '../game/supers';
 
 export interface HudRefs {
   joystickZone: HTMLElement;
@@ -22,6 +23,11 @@ export interface HudRefs {
   say(line: string): void;
   /** Show or hide the instant replay frame. */
   setReplay(on: boolean): void;
+  /** A super skill's cutscene overlay (or, with `quick`, just its banner for a moment). */
+  superStart(kind: SuperKind, who: { number: number; name: string }, yours: boolean, team: string, quick: boolean): void;
+  /** Where the hero is on screen, 0..1 across and down, so the glow and speed lines centre on them. */
+  superFocus(x: number, y: number): void;
+  superEnd(): void;
   destroy(): void;
 }
 
@@ -89,11 +95,18 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         <div class="hud-player hud-player-p2" id="hud-player-2"></div>
         <div class="bar"><span class="bar-label">Sprint</span><div class="bar-track"><div class="bar-fill bar-stamina" id="bar-stamina-2"></div></div></div>
         <div class="bar"><span class="bar-label">Power</span><div class="bar-track"><div class="bar-fill bar-power" id="bar-power-2"></div></div></div>
+        <div class="bar bar-super-row" id="bar-super-row-2" hidden><span class="bar-label" id="bar-super-label-2">⭐ Super</span><div class="bar-track"><div class="bar-fill bar-super" id="bar-super-2"></div></div></div>
       </div>
       <div class="hud-player-box" id="hud-player-box">
         <div class="hud-player" id="hud-player"></div>
         <div class="bar"><span class="bar-label">Sprint</span><div class="bar-track"><div class="bar-fill bar-stamina" id="bar-stamina"></div></div></div>
         <div class="bar"><span class="bar-label">Power</span><div class="bar-track"><div class="bar-fill bar-power" id="bar-power"></div></div></div>
+        <div class="bar bar-super-row" id="bar-super-row" hidden><span class="bar-label" id="bar-super-label">⭐ Super</span><div class="bar-track"><div class="bar-fill bar-super" id="bar-super"></div></div></div>
+      </div>
+      <div class="super-cut" id="super-cut" hidden>
+        <div class="sc-halo"></div><div class="sc-lines"></div><div class="sc-vig"></div><div class="sc-letterbox"></div><div class="sc-flash"></div>
+        <div class="sc-burst" aria-hidden="true">SUPER!</div>
+        <div class="sc-ban"><div class="sc-a"></div><div class="sc-b"><span class="sc-ico"></span> <span class="sc-name"></span></div><div class="sc-n"></div></div>
       </div>
       <div class="hud-banner" id="hud-banner"></div>
       <div id="hud-live" aria-live="polite" style="position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap"></div>
@@ -121,6 +134,38 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   const comm = q('hud-comm');
   const commText = q('hud-comm-text');
   const replayFrame = q('replay-frame');
+  const btnTrick = q('btn-trick');
+  const superCut = q('super-cut');
+  const superRows = [q('bar-super-row'), q('bar-super-row-2')];
+  const superBars = [q('bar-super'), q('bar-super-2')];
+  const superLabels = [q('bar-super-label'), q('bar-super-label-2')];
+  let trickShows: SuperKind | 'trick' = 'trick';
+  let superTimer = 0;
+  /** The star meters: a bar for keyboard and controller, and the Trick button that turns into the Super button. */
+  const showSupers = (sim: MatchSim) => {
+    const sides = [sim.config.humanSide, sim.config.humanSide2];
+    sides.forEach((side, i) => {
+      const on = sim.supersOn && side != null;
+      superRows[i].hidden = !on;
+      if (!on || side == null) return;
+      const ready = sim.superReady(side) ? sim.superFor(side) : null;
+      superBars[i].style.width = `${Math.round(sim.superMeter[side] * 100)}%`;
+      superRows[i].classList.toggle('is-ready', !!ready);
+      const label = ready ? `${SUPERS[ready.kind].icon} ${SUPERS[ready.kind].name}! Press Trick` : '⭐ Super';
+      if (superLabels[i].textContent !== label) superLabels[i].textContent = label;
+      if (i !== 0) return;
+      btnTrick.style.setProperty('--meter', sim.superMeter[side].toFixed(2));
+      btnTrick.classList.toggle('has-meter', true);
+      const shows = ready ? ready.kind : 'trick';
+      if (shows === trickShows) return;
+      trickShows = shows;
+      btnTrick.classList.toggle('is-super', !!ready);
+      btnTrick.setAttribute('aria-label', ready ? `Super: ${SUPERS[ready.kind].name}` : 'Trick');
+      btnTrick.innerHTML = ready
+        ? `<span class="abtn-ico" aria-hidden="true">${SUPERS[ready.kind].icon}</span><span class="abtn-txt" aria-hidden="true">Super</span>`
+        : '<span class="abtn-ico" aria-hidden="true">✨</span><span class="abtn-txt" aria-hidden="true">Trick</span>';
+    });
+  };
   let commTimer = 0;
   const say = (text: string) => {
     commText.textContent = text;
@@ -306,6 +351,34 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     btnLob: q('btn-lob'),
     say,
     setReplay(on) { replayFrame.hidden = !on; },
+    superStart(kind, who, yours, team, quick) {
+      const info = SUPERS[kind];
+      superCut.style.setProperty('--c', info.css);
+      superCut.classList.toggle('is-quick', quick);
+      superCut.classList.toggle('is-theirs', !yours);
+      superCut.querySelector('.sc-a')!.textContent = yours ? '⭐ SUPER SKILL!' : `😮 ${team} SUPER!`;
+      superCut.querySelector('.sc-ico')!.textContent = info.icon;
+      superCut.querySelector('.sc-name')!.textContent = info.name.toUpperCase();
+      superCut.querySelector('.sc-n')!.textContent = `#${who.number} ${who.name}`;
+      // Restart the animations from the top.
+      superCut.hidden = true;
+      superCut.classList.remove('is-on');
+      void superCut.offsetWidth;
+      superCut.hidden = false;
+      superCut.classList.add('is-on');
+      say(info.line(who.name));
+      window.clearTimeout(superTimer);
+      if (quick) superTimer = window.setTimeout(() => { superCut.hidden = true; superCut.classList.remove('is-on'); }, 1800);
+    },
+    superFocus(x, y) {
+      superCut.style.setProperty('--hx', `${(x * 100).toFixed(1)}%`);
+      superCut.style.setProperty('--hy', `${(y * 100).toFixed(1)}%`);
+    },
+    superEnd() {
+      window.clearTimeout(superTimer);
+      superCut.hidden = true;
+      superCut.classList.remove('is-on');
+    },
     update(s, events, lines) {
       sbH.textContent = String(s.score[0]);
       if (mode !== 'training') sbA.textContent = String(s.score[1]);
@@ -337,6 +410,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         barStamina2.style.width = `${Math.round(s.controlled2.stamina * 100)}%`;
         barPower2.style.width = `${Math.round(s.controlled2.charge * 100)}%`;
       } else playerBox2.style.display = 'none';
+      showSupers(s);
       events.forEach((ev, i) => {
         const said = lines?.[i] ?? null;
         if (ev.type === 'goal' && ev.player) {

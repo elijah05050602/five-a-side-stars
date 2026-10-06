@@ -171,6 +171,15 @@ export class Sfx {
         noiseBurst(c, out, t, { gain: 0.24, attack: 0.3, decay: 2.4, freq: 600, freqEnd: 1200, q: 0.5 });
         this.clap(t + 0.2, 26, 0.08);
         break;
+      case 'super':
+        this.superSting(t);
+        break;
+      case 'superGo':
+        // The cutscene ends and the super lets rip.
+        this.excitement = 1;
+        noiseBurst(c, out, t, { gain: 0.3, attack: 0.01, decay: 0.7, freq: 3000, freqEnd: 300, q: 0.6 });
+        tone(c, out, t, { freq: 120, freqEnd: 30, type: 'sine', gain: 0.6, attack: 0.004, decay: 0.6 });
+        break;
       case 'foul':
         this.whistle(t, [0.14, 0.14]);
         this.groan(t + 0.1);
@@ -189,6 +198,20 @@ export class Sfx {
       default:
         break;
     }
+  }
+
+  /** A super skill: a whoosh that rises, a deep boom, a shimmering chord and the crowd gasping. */
+  private superSting(t: number): void {
+    const c = this.ctx!, out = this.bus!;
+    this.excitement = 1;
+    noiseBurst(c, out, t, { gain: 0.22, attack: 0.5, decay: 0.25, freq: 250, freqEnd: 4000, q: 0.9 });
+    tone(c, out, t + 0.05, { freq: 90, freqEnd: 28, type: 'sine', gain: 0.7, attack: 0.005, decay: 1.4 });
+    noiseBurst(c, out, t + 0.05, { gain: 0.2, decay: 0.3, freq: 700, q: 0.6 });
+    for (const [i, m] of [60, 67, 72, 76, 79, 84].entries()) {
+      tone(c, out, t + 0.12 + i * 0.06, { freq: midiToHz(m), type: 'triangle', gain: 0.07, attack: 0.01, decay: 1.2 });
+      tone(c, out, t + 0.12 + i * 0.06, { freq: midiToHz(m + 12), type: 'sine', gain: 0.03, attack: 0.01, decay: 0.9, detune: 8 });
+    }
+    this.ooh(t + 0.3, 1);
   }
 
   /** Ball struck: a low thud with a leathery click. Power 0..1. */

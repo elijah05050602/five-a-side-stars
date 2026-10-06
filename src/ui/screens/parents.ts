@@ -1,7 +1,7 @@
 import { soundSettings, wireSoundSettings } from '../soundSettings';
 import { graphicsSettings, wireGraphicsSettings } from '../graphicsSettings';
 import { applyVolumes } from '../../game/audio';
-import { exportSave, getSettings, hasBackup, importSave, requestPersistentStorage, resetAll, restoreBackup, updateSettings, type MotionChoice } from '../../data/storage';
+import { exportSave, getSettings, hasBackup, importSave, requestPersistentStorage, resetAll, restoreBackup, updateSettings, type MotionChoice, type SuperChoice } from '../../data/storage';
 import { getProgress } from '../../data/progress';
 import { music } from '../../game/music';
 import { applyMotionSetting } from '../motion';
@@ -58,6 +58,10 @@ function applySavedSettings(): void {
   applyMotionSetting();
 }
 
+const SUPER_CHOICES: { id: SuperChoice; label: string }[] = [
+  { id: 'full', label: 'On, with cutscenes' }, { id: 'quick', label: 'No cutscenes' }, { id: 'off', label: 'Off' },
+];
+
 function renderParentSettings(root: HTMLElement, router: Router): void {
   const s = getSettings();
   const p = getProgress();
@@ -70,6 +74,10 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
         <div class="field"><span>Motion</span>
           <div class="pills">${MOTION_CHOICES.map((m) => `<button class="pill ${s.motion === m.id ? 'is-active' : ''}" data-motion="${m.id}" ${pressed(s.motion === m.id)}>${m.label}</button>`).join('')}</div>
           <p class="muted small">Calm means no confetti, no wobbling and no goal replays.${s.motion === 'auto' ? ` This device asks for ${s.reduceMotion ? 'calm' : 'full'} motion.` : ''}</p>
+        </div>
+        <div class="field"><span>Super skills</span>
+          <div class="pills">${SUPER_CHOICES.map((m) => `<button class="pill ${s.supers === m.id ? 'is-active' : ''}" data-supers="${m.id}" ${pressed(s.supers === m.id)}>${m.label}</button>`).join('')}</div>
+          <p class="muted small">When the star meter fills, the Trick button becomes a super move that depends on the player's position. Each one starts with a short cutscene that freezes play. If the cutscenes cause trouble on this device, pick "No cutscenes"; "Off" turns super skills off altogether.</p>
         </div>
         ${graphicsSettings()}
       </div>
@@ -109,6 +117,11 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
   wire(root, () => router.go({ name: 'menu' }));
   wireSoundSettings(root);
   wireGraphicsSettings(root);
+  root.querySelectorAll<HTMLElement>('[data-supers]').forEach((b) => b.addEventListener('click', () => {
+    updateSettings({ supers: b.dataset.supers as SuperChoice });
+    renderParentSettings(root, router);
+    root.querySelector<HTMLElement>(`[data-supers="${b.dataset.supers}"]`)?.focus();
+  }));
   root.querySelectorAll<HTMLElement>('[data-motion]').forEach((b) => b.addEventListener('click', () => {
     updateSettings({ motion: b.dataset.motion as MotionChoice });
     applyMotionSetting();

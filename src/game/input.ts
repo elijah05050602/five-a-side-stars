@@ -106,7 +106,7 @@ export class Input {
         ox = cx;
         oy = cy;
       }
-      zone.setPointerCapture(e.pointerId);
+      try { zone.setPointerCapture(e.pointerId); } catch { /* a pointer the browser no longer knows: the touch still counts */ }
       move(e);
     };
     const move = (e: PointerEvent) => {
@@ -150,7 +150,7 @@ export class Input {
   attachButton(el: HTMLElement, action: 'shoot' | 'pass' | 'lob' | 'sprint' | 'switch' | 'trick'): void {
     const down = (e: PointerEvent) => {
       e.preventDefault();
-      el.setPointerCapture(e.pointerId);
+      try { el.setPointerCapture(e.pointerId); } catch { /* as for the joystick */ }
       el.classList.add('is-down');
       this.touchPressed.add(action);
       this.touchHeld.add(action);

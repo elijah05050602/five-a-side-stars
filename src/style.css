@@ -314,6 +314,46 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 .replay-frame::before, .replay-frame::after { content: ''; position: absolute; left: 0; right: 0; height: 9vh; background: #0b1220; }
 .replay-frame::before { top: 0; }
 .replay-frame::after { bottom: 0; }
+
+/* ---------- Super skills ---------- */
+@property --sc-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.super-cut { position: absolute; inset: 0; pointer-events: none; z-index: 6; overflow: hidden; --c: #ffd23f; --hx: 50%; --hy: 55%; }
+.super-cut .sc-halo { position: absolute; left: var(--hx); top: var(--hy); width: 70vmin; height: 70vmin; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--c) 75%, transparent) 0, transparent 62%); mix-blend-mode: screen; animation: sc-halo 0.9s ease-in-out infinite alternate; }
+.super-cut .sc-lines { position: absolute; inset: -10%; opacity: 0.4; background: repeating-conic-gradient(from var(--sc-a) at var(--hx) var(--hy), rgba(255,255,255,0.95) 0 1.4deg, transparent 1.4deg 8deg); -webkit-mask: radial-gradient(circle at var(--hx) var(--hy), transparent 18vmin, #000 45vmin); mask: radial-gradient(circle at var(--hx) var(--hy), transparent 18vmin, #000 45vmin); animation: sc-spin 0.5s linear infinite; }
+.super-cut .sc-vig { position: absolute; inset: 0; background: radial-gradient(ellipse at var(--hx) var(--hy), transparent 20%, rgba(8,12,32,0.55) 58%, rgba(8,12,32,0.9) 100%); animation: sc-fade 0.25s ease-out both; }
+.super-cut .sc-letterbox::before, .super-cut .sc-letterbox::after { content: ''; position: absolute; left: 0; right: 0; height: 11vh; background: #05070f; animation: sc-bar-top 0.3s cubic-bezier(.2,.9,.3,1) both; }
+.super-cut .sc-letterbox::before { top: 0; }
+.super-cut .sc-letterbox::after { bottom: 0; animation-name: sc-bar-bottom; }
+.super-cut .sc-flash { position: absolute; inset: 0; background: #fff; animation: sc-flash 0.45s ease-out both; }
+.super-cut .sc-burst { position: absolute; left: 50%; top: 42%; font: 800 clamp(48px, 16vmin, 140px)/1 var(--font); color: var(--c); -webkit-text-stroke: 4px var(--navy); paint-order: stroke fill; text-shadow: 0 8px 0 var(--navy), 0 0 40px var(--c); transform: translate(-50%, -50%); animation: sc-burst 0.85s cubic-bezier(.2,1.4,.4,1) both; white-space: nowrap; }
+.super-cut .sc-ban { position: absolute; right: 0; top: 50%; padding: 12px 6vw 14px 48px; background: linear-gradient(90deg, transparent, var(--c) 22%); color: var(--navy); font-family: var(--font); text-align: right; transform: translateY(-50%) skewX(-12deg); filter: drop-shadow(0 5px 0 var(--navy)); animation: sc-ban-in 0.45s 0.35s cubic-bezier(.2,1.3,.4,1) both; overflow: hidden; }
+.super-cut .sc-ban::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.75), transparent); animation: sc-shine 0.7s 0.8s ease-in-out both; }
+.super-cut .sc-a { font-size: clamp(13px, 2.4vmin, 18px); font-weight: 700; letter-spacing: 0.08em; }
+.super-cut .sc-b { font-size: clamp(30px, 7.5vmin, 60px); font-weight: 800; line-height: 1; color: #fff; -webkit-text-stroke: 2px var(--navy); paint-order: stroke fill; }
+.super-cut .sc-n { font-size: clamp(14px, 2.8vmin, 20px); font-weight: 700; }
+.super-cut.is-theirs .sc-ban { right: auto; left: 0; padding: 12px 48px 14px 6vw; text-align: left; background: linear-gradient(270deg, transparent, var(--c) 22%); transform: translateY(-50%) skewX(12deg); animation-name: sc-ban-in-left; }
+/* "No cutscenes": just the banner, at the top, and play carries on. */
+.super-cut.is-quick .sc-halo, .super-cut.is-quick .sc-lines, .super-cut.is-quick .sc-vig, .super-cut.is-quick .sc-letterbox, .super-cut.is-quick .sc-flash, .super-cut.is-quick .sc-burst { display: none; }
+.super-cut.is-quick .sc-ban { top: 26%; padding-top: 6px; padding-bottom: 8px; animation-delay: 0s; }
+.super-cut.is-quick .sc-b { font-size: clamp(22px, 5vmin, 36px); }
+@keyframes sc-halo { from { opacity: 0.7; transform: translate(-50%, -50%) scale(0.92); } to { opacity: 1; transform: translate(-50%, -50%) scale(1.08); } }
+@keyframes sc-spin { to { --sc-a: 8deg; } }
+@keyframes sc-fade { from { opacity: 0; } }
+@keyframes sc-bar-top { from { transform: translateY(-100%); } }
+@keyframes sc-bar-bottom { from { transform: translateY(100%); } }
+@keyframes sc-flash { from { opacity: 0.95; } to { opacity: 0; } }
+@keyframes sc-burst { 0% { opacity: 0; transform: translate(-50%, -50%) scale(3) rotate(-8deg); } 30% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-4deg); } 70% { opacity: 1; transform: translate(-50%, -50%) scale(1.08) rotate(-4deg); } 100% { opacity: 0; transform: translate(-50%, -60%) scale(1.4) rotate(-4deg); } }
+@keyframes sc-ban-in { from { transform: translate(110%, -50%) skewX(-12deg); } }
+@keyframes sc-ban-in-left { from { transform: translate(-110%, -50%) skewX(12deg); } }
+@keyframes sc-shine { from { left: -40%; } to { left: 110%; } }
+/* The star meter: a bar for keyboard and controller players, a ring round the Trick button on a touch screen. */
+.bar-fill.bar-super { background: linear-gradient(90deg, #ffb703, #ffd23f, #fff3a0); }
+.bar-super-row.is-ready .bar-label { color: #ffd23f; }
+.bar-super-row.is-ready .bar-track { box-shadow: 0 0 10px 2px rgba(255,210,63,0.9); animation: sc-ready 0.6s ease-in-out infinite alternate; }
+@keyframes sc-ready { from { filter: brightness(1); } to { filter: brightness(1.35); } }
+.abtn-trick.has-meter::before { content: ''; position: absolute; inset: -8px; border-radius: 50%; pointer-events: none; background: conic-gradient(#ffd23f calc(var(--meter, 0) * 1turn), rgba(27,42,65,0.35) 0); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); }
+.abtn-trick.is-super { background: radial-gradient(circle at 35% 30%, #fff3a0, #ffd23f 45%, #f4a000); color: var(--navy); transform: scale(1.25); box-shadow: 0 4px 0 var(--navy), 0 0 0 3px #fff, 0 0 22px 8px rgba(255,210,63,0.9); animation: sc-ready 0.5s ease-in-out infinite alternate; z-index: 1; }
+.abtn-trick.is-super.is-down { transform: scale(1.1); }
 .replay-label { position: absolute; top: calc(9vh + 12px); right: 18px; color: #fff; font-weight: 700; font-size: 22px; letter-spacing: 2px; background: var(--red); padding: 4px 12px; border-radius: 8px; animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: .35; } }
 

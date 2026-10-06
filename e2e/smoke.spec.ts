@@ -86,6 +86,37 @@ test('full time works from the keyboard and the results follow', async ({ page }
   expect(errors).toEqual([]);
 });
 
+test('a super skill plays its cutscene, then the match carries on', async ({ page }) => {
+  const errors: string[] = [];
+  await toLobby(page, errors);
+  await page.locator('#m-play').click();
+  await page.locator('#s-go').click();
+  await expect.poll(() => page.evaluate(() => !!(window as DebugWindow).__match)).toBe(true);
+  type SuperWindow = Window & { __match: { cut: unknown; sim: { phase: string; clock: number; superMeter: number[]; ball: { owner: unknown; pos: unknown }; players: { side: number; isKeeper: boolean; pos: { x: number; z: number }; info: object }[]; goalX: (s: number) => number } } };
+  // Put your striker on the ball with a full star meter, then press Trick (C).
+  await page.evaluate(() => {
+    const s = (window as unknown as SuperWindow).__match.sim;
+    s.phase = 'play';
+    const p = s.players.find((q) => q.side === 0 && !q.isKeeper)!;
+    p.info = { ...p.info, position: 'ATT' };
+    p.pos = { x: s.goalX(0) - 9, z: 1 };
+    s.ball.pos = { ...p.pos };
+    s.ball.owner = p;
+    s.superMeter[0] = 1;
+  });
+  await page.keyboard.press('KeyC');
+  await expect(page.locator('#super-cut')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => !!(window as unknown as SuperWindow).__match.cut)).toBe(true);
+  const frozen = await page.evaluate(() => (window as unknown as SuperWindow).__match.sim.clock);
+  // A tap skips the rest of it; play then carries on.
+  await page.waitForTimeout(800);
+  await page.keyboard.press('KeyX');
+  await expect.poll(() => page.evaluate(() => !!(window as unknown as SuperWindow).__match.cut), { timeout: 30000 }).toBe(false);
+  await expect(page.locator('#super-cut')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => (window as unknown as SuperWindow).__match.sim.clock), { timeout: 30000 }).toBeGreaterThan(frozen + 0.2);
+  expect(errors).toEqual([]);
+});
+
 test('a cup run survives leaving the cup screen', async ({ page }) => {
   const errors: string[] = [];
   await toLobby(page, errors);
