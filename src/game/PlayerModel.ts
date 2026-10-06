@@ -4,7 +4,7 @@ import { cloneRig, loadPlayerAsset, playerAssetNow, type PlayerAsset } from './p
 import { contrastColour, numberTexture, playerAtlas } from './playerAtlas';
 import { faceTexture, type Expression } from './playerFace';
 import { ProceduralPlayerModel } from './ProceduralPlayerModel';
-import { DIVE_AIR_SHARE } from './sim';
+import { DIVE_AIR_SHARE, DRIBBLE_STRIDE } from './sim';
 import { addOutline, addSkinnedOutline, smoothOutlineNormals, toonMaterial } from './toon';
 
 /** Models are drawn bigger than their physical size so the kids read clearly from the camera. */
@@ -39,6 +39,8 @@ export interface AnimState {
   recover?: number;
   /** Sideways speed across the kid's body in m/s (positive = to their right), for a keeper's shuffle. */
   strafe?: number;
+  /** On the ball and running with it (eyes down, a little hunched over it). */
+  dribble?: boolean;
   /** Step-over skill move: 1 as it starts, fading to 0; stepoverDir is which way the feint goes (-1 or 1). */
   stepover?: number;
   stepoverDir?: number;
@@ -73,6 +75,10 @@ const BUILD_SCALE: Record<Build, [number, number, number]> = { small: [0.9, 0.88
 
 /** Rolled onto their side, the kid's body pivots at the feet, so it is raised this much to lie on the grass rather than in it. */
 const LYING_LIFT = 0.3;
+/** Seconds a dribbling tap takes. */
+const TAP_TIME = 0.2;
+/** Time in Running_B when the right foot swings through under the body. */
+const RUN_RIGHT_THROUGH = 0.35;
 
 const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -121,7 +127,11 @@ export class PlayerModel {
   private loco: Loco = 'idle';
   private oneShot: THREE.AnimationAction | null = null;
   private wasStepping = false;
-  private wasKicking = false;
+  private lastKick = 0;
+  /** Seconds left on a dribbling tap with the right foot (a small push, not a full kick). */
+  private tap = 0;
+  /** Which foot the current tap is with (1 = right). */
+  private tapSide = 1;
   private wasDiving = false;
   private wasStunned = false;
   private wasTackling = false;
@@ -376,12 +386,17 @@ export class PlayerModel {
     this.updateFace(st.mood, st.gazeX, st.gazeY, dt);
 
     // One-shots: a kick snaps in over the run; a dive plays once and holds; a tackle knocks you.
-    const kicking = st.kick > 0, diving = st.dive > 0, stunned = st.stun > 0, tackling = st.tackle > 0;
+    // A real kick starts at 1; a dribbling touch only nudges the kick timer up a little.
+    const kickStart = st.kick > this.lastKick + 0.05;
+    const realKick = kickStart && st.kick > 0.5;
+    if (kickStart && !realKick) this.startTap();
+    this.lastKick = st.kick;
+    const kicking = st.kick > 0.3, diving = st.dive > 0, stunned = st.stun > 0, tackling = st.tackle > 0;
     const stepping = (st.stepover ?? 0) > 0;
     // Step-over: a quick dodge one way over the ball (the clip is played fast so it reads as a feint).
     if (stepping && !this.wasStepping && !kicking && !diving) this.startOneShot((st.stepoverDir ?? 1) > 0 ? 'Dodge_Right' : 'Dodge_Left', 2.6, false);
     this.wasStepping = stepping;
-    if (kicking && !this.wasKicking) this.startOneShot('Unarmed_Melee_Attack_Kick', 2.4, false);
+    if (realKick) { this.tap = 0; this.startOneShot('Unarmed_Melee_Attack_Kick', 2.4, false); }
     const recovering = (st.recover ?? 0) > 0;
     const committed = diving || (this.isKeeper && recovering);
     if (diving && !this.wasDiving) {
@@ -393,7 +408,7 @@ export class PlayerModel {
     this.wasCommitted = committed;
     if (stunned && !this.wasStunned && !diving) this.startOneShot('Hit_A', 1.4, false);
     if (tackling && !this.wasTackling && !kicking) this.slide = 0.42;
-    this.wasKicking = kicking; this.wasDiving = diving; this.wasStunned = stunned; this.wasTackling = tackling;
+    this.wasDiving = diving; this.wasStunned = stunned; this.wasTackling = tackling;
 
     // Locomotion from speed; feet speed follows the kid's actual speed.
     // A keeper moving across their goal shuffles side-on in the ready stance instead of running.
@@ -403,7 +418,8 @@ export class PlayerModel {
     if (want !== this.loco) this.switchLoco(want);
     const run = this.actions.get('Running_B'), walk = this.actions.get('Walking_A');
     // Running_B swings each arm with the opposite leg; its stride is longer than Running_A's, so it plays a little faster.
-    if (run) run.setEffectiveTimeScale(THREE.MathUtils.clamp(norm / 3.4, 1, 2.4));
+    // Dribbling locks the stride to the touches: one touch per step, each with the foot coming through.
+    if (run) run.setEffectiveTimeScale(st.dribble ? run.getClip().duration / (2 * DRIBBLE_STRIDE) : THREE.MathUtils.clamp(norm / 3.4, 1, 2.4));
     if (walk) walk.setEffectiveTimeScale(THREE.MathUtils.clamp(norm / 1.8, 0.7, 1.5));
     this.mixer.update(dt);
 
@@ -418,6 +434,8 @@ export class PlayerModel {
     // Little ones run with a wobble: the body sways side to side as they go.
     roll += st.wobble * Math.sin(performance.now() / 180) * 0.12 * Math.min(1, norm / 2);
     if (kicking) lift += 0.07 * scale * Math.sin(st.kick * Math.PI);
+    // Dribbling: hunched a little over the ball, watching it.
+    if (st.dribble) pitch -= 0.12 * Math.min(1, norm / 2);
     if (stunned) roll += 0.22 * st.stun * Math.sin(st.stun * Math.PI * 3);
     if (stepping) roll += (st.stepoverDir ?? 1) * 0.3 * Math.sin((1 - st.stepover!) * Math.PI * 2);
     if (this.slide > 0) {
@@ -461,6 +479,15 @@ export class PlayerModel {
       if (this.armL && this.armR) { this.swingSideways(this.armL, 2.1 * r); this.swingSideways(this.armR, -2.1 * r); }
     }
 
+    // Dribbling tap: the right foot reaches forward and pushes the ball on, over the run cycle.
+    if (this.tap > 0 && this.legR) {
+      this.tap = Math.max(0, this.tap - dt);
+      const k = Math.sin((1 - this.tap / TAP_TIME) * Math.PI);
+      const [push, plant] = this.tapSide > 0 ? [this.legR, this.legL] : [this.legL, this.legR];
+      if (push) this.swingAbout(push, 0, 0, 1, 0.5 * k);
+      if (plant) this.swingAbout(plant, 0, 0, 1, -0.15 * k);
+    }
+
     // Shuffle: little side-steps that open and close the legs, with a hop on each step.
     if (shuffling && this.legL && this.legR) {
       this.shuffleT += dt * (5 + 2.2 * Math.abs(strafe) / scale);
@@ -472,17 +499,43 @@ export class PlayerModel {
     }
   }
 
+  /**
+   * A dribbling touch. While running, nudge the run cycle so the touch lands as a foot swings
+   * through (Running_B brings the right foot through at about 0.35 s and the left half a cycle later)
+   * and push with that foot.
+   */
+  private startTap(): void {
+    this.tap = TAP_TIME;
+    this.tapSide = 1;
+    const run = this.actions.get('Running_B');
+    if (this.loco !== 'run' || !run || this.oneShot) return;
+    const dur = run.getClip().duration;
+    const wrap = (x: number) => ((x % dur) + dur * 1.5) % dur - dur / 2;
+    const toRight = wrap(RUN_RIGHT_THROUGH - run.time), toLeft = wrap(RUN_RIGHT_THROUGH + dur / 2 - run.time);
+    const err = Math.abs(toRight) <= Math.abs(toLeft) ? toRight : toLeft;
+    this.tapSide = err === toRight ? 1 : -1;
+    run.time = (run.time + err * 0.5 + dur) % dur;
+  }
+
   private readonly tmpQ = new THREE.Quaternion();
   private readonly tmpQ2 = new THREE.Quaternion();
   private readonly tmpAxis = new THREE.Vector3();
 
   /** Swing a limb out sideways (about the kid's forward axis; positive lifts a left limb, negative a right one) on top of the clip. */
   private swingSideways(bone: THREE.Object3D, angle: number): void {
+    this.swingAbout(bone, 1, 0, 0, angle);
+  }
+
+  /**
+   * Rotate a bone about an axis given in the kid's body frame (x forward, y up, z their right) on top of the clip.
+   * About z, a positive angle swings a leg forward.
+   */
+  private swingAbout(bone: THREE.Object3D, ax: number, ay: number, az: number, angle: number): void {
     const parent = bone.parent;
     if (!parent) return;
     this.body.updateWorldMatrix(true, true);
-    // The kid's forward (body +x) in world space, then in the leg's parent space.
-    this.tmpAxis.set(1, 0, 0).applyQuaternion(this.body.getWorldQuaternion(this.tmpQ));
+    // The body-frame axis in world space, then in the bone's parent space.
+    this.tmpAxis.set(ax, ay, az).applyQuaternion(this.body.getWorldQuaternion(this.tmpQ));
     this.tmpAxis.applyQuaternion(parent.getWorldQuaternion(this.tmpQ2).invert()).normalize();
     bone.quaternion.premultiply(this.tmpQ.setFromAxisAngle(this.tmpAxis, angle));
   }

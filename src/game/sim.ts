@@ -220,7 +220,9 @@ export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootH
 export const RUNOFF_SIDE = 1.2;
 export const RUNOFF_END = 1.6;
 /** Seconds between dribbling touches. */
-const DRIBBLE_STRIDE = 0.38;
+export const DRIBBLE_STRIDE = 0.38;
+/** Seconds a kick-off taker may wait before the ball is played to a team-mate for them. */
+const KICKOFF_WAIT = 8;
 /** A dive lasts 1 / DIVE_RATE seconds: DIVE_AIR seconds of it in the air, the rest lying on the grass. */
 const DIVE_RATE = 2;
 const DIVE_AIR = 0.32;
@@ -449,7 +451,8 @@ export class MatchSim {
         if (atts[1]) atts[1].pos = v(-dir * 2.2, W * 0.1);
       }
     });
-    this.phase = 'kickoff';
+    // Target practice has no kick-off: you can run with it straight away. In a match the taker must pass or shoot first.
+    this.phase = this.mode === 'training' ? 'play' : 'kickoff';
     this.phaseTimer = 0;
     this.setPiece = null;
     for (const hs of [0, 1] as Side[]) {
@@ -498,8 +501,11 @@ export class MatchSim {
     this.clock += dt;
     this.pressureTimer -= dt;
     if (this.phase === 'kickoff') {
+      // The taker has to pass or shoot to start play. If nobody does, the ball is played to a team-mate for them.
       this.phaseTimer += dt;
-      if (this.phaseTimer > 4) this.phase = 'play';
+      const taker = this.ball.owner;
+      if (!taker) { if (this.phaseTimer > 4) this.phase = 'play'; }
+      else if (this.phaseTimer > KICKOFF_WAIT) this.pass(taker, null, 1, false);
     }
     if (this.phase === 'setpiece' && this.setPiece) {
       const sp = this.setPiece;
@@ -679,6 +685,18 @@ export class MatchSim {
   }
 
   private driveHuman(p: SimPlayer, input: InputState, _dt: number): void {
+    if (this.phase === 'kickoff' && this.ball.owner === p) {
+      // Kick-off: no running with it. Turn to aim, then pass, lob or shoot to get the game going.
+      this.steer(p, v(), 30);
+      const aimV = v(input.moveX, input.moveZ);
+      const aim = len(aimV) > 0.05 ? aimV : null;
+      if (aim) p.facing = Math.atan2(aimV.z, aimV.x);
+      if (input.shootHeld) p.charge = Math.min(1, p.charge + _dt / 0.7);
+      else if (p.charge > 0) { this.shoot(p, aim, 0.85 + 0.45 * p.charge); p.charge = 0; }
+      else if (input.pass) this.pass(p, aim, 1, false);
+      else if (input.lob) this.lob(p, aim);
+      return;
+    }
     const sp = this.phase === 'setpiece' ? this.setPiece : null;
     if (sp && p === sp.taker) {
       if (sp.timer < sp.wait) { this.moveTowards(p, sp.stand, 1.1); return; } // walking over to the ball
@@ -776,6 +794,17 @@ export class MatchSim {
     const teamHasBall = b.owner !== null && b.owner.side === p.side;
     const oppHasBall = b.owner !== null && b.owner.side !== p.side;
 
+    if (b.owner === p && this.phase === 'kickoff') {
+      // Kick-off taker: stands on the ball until they pass it (or shoot, if nobody is free).
+      this.steer(p, v(), 30);
+      if (p.think <= 0) {
+        p.think = isCpuTeam ? diff.think : 0.3;
+        const mate = this.bestPassTarget(p, null);
+        if (mate) this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z), 1, false);
+        else if (this.phaseTimer > 1.5) this.shoot(p, null, 1);
+      }
+      return;
+    }
     if (b.owner === p) {
       // Carrier: make decisions a few times a second, when the ball is at their feet.
       if (!this.canKick(p)) {
@@ -795,11 +824,6 @@ export class MatchSim {
         const pressure = Math.min(pressureNow, pressureSoon);
         const range = this.length * (isCpuTeam ? diff.shootRange : 0.38);
         const angleClear = Math.abs(p.pos.z) < this.width * 0.35;
-        if (this.phase === 'kickoff') {
-          const mate = this.bestPassTarget(p, null);
-          if (mate) this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z), 1, false);
-          return;
-        }
         if (dGoal < range && angleClear && (pressure < 1.6 || dGoal < range * 0.6 || p.holdTime > 1.5)) {
           this.shoot(p, null, rand(0.85, 1.1));
           return;
