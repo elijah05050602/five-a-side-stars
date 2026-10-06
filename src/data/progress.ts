@@ -123,7 +123,6 @@ export function recordResult(r: MatchResult): Sticker[] {
   }
   if ([...perScorer.values()].some((n) => n >= 3)) award(p, 'hat-trick', out);
   if (h > a && behind) award(p, 'comeback', out);
-  if (r.shootoutWon) { p.shootoutsWon++; award(p, 'shootout', out); }
   persist();
   return out;
 }

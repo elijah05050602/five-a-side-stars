@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BallModel } from './BallModel';
-import { Input, type InputState } from './input';
+import { Input, PressLatch, type InputState } from './input';
 import { CAMERA_HEIGHT_SCALE, getControls } from '../data/controls';
 import { buildPitch, pitchExtras } from './Pitch';
 import { Crowd } from './Crowd';
@@ -48,8 +48,6 @@ export interface MatchResult {
   shootout: [boolean[], boolean[]] | null;
   trainingPoints: number;
   twoPlayer: boolean;
-  /** Set by the tournament flow when a drawn match was won on penalties. */
-  shootoutWon?: boolean;
 }
 
 /**
@@ -89,6 +87,8 @@ export class MatchScene {
   private raf = 0;
   private last = 0;
   private acc = 0;
+  /** Taps read on frames that ran no sim step, kept for the next step that does. */
+  private readonly latches = [new PressLatch(), new PressLatch()] as const;
   private readonly camTarget = new THREE.Vector3();
   private readonly camPos = new THREE.Vector3();
   private readonly camLook = new THREE.Vector3();
@@ -393,9 +393,9 @@ export class MatchScene {
     this.adapt(ms);
     this.last = now;
     if (this.sim.shootout && this.upfield && (this.sim.shootout.taking === 0 ? 1 : -1) !== this.upDir) this.updateView();
-    const input = this.toPitch(this.input.poll());
+    const input = this.latches[0].take(this.toPitch(this.input.poll()));
     const raw2 = this.input2?.poll();
-    const input2 = raw2 && this.toPitch(raw2);
+    const input2 = raw2 && this.latches[1].take(this.toPitch(raw2));
     if (input.pause || input2?.pause) this.sim.togglePause();
     // Fixed 60 Hz simulation steps for stable physics. The sim waits while a replay plays.
     const replaying = !!this.replay && this.replay.wait <= 0;
@@ -410,6 +410,9 @@ export class MatchScene {
       steps++;
     }
     if (replaying) this.acc = 0;
+    // The first step has used the taps (a paused sim steps too, and drops them). Taps during a replay
+    // are dropped as well, so they do not take the kick-off the moment it ends.
+    if (steps > 0 || replaying) { this.latches[0].clear(); this.latches[1].clear(); }
     for (const ev of this.sim.events) {
       this.sfx.play(ev);
       if (ev.type === 'fulltime') music.jingle(this.fullTimeJingle());

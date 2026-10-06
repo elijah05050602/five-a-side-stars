@@ -66,6 +66,7 @@ export class KitPreview3D {
     this.canvas.addEventListener('pointerdown', this.onDown);
     this.canvas.addEventListener('pointermove', this.onMove);
     this.canvas.addEventListener('pointerup', this.onUp);
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the one live preview: an older one stops drawing
     current = this;
     this.resize();
     this.frame(0);

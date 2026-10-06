@@ -112,6 +112,12 @@ initBackButton(() => {
   return !onLobby();
 });
 
+// Going into the background (a call, another app, a switched tab) pauses the match, so nobody comes
+// back to a goal they missed. The pause card is waiting when they return.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && match && match.sim.phase !== 'paused') match.sim.togglePause();
+});
+
 // First visit: straight into the tutorial (with a skip button). Everyone else lands on the menu.
 if (getSettings().tutorialDone) router.go({ name: 'menu' });
 else router.startTutorial();
