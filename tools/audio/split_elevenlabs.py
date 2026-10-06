@@ -131,7 +131,11 @@ def build(batches_path, takes_dir, hints_path=None):
             hints = json.load(f)
     clips = {}
     for n, batch in enumerate(batches):
-        x = load(os.path.join(takes_dir, f'take_{n}.mp3'))
+        take = os.path.join(takes_dir, f'take_{n}.mp3')
+        if not os.path.exists(take):  # not recorded yet: the game falls back for these lines
+            print(f'take {n}: missing, skipped')
+            continue
+        x = load(take)
         pieces, gaps = split(x, len(batch['items']), hints.get(str(n)))
         for (key, i, text), seg in zip(batch['items'], pieces):
             secs = len(seg) / SR
@@ -155,7 +159,7 @@ def build(batches_path, takes_dir, hints_path=None):
     sf.write(tmp, full, SR)
     dest = os.path.join(OUT, 'commentary.mp3')
     chain = 'highpass=f=80,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=150:makeup=1.5,alimiter=limit=0.95'
-    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', tmp, '-af', chain, '-ac', '1', '-codec:a', 'libmp3lame', '-b:a', '40k', dest], check=True)
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', tmp, '-af', chain, '-ac', '1', '-codec:a', 'libmp3lame', '-b:a', '32k', dest], check=True)
     os.unlink(tmp)
     with open(os.path.join(OUT, 'commentary.json'), 'w') as f:
         json.dump({'voice': 'elevenlabs:Connor', 'clips': index}, f, separators=(',', ':'))

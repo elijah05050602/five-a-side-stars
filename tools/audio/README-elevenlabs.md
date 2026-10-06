@@ -11,10 +11,12 @@ SoundFont) still works if the audio ever needs rebuilding without an account.
 2. Record each prompt with model `eleven_v3`, voice Connor
    (`xtw8E1CXDMtNKx4sgP7u`), one take, and save it as `takes/take_<n>.mp3`.
    Record them one or two at a time: firing many at once got some refused.
-3. Transcribe each take with Scribe (`eleven_scribe_v1`). For every pair of
-   neighbouring lines, note the end time of the last word of one line and the
-   start time of the first sound of the next (audible tags such as [gasps] or
-   [laughs] count as sound). That is `commentary_cuts.json`; takes without an
+3. Transcribe each take with Scribe (`eleven_scribe_v1`) and run
+   `python3 tools/audio/scribe_cuts.py words.json` on its word list. That
+   prints, for every pair of neighbouring lines, the end time of the last word
+   of one line and the start time of the first sound of the next (audible tags
+   such as [gasps] or [laughs] count as sound): the take's entry in
+   `commentary_cuts.json`. Takes without an
    entry are cut at their longest silences, which is fine for the short score
    calls but not for lines with a dramatic beat in them.
 4. `python3 tools/audio/split_elevenlabs.py build batches.json takes/ tools/audio/commentary_cuts.json`

@@ -8,10 +8,11 @@ import spriteJson from '../../public/audio/commentary.json';
 const sprite = spriteJson as unknown as { clips: Record<string, [number, number][]> };
 
 describe('recorded commentary', () => {
-  it('has spoken clips for every big moment, recorded or borrowed from a similar line', () => {
+  it('has a spoken clip for every line it can say', () => {
     for (const key of Object.keys(LINES) as LineKey[]) {
-      if (priority(key) < 2 && !sprite.clips[key]) continue; // chatter can be shown without a voice
-      expect(sprite.clips[key]?.length ?? sprite.clips[FALLBACK[key] ?? '']?.length, key).toBeGreaterThan(0);
+      expect(sprite.clips[key]?.length, key).toBeGreaterThan(0);
+      const fallback = FALLBACK[key];
+      if (fallback) expect(sprite.clips[fallback]?.length, fallback).toBeGreaterThan(0);
     }
   });
 
