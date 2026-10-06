@@ -7,7 +7,7 @@ import type { BootStyle, Kit } from '../data/types';
  * The 'leg' and 'boot' cells are vertical strips (v = top..bottom of the part), so bands of
  * colour land at exact heights: shorts hem, bare leg, sock top, sock, boot, sole.
  */
-const CELL: Record<string, [number, number]> = {
+export const CELL: Record<string, [number, number]> = {
   skin: [0, 0], hair: [1, 0], eyes: [2, 0], brow: [3, 0],
   shirt: [0, 1], shirt2: [1, 1], shorts: [2, 1], leg: [3, 1], boot: [4, 1],
 };

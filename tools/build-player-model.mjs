@@ -6,7 +6,10 @@
 //   git clone https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0 /tmp/kaykit
 //   npm i --no-save @gltf-transform/core @gltf-transform/functions @gltf-transform/extensions
 //   KAYKIT=/tmp/kaykit/addons/kaykit_character_pack_adventures/Characters/gltf \
-//     node tools/build-player-model.mjs public/models/player.glb remap
+//     node tools/build-player-model.mjs public/models/player.glb
+// The UV remap is on by default because the game needs it. Add `raw` after the output path to
+// skip it and keep the pack's own UVs, mesh names and texture; that file is only for looking at
+// the source parts, since the game cannot paint it (src/__tests__/playerModel.test.ts fails on it).
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { mergeDocuments, prune, dedup, resample, unpartition, quantize } from '@gltf-transform/functions';
@@ -14,7 +17,8 @@ import fs from 'fs';
 
 const PACK = process.env.KAYKIT || '/tmp/kaykit/addons/kaykit_character_pack_adventures/Characters/gltf';
 const OUT = process.argv[2] || 'player.glb';
-const REMAP = process.argv[3] === 'remap';
+const REMAP = process.argv[3] !== 'raw';
+if (!REMAP) console.warn('raw: keeping the pack UVs and texture; the game cannot paint this file');
 const KEEP_ANIMS = ['Idle', 'Walking_A', 'Running_B', 'Cheer', 'Dodge_Left', 'Dodge_Right', 'Hit_A',
   // Keeper catches and throws, headers, a sad sit-down and calling for the ball.
   'Throw', 'PickUp', 'Jump_Full_Long', 'Sit_Floor_Down', 'Spellcast_Raise'];
