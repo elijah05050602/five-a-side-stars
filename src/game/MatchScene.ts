@@ -75,6 +75,9 @@ export class MatchScene {
   /** Rolling record of the last few seconds, oldest first. */
   private readonly history: ReplayFrame[] = [];
   private replay: { frames: ReplayFrame[]; t: number; wait: number } | null = null;
+  /** The team-mate waving for a pass, chosen afresh every so often. */
+  private caller: SimPlayer | null = null;
+  private callTimer = 0;
   /** The fans have had their moment on camera for this goal (so the second roar plays once). */
   private celebrated = false;
   private raf = 0;
@@ -330,6 +333,28 @@ export class MatchScene {
    * screen it can instead sit behind the player's own goal, so the pitch runs up the screen.
    * `close` below 1 brings it in (to watch a goal celebration up close).
    */
+  /** Now and then the most open team-mate up the pitch from the ball puts an arm up for it. */
+  private updateCaller(dt: number): void {
+    const sim = this.sim, o = sim.ball.owner;
+    this.callTimer -= dt;
+    if (sim.phase !== 'play' || !o) { this.caller = null; return; }
+    if (this.caller && this.caller.side !== o.side) this.caller = null;
+    if (this.callTimer > 0) return;
+    this.callTimer = 0.9 + Math.random() * 0.6;
+    this.caller = null;
+    if (Math.random() < 0.35) return;
+    const fwd = sim.goalX(o.side) > 0 ? 1 : -1;
+    const clear = 2.2 * sim.stats.scale + 0.5;
+    let best = 1.5;
+    for (const p of sim.players) {
+      if (p.side !== o.side || p === o || p.isKeeper) continue;
+      const ahead = (p.pos.x - o.pos.x) * fwd;
+      if (ahead <= best) continue;
+      const marked = sim.players.some((q) => q.side !== p.side && Math.hypot(q.pos.x - p.pos.x, q.pos.z - p.pos.z) < clear);
+      if (!marked) { best = ahead; this.caller = p; }
+    }
+  }
+
   private cameraGoal(target: THREE.Vector3, close = 1): THREE.Vector3 {
     const aspect = this.camera.aspect;
     const zoom = CAMERA_HEIGHT_SCALE[getControls().camera.height] * close;
@@ -415,6 +440,8 @@ export class MatchScene {
     const lastGoal = this.sim.goals[this.sim.goals.length - 1];
     const celebrating = this.sim.phase === 'goal' && lastGoal ? lastGoal.side : -1;
     const sprintSpeed = this.sim.stats.speed * 1.05;
+    this.updateCaller(dt);
+    const sp = this.sim.setPiece;
     for (const p of this.sim.players) {
       const m = this.models.get(p)!;
       m.group.position.set(p.pos.x, 0, p.pos.z);
@@ -432,7 +459,9 @@ export class MatchScene {
       const gazeY = ahead && Math.hypot(b.pos.x - p.pos.x, b.pos.z - p.pos.z) < 2.5 * scale ? 0.5 : 0;
       const st: AnimState = { speed, kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, tackle: p.tackleTimer, scale, wobble, mood, gazeX, gazeY, cheer: celebrating === p.side, stepover: p.trickKind === 'stepover' ? p.trickAnim : 0, stepoverDir: p.trickDir,
         dribble: b.owner === p && !p.isKeeper && this.sim.phase === 'play', recover: Math.min(1, p.recover / DIVE_RECOVER), strafe: -p.vel.x * Math.sin(p.facing) + p.vel.z * Math.cos(p.facing),
-        celebrate: celebrating >= 0 ? p.celebrate : null, celebrateT: this.sim.phaseTimer, move: p.move, moveAnim: p.moveAnim, hold: b.owner === p && p.handling };
+        celebrate: celebrating >= 0 ? p.celebrate : null, celebrateT: this.sim.phaseTimer, move: p.move, moveAnim: p.moveAnim, hold: b.owner === p && p.handling,
+        kickKind: p.kickKind, charge: p.charge, ready: this.sim.phase === 'kickoff' && b.owner !== p, call: p === this.caller,
+        throwIn: this.sim.phase === 'setpiece' && sp?.kind === 'throwin' && sp.taker === p && b.owner === p };
       m.animate(dt, st);
       const isP1 = p === this.sim.controlled;
       const isP2 = p === this.sim.controlled2;

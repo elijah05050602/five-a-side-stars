@@ -327,6 +327,18 @@ describe('passing and lobs', () => {
     expect(sim.ball.owner).toBe(defender);
   });
 
+  it('tells the model what kind of kick it was, so the leg swings to match', () => {
+    const { sim, p } = lane();
+    sim.shoot(p, null);
+    expect(p.kickKind).toBe('shot');
+    const { sim: sim2, p: p2 } = lane();
+    sim2.pass(p2, { x: 1, z: 0 });
+    expect(p2.kickKind).toBe('pass');
+    const { sim: sim3, p: p3 } = lane();
+    sim3.lob(p3, { x: 1, z: 0 });
+    expect(p3.kickKind).toBe('lob');
+  });
+
   it('passes are struck firmly enough to reach a team-mate still rolling', () => {
     const { sim, p, mate, defender } = lane();
     defender.pos = { x: 1, z: 6 };
