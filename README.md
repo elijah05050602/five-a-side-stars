@@ -11,17 +11,23 @@ localStorage. There is no server and no account.
 
 ```bash
 npm install
-npm run dev      # dev server with hot reload
-npm run build    # type-check and build to dist/
-npm run preview  # serve the built game
-npm test         # run the automated checks (saves, league, cup, match engine)
+npm run dev        # dev server with hot reload
+npm run build      # type-check and build to dist/
+npm run preview    # serve the built game
+npm test           # unit tests: saves, league, cup, career, tutorial, match engine, audio, the player model
+npm run lint       # ESLint
+npm run e2e        # browser tests on the built game (npm run build first; needs Playwright's Chromium)
 ```
+
+CI runs the type check, lint, unit tests, build and browser tests on every pull request, and the
+Pages workflow runs the tests again before it deploys.
 
 ## Ways to play
 
 - **Quick Match**: one match against the computer (or a friend on the same keyboard).
-- **Tournament**: a four-team cup with two semi-finals and a final. Draws go to penalties.
+- **Tournament**: a four-team cup with two semi-finals and a final. Draws go to penalties. The cup is saved, so you can leave and carry on later; in a two-player cup both players can reach the final.
 - **League**: a saved career through five tiers, from the Acorn League (Tier 5) up to the Star Premier League (Tier 1). Five matches a season, top two go up, bottom goes down, and the computer teams get stronger every tier.
+- **Career**: take one team from the Under 5s to the Under 10s, four mini seasons a year; players earn stars by playing.
 - **Penalties**: a best-of-five shoot-out, then sudden death. You take and save.
 - **Training**: just you and a keeper; score as many as you can before time runs out (rocket shots count double).
 - **Player stats**: seven star ratings per player. Outfielders have Speed, Dribbling, Passing, Shooting, Tackling, Stamina and Strength; keepers have Speed, Handling, Diving, Reflexes, Positioning, Kicking and Strength. The age group caps the stars and sets the budget to share out.
@@ -31,24 +37,44 @@ npm test         # run the automated checks (saves, league, cup, match engine)
 - **Positions and line-ups**: a player can be good in more than one position (tick "Can also play"), and formations put players in spots they can play first. On the squad step, drag a player onto another (or tap one, then the other) to swap them, or drag a sub onto the pitch to bring them on.
 - **Team sheet**: from the squad step of the team builder, download a printable PNG team sheet.
 - **Weather and time of day**: pick sunny, cloudy, rain, snow, sunset or a night game under floodlights on the setup screen, or let the game surprise you.
-- **Commentary and replays**: a commentator who knows the score, calls shots wide, over or off the bar, and an instant slow-motion replay of every goal (off when reduce motion is on).
+- **Commentary and replays**: a commentator who knows the score, calls shots wide, over or off the bar, and an instant slow-motion replay of every goal (off when motion is set to calm).
+
+While you play a league or career match (or a cup semi-final), the other computer matches are
+played in a background worker, so the table is ready the moment the final whistle goes.
 
 ## Sound
 
-Every sound is made in code with the Web Audio API, so there are no audio
-files: a crowd that murmurs, holds its breath when the ball nears a goal and
-roars at a goal, the referee's pea whistle, ball thumps, applause, rain and
-wind, and a looping menu tune with drums and a bass line. See `src/game/sfx.ts`,
-`src/game/music.ts` and `src/game/audio.ts`.
+- **Music and commentary** are recordings made with [ElevenLabs](https://elevenlabs.io): a home
+  theme for the menus, a matchday groove from match preparation on, win and draw jingles, and the
+  commentator (the "Connor" voice), all in `public/audio/`. The commentary is one MP3 of all the
+  lines with a cue sheet (`commentary.json`). How they were made, and the terms they follow, are in
+  `tools/audio/README-elevenlabs.md` and `public/audio/LICENSE.md`.
+- **Effects** are made in code with the Web Audio API: a crowd that murmurs, holds its breath when
+  the ball nears a goal and roars at a goal, the referee's whistle, ball thumps, applause, rain and
+  wind. See `src/game/sfx.ts` and `src/game/audio.ts`.
+
+Music, commentary and effects each have an on/off switch and a volume slider (the Parents Zone and
+the pause screen), and changes apply straight away, even mid-match. When the game goes into the
+background the sound stops and a match pauses.
 
 ## Parents and privacy
 
-Everything stays on the device: no accounts, no chat, no adverts, no purchases
-and no tracking. Teams, settings and stickers live in the browser's
-localStorage. A small word filter keeps rude words out of team and player
-names. The Parents screen (behind a quick multiplication sum) has toggles for
-sound, music and reduce motion, and a reset button. Once loaded, the game
-works offline and can be added to a phone or tablet home screen.
+Everything stays on the device: no accounts, no chat, no adverts, no purchases and no tracking,
+and the game loads nothing from other websites (the Fredoka font is part of the game). Teams,
+settings and stickers live in the browser's localStorage. A word filter keeps rude words out of
+team and player names. The Parents Zone (behind a sum written in words) has:
+
+- music, commentary and effects switches and volumes, motion (follow this device, calm or full)
+  and graphics quality;
+- **save a backup file / load a backup file**, which also moves a save to another device, and a
+  button that asks the browser to keep the save even when space runs low (browsers can clear
+  site data; Safari does after about a week without a visit unless the game is on the Home Screen);
+- a reset (type RESET to confirm). The save from before the last reset, repair or loaded file is
+  kept and can be put back.
+
+If a save cannot be read in full, the game mends or leaves out only the broken part and keeps a copy
+of the original. Once it has finished loading the first time, the game works offline and can be
+added to a phone or tablet home screen.
 
 ## Controls
 
@@ -64,7 +90,20 @@ works offline and can be added to a phone or tablet home screen.
 
 Two players on one keyboard: player 1 uses WASD, Space (shoot), Z (pass), left
 Shift (sprint) and Q (switch); player 2 uses the arrow keys, Enter, `/`, right
-Shift and `.`.
+Shift and `.`. Game controllers work too. On the Controls screen every key and controller button
+can be changed, and the touch buttons can be made bigger, more see-through or swapped round for
+left-handed players.
+
+The menus work with the keyboard (Tab, Enter, Esc) and a controller (d-pad and A on the pause and
+full-time cards). The phone's Back button goes back a screen, and pauses or resumes a match.
+
+## Accessibility
+
+Focus moves to each new screen's heading and the tab title names the screen; choices say whether
+they are selected; colour swatches have names; goals, half time and full time are announced to
+screen readers. Text on coloured buttons and cards meets WCAG AA contrast, controls are at least
+44 px, pinch zoom works, and the motion setting follows the device's reduce-motion switch unless a
+grown-up picks calm or full.
 
 ## Age groups
 
@@ -82,9 +121,22 @@ the shared markup helpers (console bar, page heading, lobby dock) live in
 `src/ui/shell.ts` and the styles in `src/style.css`. Stadium and mascot art
 from the kit is in `public/art/`.
 
+## Working on it
+
+- **The player model** is built by `tools/build-player-model.mjs` from the KayKit pack (the
+  header has the steps). It remaps the UVs to the colour grid the game paints by default; a test
+  checks the shipped `public/models/player.glb` has the face material and remapped UVs.
+- **Offline caching** is generated at build time: the service worker's file list and cache
+  version come from the built files' contents, so there is no version number to bump by hand.
+- **Audio** tools live in `tools/audio/` (see its README).
+- Notes for AI coding assistants are in `CLAUDE.md`.
+
 ## Credits
 
 The kids on the pitch are built from the
 [KayKit Character Pack: Adventurers](https://kaylousberg.itch.io/kaykit-adventurers)
 by Kay Lousberg (CC0, public domain). The game repaints the model with each
 team's kit; see `public/models/LICENSE.md` and `tools/build-player-model.mjs`.
+Music and commentary were made with ElevenLabs (see `public/audio/LICENSE.md`). The Fredoka
+typeface is by the Fredoka Project Authors, under the SIL Open Font License 1.1. The Davao
+Strikers FC name and crest belong to the club. The code is MIT licensed (see `LICENSE`).
