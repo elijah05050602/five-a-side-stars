@@ -85,6 +85,10 @@ export interface SimPlayer {
   /** 1 right after being tackled off the ball, fading to 0. */
   stunAnim: number;
   diveDir: number;
+  /** Sideways speed a keeper launched the current dive at; the dive is committed, so this never changes mid-air. */
+  diveSpeed: number;
+  /** Seconds left getting back up after a dive (a keeper cannot move until it reaches 0). */
+  recover: number;
   distanceRun: number;
   isKeeper: boolean;
   speedMul: number;
@@ -217,6 +221,13 @@ export const RUNOFF_SIDE = 1.2;
 export const RUNOFF_END = 1.6;
 /** Seconds between dribbling touches. */
 const DRIBBLE_STRIDE = 0.38;
+/** A dive lasts 1 / DIVE_RATE seconds: DIVE_AIR seconds of it in the air, the rest lying on the grass. */
+const DIVE_RATE = 2;
+const DIVE_AIR = 0.32;
+/** Share of the dive animation spent in the air. */
+export const DIVE_AIR_SHARE = DIVE_AIR * DIVE_RATE;
+/** Seconds a keeper with average Reflexes takes to get back up after a dive. */
+export const DIVE_RECOVER = 0.35;
 
 const DIFF = {
   easy: { speed: 0.85, think: 0.55, accuracy: 0.6, tackle: 0.6, humanTackle: 1.3, shootRange: 0.34 },
@@ -318,7 +329,7 @@ export class MatchSim {
         const p: SimPlayer = {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), role: info.position, slot: v(info.position === 'GK' ? 0.03 : 0.33, 0), kickCooldown: 0, think: Math.random() * 0.3,
-          aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, distanceRun: 0, isKeeper: info.position === 'GK',
+          aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, distanceRun: 0, isKeeper: info.position === 'GK',
           speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
           mul, match: freshMatchStats(),
@@ -356,7 +367,7 @@ export class MatchSim {
     const keeper = this.teamOf((1 - side) as Side).find((p) => p.isKeeper) ?? this.teamOf((1 - side) as Side)[0];
     this.players.forEach((p, i) => {
       p.pos = v(-dir * 2 + (i % 5) * 0.8 * -dir, -3 + (i % 3) * 3);
-      p.vel = v(); p.kickCooldown = 0; p.charge = 0; p.diveAnim = 0; p.kickAnim = 0; p.penaltyGuess = 0;
+      p.vel = v(); p.kickCooldown = 0; p.charge = 0; p.diveAnim = 0; p.recover = 0; p.kickAnim = 0; p.penaltyGuess = 0;
     });
     taker.pos = v(spot.x - dir * 0.5, 0);
     taker.facing = side === 0 ? 0 : Math.PI;
@@ -429,6 +440,7 @@ export class MatchSim {
         p.kickCooldown = 0;
         p.kickAnim = 0;
         p.diveAnim = 0;
+        p.recover = 0;
       });
       if (s === side) {
         // The furthest forward stands on the ball, the next just behind.
@@ -519,11 +531,12 @@ export class MatchSim {
       p.holdTime = this.ball.owner === p ? p.holdTime + dt : 0;
       if (this.controlledBy[p.side] !== p) p.stamina = Math.min(1, p.stamina + dt / 4);
       p.kickAnim = Math.max(0, p.kickAnim - dt * 4);
-      p.diveAnim = Math.max(0, p.diveAnim - dt * 1.4);
+      this.tickDive(p, dt);
       p.trickAnim = Math.max(0, p.trickAnim - dt * 2.2);
       p.trickBoost = Math.max(0, p.trickBoost - dt);
       p.trickCooldown = Math.max(0, p.trickCooldown - dt);
       if (p.trickAnim <= 0) p.trickKind = null;
+      if (this.keeperCommitted(p)) continue; // mid-dive or getting up: no steering until back on their feet
       const inp = inputs[p.side];
       if (inp && this.controlledBy[p.side] === p) this.driveHuman(p, inp, dt);
       else this.driveAI(p, dt);
@@ -574,7 +587,8 @@ export class MatchSim {
     for (const p of this.players) {
       p.kickCooldown = Math.max(0, p.kickCooldown - dt);
       p.kickAnim = Math.max(0, p.kickAnim - dt * 4);
-      p.diveAnim = Math.max(0, p.diveAnim - dt * 1.4);
+      this.tickDive(p, dt);
+      if (this.keeperCommitted(p)) continue;
       const inp = inputs[p.side];
       const keeper = p.isKeeper && p.side === defending;
       const taker = this.setPiece?.taker === p || (so.kicked && this.ball.lastKick === p);
@@ -608,7 +622,7 @@ export class MatchSim {
     p.pos.x = own + dir * 0.4;
     p.pos.z = clamp(p.pos.z, -this.goalWidth / 2 - 0.3, this.goalWidth / 2 + 0.3);
     p.facing = dir > 0 ? 0 : Math.PI;
-    if (Math.abs(z) > 0.6 && p.diveAnim <= 0 && this.ball.owner !== p && len(this.ball.vel) > 3) { p.diveAnim = 1; p.diveDir = Math.sign(z); }
+    if (Math.abs(z) > 0.6 && this.ball.owner !== p && len(this.ball.vel) > 3) this.startDive(p, Math.sign(z), this.goalWidth * 0.4);
   }
 
   private advanceShootout(): void {
@@ -753,7 +767,7 @@ export class MatchSim {
       // The tutorial team-mate waits on their spot and gives the ball straight back.
       if (b.owner === p) {
         const human = this.controlledBy[p.side];
-        if (p.holdTime > 0.8 && human && human !== p) this.pass(p, v(human.pos.x - p.pos.x, human.pos.z - p.pos.z));
+        if (p.holdTime > 0.8 && human && human !== p) this.pass(p, v(human.pos.x - p.pos.x, human.pos.z - p.pos.z), 1, false);
         this.steer(p, v(), 20);
       } else this.moveTowards(p, p.home, 0.8);
       return;
@@ -783,7 +797,7 @@ export class MatchSim {
         const angleClear = Math.abs(p.pos.z) < this.width * 0.35;
         if (this.phase === 'kickoff') {
           const mate = this.bestPassTarget(p, null);
-          if (mate) this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z));
+          if (mate) this.pass(p, v(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z), 1, false);
           return;
         }
         if (dGoal < range && angleClear && (pressure < 1.6 || dGoal < range * 0.6 || p.holdTime > 1.5)) {
@@ -807,7 +821,9 @@ export class MatchSim {
           return;
         }
         if (tight || p.holdTime > 0.7) {
-          const mate = this.bestPassTarget(p, null);
+          // Hemmed in near our own goal, the keeper is sometimes the way out.
+          const backOk = tight && Math.abs(p.pos.x - own) < this.length * 0.35 && Math.random() < 0.3;
+          const mate = this.bestPassTarget(p, null, false, backOk);
           const forward = mate ? (mate.pos.x - p.pos.x) * (p.side === 0 ? 1 : -1) : -99;
           const worthIt = mate !== null && (tight ? Math.random() < 0.8 : forward > 3 && Math.random() < 0.35);
           if (worthIt && mate) {
@@ -903,6 +919,39 @@ export class MatchSim {
     }
   }
 
+  /**
+   * A keeper's dive is committed: they launch sideways at a speed picked for the
+   * distance they need, fly for a moment, land, and then have to get up before
+   * they can move again. Nothing changes direction once they leave the ground.
+   */
+  private startDive(p: SimPlayer, dir: number, need: number): void {
+    if (p.diveAnim > 0 || p.recover > 0) return;
+    p.diveAnim = 1;
+    p.diveDir = dir;
+    const top = this.stats.speed * 1.9 * p.speedMul;
+    p.diveSpeed = clamp(need / (DIVE_AIR * 0.6), this.stats.speed * 0.5, top);
+  }
+
+  /** Runs the dive clock, and starts the get-up when a dive ends. */
+  private tickDive(p: SimPlayer, dt: number): void {
+    if (p.diveAnim > 0) {
+      p.diveAnim = Math.max(0, p.diveAnim - dt * DIVE_RATE);
+      if (p.diveAnim === 0 && p.isKeeper) p.recover = DIVE_RECOVER / Math.sqrt(p.mul.save);
+    } else p.recover = Math.max(0, p.recover - dt);
+  }
+
+  /** True while a keeper is in the air, on the ground or getting up, moving only as the dive carries them. */
+  private keeperCommitted(p: SimPlayer): boolean {
+    if (!p.isKeeper || (p.diveAnim <= 0 && p.recover <= 0)) return false;
+    const airborne = p.diveAnim > 1 - DIVE_AIR_SHARE;
+    if (airborne) {
+      // Fastest at take-off, easing as they come down.
+      const k = (p.diveAnim - (1 - DIVE_AIR_SHARE)) / DIVE_AIR_SHARE;
+      p.vel = v(0, p.diveDir * p.diveSpeed * (0.4 + 0.6 * k));
+    } else this.steer(p, v(), 40); // landed: a short skid, then still
+    return true;
+  }
+
   private driveKeeper(p: SimPlayer, dt: number): void {
     const b = this.ball;
     const own = this.ownGoalX(p.side);
@@ -922,7 +971,15 @@ export class MatchSim {
       this.steer(p, v(), 20);
       return;
     }
-    const toGoal = b.vel.x * dir < -0.5; // ball travelling towards our goal
+    // A team-mate's pass back is not a shot: go and meet it rather than diving at it.
+    const backPass = b.owner === null && b.wasPass && b.lastKick !== null && b.lastKick.side === p.side;
+    if (backPass && b.receiver === p) {
+      const meet = this.interceptPoint(p);
+      this.moveTowards(p, v(own + clamp((meet.x - own) * dir, -0.3, 5) * dir, clamp(meet.z, -this.goalWidth, this.goalWidth)), 1.1);
+      p.facing = Math.atan2(b.pos.z - p.pos.z, b.pos.x - p.pos.x);
+      return;
+    }
+    const toGoal = b.vel.x * dir < -0.5 && !backPass; // ball travelling towards our goal
     const towardsUs = Math.abs(b.pos.x - own) < this.length * 0.5;
     // Positioning: a good keeper follows the ball across the goal and narrows the angle.
     let targetZ = clamp(b.pos.z * clamp(0.6 * p.mul.angle, 0.3, 0.85), -this.goalWidth / 2 + 0.3, this.goalWidth / 2 - 0.3);
@@ -937,15 +994,12 @@ export class MatchSim {
         p.penaltyGuess = (Math.sign(predZ) || 1) * (right ? 1 : -1);
       }
       targetZ = p.penaltyGuess * this.goalWidth * 0.4;
-      if (p.diveAnim <= 0 && t < 0.7) { p.diveAnim = 1; p.diveDir = p.penaltyGuess; }
+      if (t < 0.5) this.startDive(p, p.penaltyGuess, Math.abs(predZ - p.pos.z));
     } else if (toGoal && t < 1.4 && towardsUs) {
       // Predict where the ball crosses the keeper's line and go there.
       const predZ = b.pos.z + b.vel.z * t;
       targetZ = clamp(predZ, -this.goalWidth / 2 - 0.4, this.goalWidth / 2 + 0.4);
-      if (Math.abs(predZ - p.pos.z) > reach * 0.45 && p.diveAnim <= 0 && t < 0.8) {
-        p.diveAnim = 1;
-        p.diveDir = Math.sign(predZ - p.pos.z) || 1;
-      }
+      if (Math.abs(predZ - p.pos.z) > reach * 0.45 && t < 0.45) this.startDive(p, Math.sign(predZ - p.pos.z) || 1, Math.abs(predZ - p.pos.z));
     } else if (this.phase !== 'setpiece' && b.owner && b.owner.side !== p.side && Math.abs(b.owner.pos.x - own) < 6 && Math.abs(b.owner.pos.z) < this.goalWidth) {
       // A dribbler is bearing down on goal: come out to narrow the angle if no defender is on them.
       const defender = this.nearest(this.teamOf(p.side).filter((m) => !m.isKeeper), b.owner.pos);
@@ -961,7 +1015,7 @@ export class MatchSim {
       const opp = this.nearest(this.teamOf((1 - p.side) as Side), b.pos);
       if (!opp || dist(opp.pos, b.pos) > dist(p.pos, b.pos)) { targetX = b.pos.x; targetZ = b.pos.z; }
     }
-    const speed = p.diveAnim > 0 ? 1.6 : rush ? 1.35 : 1.1;
+    const speed = rush ? 1.35 : 1.1;
     this.moveTowards(p, v(targetX, targetZ), speed);
     p.facing = Math.atan2(b.pos.z - p.pos.z, b.pos.x - p.pos.x);
   }
@@ -998,9 +1052,14 @@ export class MatchSim {
     return this.nearest(list.filter((p) => !p.isKeeper), pos);
   }
 
-  /** Team-mate who is most open and furthest forward, within passing distance. */
-  private bestPassTarget(from: SimPlayer, aim: V2 | null, lofted = false): SimPlayer | null {
-    const mates = this.teamOf(from.side).filter((m) => m !== from && !m.isKeeper);
+  /**
+   * Team-mate who is most open and furthest forward, within passing distance.
+   * With `backToKeeper`, an outfield player in their own half may also roll it back to their keeper.
+   */
+  private bestPassTarget(from: SimPlayer, aim: V2 | null, lofted = false, backToKeeper = false): SimPlayer | null {
+    const keeper = backToKeeper && !lofted && !from.isKeeper ? this.teamOf(from.side).find((m) => m.isKeeper && m !== from) : undefined;
+    const ownHalf = Math.abs(from.pos.x - this.ownGoalX(from.side)) < this.length * 0.5;
+    const mates = this.teamOf(from.side).filter((m) => m !== from && (!m.isKeeper || (m === keeper && ownHalf)));
     const opps = this.teamOf((1 - from.side) as Side);
     const dir = from.side === 0 ? 1 : -1;
     let best: SimPlayer | null = null, bestScore = -Infinity;
@@ -1020,6 +1079,8 @@ export class MatchSim {
       const openness = opps.reduce((acc, o) => acc + Math.min(dist(o.pos, m.pos), 6), 0);
       // A lofted ball sails over anyone in the lane, so only the receiver's space matters.
       let score = openness - (lofted ? 0 : blocked * 12) - d * 0.3 + (m.pos.x - from.pos.x) * dir * (lofted ? 1 : 0.6);
+      // The keeper is the safe ball, not the first choice, unless the stick points straight at them.
+      if (m.isKeeper) score -= aim ? 4 : 8;
       if (aim) {
         const dot = lane.x * aim.x + lane.z * aim.z;
         score += dot * 15; // strongly prefer the direction the human is pointing
@@ -1319,7 +1380,7 @@ export class MatchSim {
       if (p.kickCooldown > 0) continue;
       const d = dist(p.pos, b.pos);
       const kr = this.stats.keeperReach * (p.info.special === 'keeper' ? 1.25 : 1) * p.mul.reach;
-      const reach = p.isKeeper ? (p.diveAnim > 0 ? kr : kr * 0.55) : controlR;
+      const reach = p.isKeeper ? (p.diveAnim > 0 ? kr : p.recover > 0 ? kr * 0.35 : kr * 0.55) : controlR;
       // The intended receiver of a lob can chest or head it down; everyone else needs it at their feet.
       const meantFor = b.wasPass && b.receiver === p;
       const maxHeight = p.isKeeper ? this.goalHeight : (meantFor && b.lofted ? 1.3 : 0.6) * this.stats.scale + 0.2;
@@ -1330,7 +1391,8 @@ export class MatchSim {
     }
     if (best) {
       const ballSpeed = len(b.vel);
-      if (best.isKeeper && ballSpeed > 3.5) {
+      const ownPass = b.lastKick !== null && b.lastKick.side === best.side && b.wasPass;
+      if (best.isKeeper && ballSpeed > 3.5 && !ownPass) {
         // One save attempt per shot, judged at the ball's closest approach. Comfortable
         // balls are caught; the rest is a dive whose odds fall with distance and shot speed.
         if (b.keeperTried === b.flightId) return;
@@ -1360,8 +1422,7 @@ export class MatchSim {
           } else b.vel = v(dir * ballSpeed * rand(0.15, 0.35), sideways * ballSpeed * rand(0.45, 0.7));
           b.vy = rand(1, 3);
           best.kickCooldown = 0.35;
-          best.diveAnim = Math.max(best.diveAnim, 0.9);
-          best.diveDir = sideways;
+          this.startDive(best, sideways, 0.3);
           b.lastTouch = best;
           return;
         }
@@ -1760,8 +1821,8 @@ export class MatchSim {
     this.events.push({ type: 'shot', side: p.side, player: p.info });
   }
 
-  pass(p: SimPlayer, aim: V2 | null, speedMul = 1): void {
-    const mate = this.bestPassTarget(p, aim);
+  pass(p: SimPlayer, aim: V2 | null, speedMul = 1, backToKeeper = true): void {
+    const mate = this.bestPassTarget(p, aim, false, backToKeeper);
     let dir: V2;
     let d: number;
     if (mate) {

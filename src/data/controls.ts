@@ -51,15 +51,24 @@ export const ACTION_LABELS: Record<Action, string> = {
   shoot: 'Shoot (hold to power up)', pass: 'Pass', lob: 'Lob pass / cross', sprint: 'Sprint', switch: 'Switch player', trick: 'Trick', pause: 'Pause',
 };
 
+const SOLO_KEYS = (): KeyMap => ({
+  up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'],
+  shoot: ['Space', 'KeyA', 'KeyX'], pass: ['KeyD', 'KeyZ', 'Enter'], lob: ['KeyS', 'KeyV'], sprint: ['ShiftLeft', 'ShiftRight'],
+  switch: ['KeyQ', 'KeyE'], trick: ['KeyC', 'KeyW'], pause: ['Escape', 'KeyP'],
+});
+
+/** The single-player keys before pass moved to D and lob to S (WASD moved as well as the arrows then). */
+const OLD_SOLO_KEYS: KeyMap = {
+  up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
+  shoot: ['Space', 'KeyX', 'KeyK'], pass: ['KeyZ', 'Enter', 'KeyJ'], lob: ['KeyV', 'KeyI'], sprint: ['ShiftLeft', 'ShiftRight', 'KeyL'],
+  switch: ['KeyQ', 'KeyE'], trick: ['KeyC', 'KeyU'], pause: ['Escape', 'KeyP'],
+};
+
 export function defaultControls(): ControlsConfig {
   return {
     keys: {
-      // Single player: arrows and WASD both work, with several shoot and pass keys.
-      solo: {
-        up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
-        shoot: ['Space', 'KeyX', 'KeyK'], pass: ['KeyZ', 'Enter', 'KeyJ'], lob: ['KeyV', 'KeyI'], sprint: ['ShiftLeft', 'ShiftRight', 'KeyL'],
-        switch: ['KeyQ', 'KeyE'], trick: ['KeyC', 'KeyU'], pause: ['Escape', 'KeyP'],
-      },
+      // Single player: move with the arrows, and play with A (shoot), S (lob) and D (pass) under the other hand.
+      solo: SOLO_KEYS(),
       // Two players on one keyboard: player 1 on the left-hand side...
       p1: {
         up: ['KeyW'], down: ['KeyS'], left: ['KeyA'], right: ['KeyD'],
@@ -98,6 +107,8 @@ function sanitise(raw: unknown): ControlsConfig {
   for (const p of ['solo', 'p1', 'p2'] as KeyProfile[]) {
     for (const a of ACTIONS) d.keys[p][a] = cleanList(r.keys?.[p]?.[a], isStr, KEY_SLOTS, d.keys[p][a]);
   }
+  // A save that still has the old untouched single-player keys moves to the new defaults (pass on D, lob on S).
+  if (ACTIONS.every((a) => d.keys.solo[a].join() === OLD_SOLO_KEYS[a].join())) d.keys.solo = SOLO_KEYS();
   for (const a of ACTIONS) d.pad[a] = cleanList(r.pad?.[a], isBtn, PAD_SLOTS, d.pad[a]);
   // An action added since the file was saved (like Lob) takes only default keys and buttons nothing else uses.
   for (const p of ['solo', 'p1', 'p2'] as KeyProfile[]) {
@@ -232,7 +243,7 @@ export function moveKeysLabel(profile: KeyProfile): string {
   return [m.up, m.left, m.down, m.right].map((l) => (l[0] ? keyLabel(l[0]) : '?')).join(' ');
 }
 
-/** One plain sentence of a profile's main keys, e.g. "W A S D to move, hold Space to shoot, Z to pass...". */
+/** One plain sentence of a profile's main keys, e.g. "↑ ← ↓ → to move, hold Space to shoot, D to pass...". */
 export function controlsSentence(profile: KeyProfile): string {
   const k = (a: Action) => firstKey(profile, a);
   return `${moveKeysLabel(profile)} to move, hold ${k('shoot')} to shoot, ${k('pass')} to pass, ${k('lob')} to lob a cross, ${k('sprint')} to sprint, ${k('switch')} to switch, ${k('trick')} for a trick`;
