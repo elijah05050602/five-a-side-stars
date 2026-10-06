@@ -1,6 +1,6 @@
 import { generateOpponent } from '../data/defaults';
 import type { Team } from '../data/types';
-import { IDLE_INPUT, MatchSim } from './sim';
+import { playOut, type SimJob, type SimOutcome } from './background';
 import type { MatchResult } from './MatchScene';
 
 export interface LeagueTier {
@@ -120,27 +120,29 @@ export function nextFixture(s: LeagueState, human: Team): { home: Team; away: Te
   return { home: leagueTeam(s, human, f.homeId), away: leagueTeam(s, human, f.awayId), fixture: f, youAreHome: f.homeId === human.id };
 }
 
-function simulate(home: Team, away: Team, halfSeconds: number, level: number): [number, number] {
-  const sim = new MatchSim({ home, away, difficulty: 'normal', halfSeconds: Math.min(halfSeconds, 90), humanSide: null, cpuLevel: level });
-  let guard = 0;
-  while (sim.phase !== 'fulltime' && guard++ < 60 * 60 * 20) { sim.step(1 / 60, IDLE_INPUT); sim.events.length = 0; }
-  return [...sim.score] as [number, number];
+/** The rest of the current round, one job per fixture (null for the player's own), to play in the background during theirs. */
+export function roundJobs(s: LeagueState, human: Team): (SimJob | null)[] {
+  if (seasonOver(s)) return [];
+  const level = tierInfo(s.tier).level;
+  return s.rounds[s.round].map((f) => (f.score || f.homeId === human.id || f.awayId === human.id ? null
+    : { home: leagueTeam(s, human, f.homeId), away: leagueTeam(s, human, f.awayId), difficulty: 'normal', halfSeconds: s.halfSeconds, cpuLevel: level }));
 }
 
 /**
- * Record the player's finished match, simulate the rest of the round and move
- * the league on. The result's home side is whoever the player was at home or
- * away against, so scores are turned round when the player was away.
+ * Record the player's finished match, fill in the rest of the round and move the league on.
+ * `others` are the round's other results already played in the background (see roundJobs);
+ * any that are missing are played here. The result's home side is whoever the player was at
+ * home or away against, so scores are turned round when the player was away.
  */
-export function applyLeagueResult(s: LeagueState, human: Team, r: MatchResult): void {
+export function applyLeagueResult(s: LeagueState, human: Team, r: MatchResult, others?: (SimOutcome | null)[]): void {
   const nf = nextFixture(s, human);
   if (!nf || nf.fixture.score) return;
   nf.fixture.score = r.home.id === nf.fixture.homeId ? [...r.score] as [number, number] : [r.score[1], r.score[0]];
-  const level = tierInfo(s.tier).level;
-  for (const f of s.rounds[s.round]) {
-    if (f.score) continue;
-    f.score = simulate(leagueTeam(s, human, f.homeId), leagueTeam(s, human, f.awayId), s.halfSeconds, level);
-  }
+  const jobs = roundJobs(s, human);
+  s.rounds[s.round].forEach((f, i) => {
+    if (f.score) return;
+    f.score = others?.[i]?.score ?? playOut(jobs[i]!).score;
+  });
   s.round++;
 }
 

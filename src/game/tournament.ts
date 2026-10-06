@@ -1,7 +1,6 @@
 import { generateOpponent } from '../data/defaults';
 import type { Difficulty, Team } from '../data/types';
-import { MatchSim } from './sim';
-import { IDLE_INPUT } from './sim';
+import { homeWon, playOut, type BackgroundRequest, type CupAhead, type SimOutcome } from './background';
 import type { MatchResult } from './MatchScene';
 
 export interface Fixture {
@@ -58,30 +57,39 @@ export function currentFixture(s: TournamentState): Fixture | null {
 
 export function humanStillIn(s: TournamentState): boolean {
   if (s.stage === 'semi') return true;
-  if (s.stage === 'final') return s.final !== null && (s.final.home.id === s.humanTeamId || s.final.away.id === s.humanTeamId);
-  return s.final?.winnerId === s.humanTeamId;
+  const humans = humanTeams(s);
+  if (s.stage === 'final') return s.final !== null && (humans.includes(s.final.home.id) || humans.includes(s.final.away.id));
+  return humans.includes(s.final?.winnerId ?? '');
 }
 
-/** Run a whole computer-vs-computer match in one go (a few milliseconds). */
+/** Write a played-out tie into the bracket (a shoot-out that somehow never settled goes to the home side). */
+function settle(f: Fixture, o: SimOutcome): void {
+  f.score = o.score;
+  f.pens = o.pens;
+  f.winnerId = homeWon(o) ? f.home.id : f.away.id;
+}
+
+/** Play a whole computer-vs-computer tie here and now, penalties included (see background.ts for the cost). */
 export function simulateFixture(f: Fixture, difficulty: Difficulty, halfSeconds: number): void {
-  const sim = new MatchSim({ home: f.home, away: f.away, difficulty, halfSeconds: Math.min(halfSeconds, 90), humanSide: null });
-  let guard = 0;
-  while (sim.phase !== 'fulltime' && guard++ < 60 * 60 * 20) { sim.step(1 / 60, IDLE_INPUT); sim.events.length = 0; }
-  f.score = [...sim.score] as [number, number];
-  if (f.score[0] !== f.score[1]) { f.winnerId = f.score[0] > f.score[1] ? f.home.id : f.away.id; return; }
-  const so = new MatchSim({ home: f.home, away: f.away, difficulty, halfSeconds: 60, humanSide: null, mode: 'shootout' });
-  guard = 0;
-  while (so.phase !== 'fulltime' && guard++ < 60 * 60 * 5) { so.step(1 / 60, IDLE_INPUT); so.events.length = 0; }
-  f.pens = [...so.score] as [number, number];
-  // A shoot-out that somehow never settled goes to the home side.
-  f.winnerId = f.pens[1] > f.pens[0] ? f.away.id : f.home.id;
+  settle(f, playOut({ home: f.home, away: f.away, difficulty, halfSeconds, pens: true }));
+}
+
+/** The teams humans control in this cup: yours, and Player 2's in a two-player cup (they meet in the first semi). */
+const humanTeams = (s: TournamentState): string[] => (s.twoPlayer ? [s.humanTeamId, s.semis[0].away.id] : [s.humanTeamId]);
+
+/** During your semi-final: the other semi, and the final your opponent would play if they beat you, to play in the background. */
+export function cupAheadRequest(s: TournamentState): BackgroundRequest | null {
+  if (s.stage !== 'semi') return null;
+  const yours = s.semis[0];
+  const opponent = yours.home.id === s.humanTeamId ? yours.away : yours.home;
+  return { kind: 'cup', semi2: { home: s.semis[1].home, away: s.semis[1].away, difficulty: s.difficulty, halfSeconds: s.halfSeconds, pens: true }, opponent };
 }
 
 /**
- * Feed a finished human match (or shoot-out) into the bracket and move it on.
- * Returns true when the result settled a fixture (so the next stage is ready).
+ * Feed a finished human match (or shoot-out) into the bracket and move it on. `ahead` holds the
+ * computer ties already played in the background (see cupAheadRequest); without it they are played here.
  */
-export function applyResult(s: TournamentState, r: MatchResult): void {
+export function applyResult(s: TournamentState, r: MatchResult, ahead?: CupAhead): void {
   const f = currentFixture(s);
   if (!f) return;
   if (r.mode === 'shootout') {
@@ -94,13 +102,19 @@ export function applyResult(s: TournamentState, r: MatchResult): void {
   }
   s.needsShootout = false;
   if (s.stage === 'semi') {
-    simulateFixture(s.semis[1], s.difficulty, s.halfSeconds);
+    if (ahead) settle(s.semis[1], ahead.semi2);
+    else simulateFixture(s.semis[1], s.difficulty, s.halfSeconds);
     const w1 = f.winnerId === f.home.id ? f.home : f.away;
     const w2 = s.semis[1].winnerId === s.semis[1].home.id ? s.semis[1].home : s.semis[1].away;
     // The human (or their conqueror) is always listed first in the final.
     s.final = fixture(w1, w2);
     s.stage = 'final';
-    if (w1.id !== s.humanTeamId) { simulateFixture(s.final, s.difficulty, s.halfSeconds); s.stage = 'done'; }
+    // Knocked out: the computer finishes the cup. (In a two-player cup the semi winner is always a human, who plays on.)
+    if (!humanTeams(s).includes(w1.id)) {
+      if (ahead) settle(s.final, ahead.finalIfOut);
+      else simulateFixture(s.final, s.difficulty, s.halfSeconds);
+      s.stage = 'done';
+    }
   } else if (s.stage === 'final') {
     s.stage = 'done';
   }

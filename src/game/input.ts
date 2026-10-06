@@ -21,6 +21,32 @@ export type PadSlot = 'any' | number | null;
 
 const STICK_DEAD = 0.25;
 
+/** The presses that count once, on the frame they happen. */
+const ONE_SHOT = ['shoot', 'pass', 'lob', 'switchPlayer', 'trick'] as const;
+
+/**
+ * Keeps a tap until a sim step uses it. The sim steps 60 times a second but the screen may draw
+ * 120 or 144 frames, so most frames run no step at all, and a tap read on one of those used to be
+ * lost: about half of them at 120 Hz.
+ */
+export class PressLatch {
+  private readonly held = new Set<(typeof ONE_SHOT)[number]>();
+
+  /** Add this frame's taps to the ones still waiting, and mark them all on `s` (a fresh state from poll()). */
+  take(s: InputState): InputState {
+    for (const k of ONE_SHOT) {
+      if (s[k]) this.held.add(k);
+      else if (this.held.has(k)) s[k] = true;
+    }
+    return s;
+  }
+
+  /** A step has used the taps, or they should not count (while paused or during a replay). */
+  clear(): void {
+    this.held.clear();
+  }
+}
+
 export class Input {
   private keys = new Set<string>();
   private pressed = new Set<string>();

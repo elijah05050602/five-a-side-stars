@@ -11,9 +11,12 @@ export class Sfx {
   private ctx: AudioContext | null = null;
   private bus: GainNode | null = null;
   private crowd: { gain: GainNode; filter: BiquadFilterNode; hum: GainNode } | null = null;
+  /** The crowd and weather sources, which loop until dispose() stops them. */
+  private loops: AudioScheduledSourceNode[] = [];
   private lastKick = 0;
   private excitement = 0;
   private running = false;
+  private disposed = false;
   private whistleTimer = 0;
 
   private ensure(): AudioContext | null {
@@ -31,6 +34,7 @@ export class Sfx {
 
   /** Start the crowd bed. Safe to call before any gesture: it retries on the first event. */
   start(weather: 'clear' | 'cloudy' | 'rain' | 'snow' = 'clear'): void {
+    if (this.disposed) return;
     const c = this.ensure();
     if (!c || this.running) return;
     this.running = true;
@@ -69,6 +73,7 @@ export class Sfx {
     humSrc.connect(humFilter).connect(hum).connect(bus);
     humSrc.start(t);
     this.crowd = { gain, filter, hum };
+    this.loops.push(src, lfo, humSrc);
 
     if (weather === 'rain' || weather === 'snow') {
       // Rain is bright hiss; snow is a soft wind.
@@ -84,6 +89,7 @@ export class Sfx {
       wg.gain.exponentialRampToValueAtTime(weather === 'rain' ? 0.035 : 0.05, t + 3);
       wsrc.connect(wf).connect(wg).connect(bus);
       wsrc.start(t);
+      this.loops.push(wsrc);
       if (weather === 'snow') {
         const gust = c.createOscillator();
         gust.frequency.value = 0.07;
@@ -91,6 +97,7 @@ export class Sfx {
         gg.gain.value = 0.02;
         gust.connect(gg).connect(wg.gain);
         gust.start(t);
+        this.loops.push(gust);
       }
     }
   }
@@ -294,13 +301,24 @@ export class Sfx {
     this.clap(t + 1.6, 22, 0.08);
   }
 
+  /**
+   * Fade everything out, then stop the looping crowd and weather sources and
+   * unplug them, so no match leaves sources running in the shared context.
+   */
   dispose(): void {
+    this.disposed = true;
+    const loops = this.loops;
     if (this.ctx && this.bus) {
       const t = this.ctx.currentTime;
       this.bus.gain.setTargetAtTime(0, t, 0.3);
+      for (const s of loops) s.stop(t + 1.5);
       const bus = this.bus;
-      window.setTimeout(() => bus.disconnect(), 1500);
+      window.setTimeout(() => {
+        for (const s of loops) s.disconnect();
+        bus.disconnect();
+      }, 1500);
     }
+    this.loops = [];
     this.running = false;
     this.crowd = null;
   }

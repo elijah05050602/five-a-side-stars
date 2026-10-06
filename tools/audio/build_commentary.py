@@ -10,7 +10,8 @@ Usage (from the repo root):
 
 Reads tools/audio/commentary_script.json and writes public/audio/commentary.mp3
 plus public/audio/commentary.json, which maps each line key to its clips as
-[start, duration] in seconds.
+[start, duration] in seconds and records the MP3's length (the game refuses a
+recording of another length).
 
 To sound like a live commentator rather than a reader, each line is split into
 phrases and spoken one phrase at a time: '...' becomes a dramatic beat, each
@@ -159,6 +160,12 @@ def speak(k, key, text):
     return np.concatenate(pieces), sr
 
 
+def mp3_seconds(path):
+    """The length of an MP3 as ffprobe reports it, to the millisecond."""
+    out = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path], capture_output=True, text=True, check=True).stdout
+    return round(float(out), 3)
+
+
 def trim(x, sr, thresh=0.01):
     loud = np.where(np.abs(x) > thresh)[0]
     if len(loud) == 0:
@@ -198,7 +205,7 @@ def main(model, voices):
     subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', tmp, '-af', chain, '-ac', '1', '-codec:a', 'libmp3lame', '-b:a', '40k', dest], check=True)
     os.unlink(tmp)
     with open(os.path.join(OUT, 'commentary.json'), 'w') as f:
-        json.dump({'voice': VOICE, 'clips': index}, f, separators=(',', ':'))
+        json.dump({'voice': VOICE, 'duration': mp3_seconds(dest), 'clips': index}, f, separators=(',', ':'))
     print(f'{len(full) / sr:.1f}s of audio, {os.path.getsize(dest) // 1024} KB, {sum(len(v) for v in index.values())} clips')
 
 

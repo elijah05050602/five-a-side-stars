@@ -1,0 +1,17 @@
+# Weekly update pull requests for npm packages and the GitHub Actions the workflows use.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # three and its types move together; the build tools can come as one pull request.
+      three:
+        patterns: ['three', '@types/three']
+      build-tools:
+        patterns: ['vite', 'vitest', 'typescript', '@playwright/test', 'eslint', 'typescript-eslint', '@eslint/js', 'globals']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { BootStyle, Kit } from '../data/types';
+import { TextureCache } from './renderer';
 
 /**
  * The player model's UVs point at cells on an 8x4 grid (see tools/build-player-model.mjs).
@@ -7,7 +8,7 @@ import type { BootStyle, Kit } from '../data/types';
  * The 'leg' and 'boot' cells are vertical strips (v = top..bottom of the part), so bands of
  * colour land at exact heights: shorts hem, bare leg, sock top, sock, boot, sole.
  */
-const CELL: Record<string, [number, number]> = {
+export const CELL: Record<string, [number, number]> = {
   skin: [0, 0], hair: [1, 0], eyes: [2, 0], brow: [3, 0],
   shirt: [0, 1], shirt2: [1, 1], shorts: [2, 1], leg: [3, 1], boot: [4, 1],
 };
@@ -15,13 +16,17 @@ const C = 96; // pixels per cell
 
 export interface LookColours { skin: string; hair: string; boots: string; bootStyle?: BootStyle; bald?: boolean }
 
-const cache = new Map<string, THREE.CanvasTexture>();
+/** The atlases kids are wearing, plus the last few taken off (each one is a 768x384 canvas). */
+const atlases = new TextureCache<THREE.CanvasTexture>(6);
 
+/** The atlas for a kit and look. Each call holds it: hand it back with releaseTexture() once it is not shown. */
 export function playerAtlas(kit: Kit, look: LookColours): THREE.CanvasTexture {
   const style = look.bootStyle ?? 'classic';
   const key = `${kit.pattern}|${kit.shirt}|${kit.shirt2}|${kit.shorts}|${kit.socks}|${look.skin}|${look.hair}|${look.boots}|${style}|${look.bald ? 1 : 0}`;
-  const hit = cache.get(key);
-  if (hit) return hit;
+  return atlases.acquire(key, () => paintAtlas(kit, look, style));
+}
+
+function paintAtlas(kit: Kit, look: LookColours, style: BootStyle): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = C * 8; canvas.height = C * 4;
   const ctx = canvas.getContext('2d')!;
@@ -106,7 +111,6 @@ export function playerAtlas(kit: Kit, look: LookColours): THREE.CanvasTexture {
   tex.generateMipmaps = false;
   tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;
-  cache.set(key, tex);
   return tex;
 }
 
@@ -117,12 +121,13 @@ function shade(hex: string, k: number): string {
   return `#${c.getHexString()}`;
 }
 
-let numberCache = new Map<string, THREE.CanvasTexture>();
-/** The shirt number for the little plate on a player's back. */
+const numbers = new TextureCache<THREE.CanvasTexture>(16);
+/** The shirt number for the little plate on a player's back. Held like playerAtlas: hand it back with releaseTexture(). */
 export function numberTexture(n: number, colour: string): THREE.CanvasTexture {
-  const key = `${n}|${colour}`;
-  const hit = numberCache.get(key);
-  if (hit) return hit;
+  return numbers.acquire(`${n}|${colour}`, () => paintNumber(n, colour));
+}
+
+function paintNumber(n: number, colour: string): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 128; canvas.height = 128;
   const ctx = canvas.getContext('2d')!;
@@ -135,7 +140,6 @@ export function numberTexture(n: number, colour: string): THREE.CanvasTexture {
   ctx.fillText(String(n), 64, 70);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  numberCache.set(key, tex);
   return tex;
 }
 
@@ -146,7 +150,8 @@ export function contrastColour(hex: string): string {
   return lum > 0.45 ? '#1b2a41' : '#ffffff';
 }
 
+/** Dispose every atlas and number no kid is wearing. A match calls this when it ends; held ones stay. */
 export function clearPlayerAtlasCache(): void {
-  cache.forEach((t) => t.dispose()); cache.clear();
-  numberCache.forEach((t) => t.dispose()); numberCache = new Map();
+  atlases.clearIdle();
+  numbers.clearIdle();
 }

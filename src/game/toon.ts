@@ -1,12 +1,13 @@
 import * as THREE from 'three';
+import { shared } from './renderer';
 
 let gradient: THREE.DataTexture | null = null;
 
-/** A four-step gradient so toon materials shade in flat bands like a cartoon. */
+/** A four-step gradient so toon materials shade in flat bands like a cartoon. Every toon material shares it. */
 export function toonGradient(): THREE.DataTexture {
   if (gradient) return gradient;
   const data = new Uint8Array([70, 70, 70, 255, 140, 140, 140, 255, 205, 205, 205, 255, 255, 255, 255, 255]);
-  gradient = new THREE.DataTexture(data, 4, 1, THREE.RGBAFormat);
+  gradient = shared(new THREE.DataTexture(data, 4, 1, THREE.RGBAFormat));
   gradient.minFilter = THREE.NearestFilter;
   gradient.magFilter = THREE.NearestFilter;
   gradient.needsUpdate = true;
@@ -17,7 +18,8 @@ export function toonMaterial(opts: { color?: THREE.ColorRepresentation; map?: TH
   return new THREE.MeshToonMaterial({ color: opts.color ?? 0xffffff, map: opts.map ?? null, gradientMap: toonGradient() });
 }
 
-const outlineMat = new THREE.MeshBasicMaterial({ color: 0x12203a, side: THREE.BackSide });
+/** One outline material for every outline in the game. */
+const outlineMat = shared(new THREE.MeshBasicMaterial({ color: 0x12203a, side: THREE.BackSide }));
 
 /**
  * Cartoon outline: a slightly bigger copy of the mesh drawn inside-out in a
@@ -92,6 +94,9 @@ export function addSkinnedOutline(mesh: THREE.SkinnedMesh, thickness = 0.03): TH
       .replace('#include <beginnormal_vertex>', smooth ? 'vec3 objectNormal = vec3( outlineNormal );' : '#include <beginnormal_vertex>')
       .replace('#include <skinning_vertex>', '#include <skinning_vertex>\ntransformed += normalize(objectNormal) * uOutline;');
   };
+  // three.js caches the compiled shader by onBeforeCompile's source, which is the same text for both
+  // variants, so without this a smoothed mesh could be drawn with the other's shader or the other way round.
+  mat.customProgramCacheKey = () => (smooth ? 'skinned-outline-smooth' : 'skinned-outline');
   const o = new THREE.SkinnedMesh(mesh.geometry, mat);
   o.bind(mesh.skeleton, mesh.bindMatrix);
   o.castShadow = false;

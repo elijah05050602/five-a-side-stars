@@ -6,7 +6,10 @@
 //   git clone https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0 /tmp/kaykit
 //   npm i --no-save @gltf-transform/core @gltf-transform/functions @gltf-transform/extensions
 //   KAYKIT=/tmp/kaykit/addons/kaykit_character_pack_adventures/Characters/gltf \
-//     node tools/build-player-model.mjs public/models/player.glb remap
+//     node tools/build-player-model.mjs public/models/player.glb
+// The UV remap is on by default because the game needs it. Add `raw` after the output path to
+// skip it and keep the pack's own UVs, mesh names and texture; that file is only for looking at
+// the source parts, since the game cannot paint it (src/__tests__/playerModel.test.ts fails on it).
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { mergeDocuments, prune, dedup, resample, unpartition, quantize } from '@gltf-transform/functions';
@@ -14,10 +17,11 @@ import fs from 'fs';
 
 const PACK = process.env.KAYKIT || '/tmp/kaykit/addons/kaykit_character_pack_adventures/Characters/gltf';
 const OUT = process.argv[2] || 'player.glb';
-const REMAP = process.argv[3] === 'remap';
+const REMAP = process.argv[3] !== 'raw';
+if (!REMAP) console.warn('raw: keeping the pack UVs and texture; the game cannot paint this file');
 const KEEP_ANIMS = ['Idle', 'Walking_A', 'Running_B', 'Cheer', 'Dodge_Left', 'Dodge_Right', 'Hit_A',
-  // Keeper catches and throws, headers, a sad sit-down and calling for the ball.
-  'Throw', 'PickUp', 'Jump_Full_Long', 'Sit_Floor_Down', 'Spellcast_Raise'];
+  // A keeper scooping up the ball and throwing it, and a beaten keeper sitting down.
+  'PickUp', 'Throw', 'Sit_Floor_Down'];
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 
 const doc = await io.read(`${PACK}/Rogue.glb`);
@@ -224,7 +228,7 @@ function capHoles(mesh, name) {
       const srcOf = (k) => owners[loop[k]].by.get(pi);
       const COLLAR_Y = 1.05;
       const isV = (k) => pts[k][1] < COLLAR_Y && pts[k][2] > 0;
-      let a = loop.findIndex((_, k) => isV(k) && !isV((k + loop.length - 1) % loop.length));
+      const a = loop.findIndex((_, k) => isV(k) && !isV((k + loop.length - 1) % loop.length));
       const run = [];
       if (a >= 0) for (let k = a; isV(k); k = (k + 1) % loop.length) run.push(k);
       const nL = loop.length;
@@ -375,7 +379,7 @@ console.log('wrote', OUT, (st.size / 1024).toFixed(0), 'KB');
 console.log('nodes with meshes:', root.listNodes().filter((n) => n.getMesh()).map((n) => n.getName()).join(', '));
 console.log('anims:', root.listAnimations().map((a) => a.getName()).join(', '));
 // Body-only bounds (skinned meshes in bind pose)
-let min = [1e9, 1e9, 1e9], max = [-1e9, -1e9, -1e9];
+const min = [1e9, 1e9, 1e9], max = [-1e9, -1e9, -1e9];
 for (const n of root.listNodes()) if (n.getMesh()) for (const p of n.getMesh().listPrimitives()) { const a = p.getAttribute('POSITION'); const mn = a.getMin([]), mx = a.getMax([]); for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], mn[i]); max[i] = Math.max(max[i], mx[i]); } }
 console.log('bounds', min.map((v) => v.toFixed(2)), max.map((v) => v.toFixed(2)));
 // Where does the nose point? Head mesh extremes on x and z.

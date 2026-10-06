@@ -6,6 +6,7 @@ import { faceTexture, type Expression } from './playerFace';
 import { ProceduralPlayerModel } from './ProceduralPlayerModel';
 import { DIVE_AIR_SHARE, DRIBBLE_STRIDE, SLIDE_AT, type Celebration, type KickKind, type MoveKind } from './sim';
 import { graphicsProfile } from './graphics';
+import { disposeObject, releaseTexture, shared } from './renderer';
 import { addOutline, addSkinnedOutline, smoothOutlineNormals, toonMaterial } from './toon';
 
 /** Models are drawn bigger than their physical size so the kids read clearly from the camera. */
@@ -80,11 +81,11 @@ function shadowTexture(): THREE.CanvasTexture {
   g.addColorStop(1, 'rgba(10,25,40,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 128, 128);
-  shadowTex = new THREE.CanvasTexture(c);
+  shadowTex = shared(new THREE.CanvasTexture(c));
   return shadowTex;
 }
-const shadowGeo = new THREE.PlaneGeometry(1.25, 1.0);
-const plateGeo = new THREE.PlaneGeometry(0.44, 0.44);
+const shadowGeo = shared(new THREE.PlaneGeometry(1.25, 1.0));
+const plateGeo = shared(new THREE.PlaneGeometry(0.44, 0.44));
 
 type Loco = 'idle' | 'walk' | 'run' | 'cheer';
 type Head = 'Head_plain' | 'Head_short' | 'Head_long';
@@ -257,6 +258,13 @@ export class PlayerModel {
 
   private buildRig(asset: PlayerAsset): void {
     const rig = cloneRig(asset);
+    // The clone's geometry (and the file's own materials) belong to the loaded model, which every kid shares.
+    rig.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      shared(m.geometry);
+      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) shared(mat);
+    });
     // The file faces +z; the game treats local +x as forward.
     rig.rotation.y = Math.PI / 2;
     this.rigScale = (this.scale * MODEL_SCALE * BASE_HEIGHT) / asset.height;
@@ -376,10 +384,18 @@ export class PlayerModel {
 
   setKit(kit: Kit, number: number): void {
     this.kit = kit; this.number = number;
-    this.material.map = this.atlas();
-    this.material.needsUpdate = true;
-    if (this.plate) { const pm = this.plate.material as THREE.MeshBasicMaterial; pm.map = numberTexture(number, contrastColour(kit.shirt)); pm.needsUpdate = true; }
+    this.swapMap(this.material, this.atlas());
+    if (this.plate) this.swapMap(this.plate.material as THREE.MeshBasicMaterial, numberTexture(number, contrastColour(kit.shirt)));
     this.fallback?.setKit(kit, number);
+  }
+
+  /** Put a cached texture on one of this kid's materials and hand back the one it replaces. */
+  private swapMap(mat: THREE.MeshToonMaterial | THREE.MeshBasicMaterial, tex: THREE.Texture): void {
+    const old = mat.map;
+    mat.map = tex;
+    mat.needsUpdate = true;
+    // Even when it is the same texture: getting it again took a second hold.
+    releaseTexture(old);
   }
 
   setLook(skin: string, hair: string, hairStyle?: Player['hairStyle'], boots?: string, bootStyle?: BootStyle): void {
@@ -387,8 +403,7 @@ export class PlayerModel {
     if (boots) this.boots = boots;
     if (bootStyle) this.bootStyle = bootStyle;
     if (hairStyle) this.hairStyle = hairStyle;
-    this.material.map = this.atlas();
-    this.material.needsUpdate = true;
+    this.swapMap(this.material, this.atlas());
     this.hairMat.color.set(hair);
     this.faceKey = '';
     this.applyHead();
@@ -430,8 +445,7 @@ export class PlayerModel {
     const key = `${expr}|${gx}|${gy}`;
     if (key === this.faceKey) return;
     this.faceKey = key;
-    this.faceMat.map = faceTexture(this.skin, expr, gx, gy, this.hair);
-    this.faceMat.needsUpdate = true;
+    this.swapMap(this.faceMat, faceTexture(this.skin, expr, gx, gy, this.hair));
   }
 
   /** Drives the clips and the procedural layer (leans, hops, slides) from the sim state. */
@@ -920,24 +934,19 @@ export class PlayerModel {
   }
 
   dispose(): void {
+    if (this.disposed) return;
     this.disposed = true;
     this.mixer?.stopAllAction();
     if (this.rig) this.mixer?.uncacheRoot(this.rig);
-    // Skinned geometry is shared with the loaded asset, so only our own materials and hair pieces go.
-    this.rig?.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh && m.material !== this.material && m.material !== this.faceMat && m.material !== this.hairMat) (m.material as THREE.Material).dispose();
-    });
-    this.hairAcc?.children.forEach((c) => (c as THREE.Mesh).geometry.dispose());
-    this.material.dispose();
-    this.faceMat.dispose();
-    this.hairMat.dispose();
-    (this.ring.material as THREE.Material).dispose();
-    this.ring.geometry.dispose();
-    (this.teamRing.material as THREE.Material).dispose();
-    this.teamRing.geometry.dispose();
-    (this.marker.material as THREE.Material).dispose();
-    this.marker.geometry.dispose();
-    this.fallback?.dispose();
+    // The kit, face and number textures are cached for every kid who looks the same: hand them back.
+    releaseTexture(this.material.map);
+    releaseTexture(this.faceMat.map);
+    if (this.plate) releaseTexture((this.plate.material as THREE.MeshBasicMaterial).map);
+    if (this.fallback) { this.fallback.group.removeFromParent(); this.fallback.dispose(); }
+    // The rest is this kid's own: rings, shadow, outlines, skeletons, hair pieces and the number plate.
+    // The rig's geometry and the outline material are shared, so disposeObject leaves them be.
+    disposeObject(this.group);
+    // These are not always in the tree (before the rig loads, or on a model with no face part).
+    for (const m of [this.material, this.faceMat, this.hairMat]) m.dispose();
   }
 }
