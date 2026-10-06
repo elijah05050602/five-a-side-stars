@@ -268,6 +268,14 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 .overlay[hidden] { display: none; }
 .overlay-card { border: var(--stroke); box-shadow: 0 8px 0 var(--navy); text-align: center; min-width: min(420px, 90vw); display: flex; flex-direction: column; gap: 12px; align-items: center; }
 .overlay-card h2 { font-size: 40px; }
+/* Full time: both badges and full names either side of the score; a long name wraps rather than squeezing the score. */
+.ft-score { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 14px; width: 100%; }
+.ft-team { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; font-weight: 700; font-size: 17px; line-height: 1.15; overflow-wrap: anywhere; }
+@media (max-width: 520px), (max-height: 520px) {
+  .ft-score { gap: 10px; }
+  .ft-team { font-size: 15px; }
+  .ft-score .score-big { font-size: 44px; }
+}
 
 @media (max-width: 820px) {
   .builder-body { grid-template-columns: 1fr; }
