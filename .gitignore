@@ -6,3 +6,7 @@ __pycache__/
 
 # Scratch git worktrees made by Claude Code helpers
 .claude/worktrees/
+
+# Playwright output
+test-results/
+playwright-report/
