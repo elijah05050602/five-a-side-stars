@@ -18,7 +18,9 @@ hints.json (optional) maps a take number to its line boundaries,
 [[end of line 1, start of line 2], ...] in seconds, read off a Scribe
 transcript of the take; see split().
 
-Writes public/audio/commentary.mp3 and public/audio/commentary.json.
+Writes public/audio/commentary.mp3 and public/audio/commentary.json. The index
+also records the MP3's length (from ffprobe): the game refuses a recording of
+another length, so a stale cached copy of one file never plays the wrong lines.
 """
 import json
 import os
@@ -67,6 +69,12 @@ def plan(recorded=None):
 def load(path):
     raw = subprocess.run(['ffmpeg', '-loglevel', 'error', '-i', path, '-f', 'f32le', '-ac', '1', '-ar', str(SR), '-'], capture_output=True, check=True).stdout
     return np.frombuffer(raw, dtype=np.float32).copy()
+
+
+def mp3_seconds(path):
+    """The length of an MP3 as ffprobe reports it, to the millisecond."""
+    out = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path], capture_output=True, text=True, check=True).stdout
+    return round(float(out), 3)
 
 
 def spoken_chars(text):
@@ -162,7 +170,7 @@ def build(batches_path, takes_dir, hints_path=None):
     subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', tmp, '-af', chain, '-ac', '1', '-codec:a', 'libmp3lame', '-b:a', '32k', dest], check=True)
     os.unlink(tmp)
     with open(os.path.join(OUT, 'commentary.json'), 'w') as f:
-        json.dump({'voice': 'elevenlabs:Connor', 'clips': index}, f, separators=(',', ':'))
+        json.dump({'voice': 'elevenlabs:Connor', 'duration': mp3_seconds(dest), 'clips': index}, f, separators=(',', ':'))
     print(f'{len(full) / SR:.1f}s of audio, {os.path.getsize(dest) // 1024} KB, {sum(len(v) for v in index.values())} clips')
 
 

@@ -1,5 +1,5 @@
 import { getSettings } from '../data/storage';
-import { audioContext, channelBus, loadAudio } from './audio';
+import { audioContext, channelBus, loadAudio, releaseAudio } from './audio';
 import type { LineKey } from './commentary';
 
 /**
@@ -14,7 +14,8 @@ import type { LineKey } from './commentary';
  * into silence.
  */
 type Clip = [start: number, duration: number];
-interface Sprite { clips: Partial<Record<string, Clip[]>> }
+/** commentary.json: where each clip lies in the recording, and how long the recording it was built for is (s). */
+interface Sprite { duration?: number; clips: Partial<Record<string, Clip[]>> }
 /** A line (and its score call) scheduled on the context: being spoken, or waiting for the one before it. */
 interface Spoken { srcs: AudioBufferSourceNode[]; gain: GainNode; prio: number; until: number }
 
@@ -54,27 +55,50 @@ export const FALLBACK: Partial<Record<LineKey, LineKey>> = {
 const SPRITE_RATE = 24000;
 /** After a failed download, how long (ms) before a line may try again, so an offline phone is not asked for every line. */
 const RETRY_MS = 10000;
+/** How far (s) a decoded recording's length may stray from the one its index was built for: MP3 decoders differ by a few frames. */
+const LENGTH_SLACK = 0.5;
 
 interface Loaded { sprite: Sprite; buffer: AudioBuffer }
 let spritePromise: Promise<Loaded | null> | null = null;
 /** The clips once they have arrived, for a Commentary to pick up straight away. */
 let loaded: Loaded | null = null;
 let retryAt = -Infinity;
+/** The index and the recording turned out not to belong together: silent until the next visit. */
+let mismatched = false;
+
+/**
+ * True when the index belongs to this recording. They are separate files, so
+ * a stale cache can pair an old index with a new recording (or the other way
+ * round), and then every cue would point into the wrong line.
+ */
+export function spriteMatches(sprite: Sprite, seconds: number): boolean {
+  if (typeof sprite.duration === 'number') return Math.abs(sprite.duration - seconds) <= LENGTH_SLACK;
+  // An index from before the length was stored: at least every cue must lie inside the recording.
+  return Object.values(sprite.clips).every((clips) => (clips ?? []).every(([start, dur]) => start + dur <= seconds));
+}
 
 /**
  * Fetch the clips (once). Called on the first tap so the opening kick-off line
  * is ready in time, when a match starts, when commentary is switched on, and
  * by a line that finds the clips missing (commentary was off when the match
  * started, or a download failed: that is tried again at most every ten seconds).
+ * An index and recording that do not match are refused: wrong lines are worse
+ * than none, and asking again would only bring the same pair from the cache.
  */
 export function preloadCommentary(): Promise<Loaded | null> {
-  if (!getSettings().commentary || !audioContext()) return Promise.resolve(null);
+  if (!getSettings().commentary || mismatched || !audioContext()) return Promise.resolve(null);
   if (!spritePromise) {
     if (performance.now() < retryAt) return Promise.resolve(null);
     spritePromise = Promise.all([
       fetch(`${import.meta.env.BASE_URL}audio/commentary.json`).then((r) => (r.ok ? (r.json() as Promise<Sprite>) : null)).catch(() => null),
       loadAudio('audio/commentary.mp3', SPRITE_RATE),
-    ]).then(([sprite, buffer]) => (sprite && buffer ? { sprite, buffer } : null));
+    ]).then(([sprite, buffer]) => {
+      if (!sprite || !buffer) return null;
+      if (spriteMatches(sprite, buffer.duration)) return { sprite, buffer };
+      mismatched = true;
+      releaseAudio('audio/commentary.mp3');
+      return null;
+    });
     void spritePromise.then((got) => {
       if (got) loaded = got;
       else { spritePromise = null; retryAt = performance.now() + RETRY_MS; }

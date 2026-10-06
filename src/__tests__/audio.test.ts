@@ -114,9 +114,9 @@ const CLIPS: Record<string, [number, number][]> = {
   goalOpener: [[15, 3]], fulltimeWin: [[19, 2.5]], score_1_0: [[22, 1]], score_2_1: [[24, 1]],
 };
 
-/** Serve the commentary index and a recording of the given length. */
-function serveSprite(seconds = 705.24): void {
-  files['audio/commentary.json'] = () => ({ voice: 'test', clips: CLIPS });
+/** Serve a recording of the given length and an index built for a recording of `indexFor` seconds (none: an old index). */
+function serveSprite(seconds = 705.24, indexFor: number | undefined = 705.24): void {
+  files['audio/commentary.json'] = () => ({ voice: 'test', ...(indexFor === undefined ? {} : { duration: indexFor }), clips: CLIPS });
   files['audio/commentary.mp3'] = () => fakeMp3(seconds);
 }
 
@@ -499,6 +499,38 @@ describe('commentary: getting the clips', () => {
     release();
     await settle();
     expect(said(FakeContext.made[0]).map((s) => s.key)).toEqual(['kickoffFirst']);
+  });
+
+  it('refuses a recording that does not match its index, and stays silent rather than say the wrong lines', async () => {
+    vi.useFakeTimers();
+    serveSprite(690, 705.24); // a new recording with the index of an old one, from a stale cache
+    const { Commentary, preloadCommentary } = await import('../game/voice');
+    expect(await preloadCommentary()).toBeNull();
+    const v = new Commentary();
+    v.say('goalOpener', [1, 0]);
+    vi.advanceTimersByTime(60_000);
+    v.say('save');
+    await settle();
+    expect(said(FakeContext.made[0])).toEqual([]);
+    // Nothing is fetched again for this visit (the same cache would give the same pair)...
+    expect(fetched.filter((u) => u.endsWith('commentary.mp3'))).toHaveLength(1);
+    // ...and the refused recording's samples are let go.
+    const { loadAudio } = await import('../game/audio');
+    void loadAudio('audio/commentary.mp3', 24000);
+    expect(fetched.filter((u) => u.endsWith('commentary.mp3'))).toHaveLength(2);
+  });
+
+  it('allows the few hundredths of a second MP3 decoders differ by', async () => {
+    serveSprite(705.17, 705.24); // Chromium trims the encoder delay and padding: ffprobe says 705.24 s
+    const { preloadCommentary } = await import('../game/voice');
+    expect(await preloadCommentary()).not.toBeNull();
+  });
+
+  it('an index from before lengths were stored is used only if every cue lies inside the recording', async () => {
+    serveSprite(20, undefined); // the last cue in CLIPS ends at 25 s
+    const voice = await import('../game/voice');
+    expect(await voice.preloadCommentary()).toBeNull();
+    expect(voice.spriteMatches({ clips: CLIPS }, 30)).toBe(true);
   });
 
   it('a line said too long before the clips arrive is not spoken late', async () => {
