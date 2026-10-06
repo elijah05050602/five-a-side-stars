@@ -6,8 +6,8 @@ import { disposeObject } from './renderer';
 /**
  * Weather and time of day for a match: sky and fog colours, the sun's colour
  * and angle, floodlights at night, cloud shadows drifting over the grass,
- * rain streaks or snowflakes, stars and a moon. It finds the scene's lights
- * itself, so the match scene only has to create it and call update().
+ * rain streaks or snowflakes, stars and a moon. The match hands it the sun and
+ * the sky light to restyle, then only has to call update().
  */
 export type WeatherKind = 'clear' | 'cloudy' | 'rain' | 'snow';
 export type TimeOfDay = 'day' | 'sunset' | 'night';
@@ -51,6 +51,9 @@ export function describeConditions(c: Conditions): string {
 
 interface Look { sky: string; fog: string; sun: string; sunIntensity: number; sunPos: [number, number, number]; hemiSky: string; hemiGround: string; hemiIntensity: number; exposure: number }
 
+/** The lights the weather restyles. Any other light in the scene (the match's rim light) keeps its own look. */
+export interface WeatherLights { sun: THREE.DirectionalLight; sky: THREE.HemisphereLight }
+
 function lookFor(c: Conditions): Look {
   const base: Look = { sky: '#8fd3ff', fog: '#8fd3ff', sun: '#ffffff', sunIntensity: 2.2, sunPos: [-12, 30, 18], hemiSky: '#dff3ff', hemiGround: '#3b7f4e', hemiIntensity: 1.25, exposure: 1.15 };
   if (c.time === 'sunset') Object.assign(base, { sky: '#ffb36b', fog: '#ffc994', sun: '#ffb070', sunIntensity: 2.0, sunPos: [-28, 12, 10], hemiSky: '#ffd3a8', hemiGround: '#5a4a3a', hemiIntensity: 1.0, exposure: 1.1 });
@@ -78,24 +81,20 @@ export class Weather {
   private time = 0;
   private readonly fogDistance: [number, number];
 
-  constructor(private readonly scene: THREE.Scene, private readonly dims: { length: number; width: number }, readonly conditions: Conditions, gfx: Pick<GraphicsProfile, 'liteWeather' | 'spotlights'>) {
+  constructor(private readonly scene: THREE.Scene, private readonly dims: { length: number; width: number }, readonly conditions: Conditions, gfx: Pick<GraphicsProfile, 'liteWeather' | 'spotlights'>, private readonly lights: WeatherLights) {
     const lowDetail = gfx.liteWeather;
     const look = lookFor(conditions);
     scene.background = new THREE.Color(look.sky);
     const poor = conditions.weather === 'rain' || conditions.weather === 'snow' || (conditions.weather === 'cloudy' && conditions.time !== 'sunset');
     this.fogDistance = conditions.time === 'night' ? [40, 95] : poor ? [45, 100] : [70, 130];
     scene.fog = new THREE.Fog(look.fog, this.fogDistance[0], this.fogDistance[1]);
-    scene.traverse((o) => {
-      if (o instanceof THREE.DirectionalLight) {
-        o.color.set(look.sun);
-        o.intensity = look.sunIntensity;
-        o.position.set(...look.sunPos);
-      } else if (o instanceof THREE.HemisphereLight) {
-        o.color.set(look.hemiSky);
-        o.groundColor.set(look.hemiGround);
-        o.intensity = look.hemiIntensity;
-      }
-    });
+    const { sun, sky } = lights;
+    sun.color.set(look.sun);
+    sun.intensity = look.sunIntensity;
+    sun.position.set(...look.sunPos);
+    sky.color.set(look.hemiSky);
+    sky.groundColor.set(look.hemiGround);
+    sky.intensity = look.hemiIntensity;
     scene.add(this.group);
 
     if (conditions.time === 'night') this.buildNight(lowDetail, gfx.spotlights);
@@ -146,11 +145,11 @@ export class Weather {
       beam.rotateX(Math.PI / 2);
       this.group.add(beam);
     }
-    // Without the spotlights (Low graphics), brighten the existing lights instead: a flat floodlit wash costs nothing per pixel.
-    if (!spotlights) this.scene.traverse((o) => {
-      if (o instanceof THREE.HemisphereLight) { o.intensity += 0.9; o.color.lerp(new THREE.Color(0xf3f7ff), 0.5); }
-      else if (o instanceof THREE.DirectionalLight && o.castShadow) { o.intensity += 0.9; o.color.lerp(new THREE.Color(0xf3f7ff), 0.5); }
-    });
+    // Without the spotlights (Low graphics), brighten the sky light and the sun instead: a flat floodlit wash
+    // costs nothing per pixel. (Low has no shadow map, so this must not depend on the sun casting shadows.)
+    if (!spotlights) {
+      for (const light of [this.lights.sky, this.lights.sun]) { light.intensity += 0.9; light.color.lerp(new THREE.Color(0xf3f7ff), 0.5); }
+    }
     this.scene.traverse((o) => { if (o.userData.lamp && o instanceof THREE.Mesh) (o.material as THREE.MeshStandardMaterial).emissiveIntensity = 2.5; });
   }
 
