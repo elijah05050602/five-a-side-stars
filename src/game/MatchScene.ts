@@ -232,7 +232,8 @@ export class MatchScene {
    * was already too slow.
    */
   private adapt(ms: number): void {
-    if (!this.gfx.adaptive || ms > 250 || document.hidden) return;
+    // A frame that took no time (or claims to have ended before it began) says nothing about speed.
+    if (!this.gfx.adaptive || ms <= 0 || ms > 250 || document.hidden) return;
     this.frameMs += (ms - this.frameMs) * 0.05;
     this.adaptTimer += ms / 1000;
     const slow = this.frameMs > 25, smooth = this.frameMs < 19;
@@ -384,8 +385,12 @@ export class MatchScene {
   private frame = (now: number): void => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.frame);
-    const dt = Math.min(0.1, (now - this.last) / 1000);
-    this.adapt(now - this.last);
+    // The first frame can be stamped up to a second or so before the loop started (the browser dates it
+    // to a frame that fell due while the match was being built). Time must never run backwards: a
+    // negative step flings the camera far off the pitch.
+    const ms = Math.max(0, now - this.last);
+    const dt = Math.min(0.1, ms / 1000);
+    this.adapt(ms);
     this.last = now;
     if (this.sim.shootout && this.upfield && (this.sim.shootout.taking === 0 ? 1 : -1) !== this.upDir) this.updateView();
     const input = this.toPitch(this.input.poll());
