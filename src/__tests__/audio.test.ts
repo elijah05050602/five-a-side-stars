@@ -236,3 +236,29 @@ describe('audio context and the page', () => {
     expect(c.state).toBe('running');
   });
 });
+
+describe('match sounds', () => {
+  it('fades out, then stops and unplugs the looping crowd and weather when the match ends', async () => {
+    vi.useFakeTimers();
+    const { channelBus } = await import('../game/audio');
+    const { Sfx } = await import('../game/sfx');
+    const sfx = new Sfx();
+    sfx.start('snow');
+    const c = FakeContext.made[0];
+    const loops = c.live();
+    expect(loops).toHaveLength(5); // crowd noise, its swell, the hum, the wind and its gusts
+    const bus = c.gains.find((g) => g.outputs.has(channelBus('sfx')))!;
+    c.currentTime = 10;
+    sfx.dispose();
+    expect(bus.gain.events).toContainEqual({ type: 'target', value: 0, time: 10 });
+    // Every loop is told to stop once the fade has died away, so none is left running.
+    for (const s of loops) expect(s.stoppedAt).toBeGreaterThanOrEqual(11.5);
+    expect(c.live()).toHaveLength(0);
+    vi.advanceTimersByTime(1500);
+    for (const s of loops) expect(s.disconnected).toBe(true);
+    expect(bus.disconnected).toBe(true);
+    // A late call does not start a new crowd on the old bus.
+    sfx.start('rain');
+    expect(c.live()).toHaveLength(0);
+  });
+});
