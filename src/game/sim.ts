@@ -328,6 +328,8 @@ export class MatchSim {
   controlledBy: [SimPlayer | null, SimPlayer | null] = [null, null];
   events: SimEvent[] = [];
   private switchHolds: [number, number] = [0, 0];
+  /** The length of the step being run, for the helpers that change things at a rate (steering, the switch hold). */
+  private stepDt = 1 / 60;
   /**
    * A newly picked player whose human has not touched the stick yet runs for them (presses the ball,
    * gets back), so a turnover never leaves the new defender standing still waiting for input.
@@ -381,6 +383,7 @@ export class MatchSim {
           mul, match: freshMatchStats(),
         };
         this.players.push(p);
+        this.sides[side].push(p);
       });
       // Line the outfield players up in the team's formation.
       const outfield = this.players.filter((p) => p.side === side && !p.isKeeper);
@@ -461,7 +464,9 @@ export class MatchSim {
   /** Player 1's controlled player (what the main HUD shows). */
   get controlled(): SimPlayer | null { return this.config.humanSide === null ? null : this.controlledBy[this.config.humanSide]; }
   get controlled2(): SimPlayer | null { return this.config.humanSide2 == null ? null : this.controlledBy[this.config.humanSide2]; }
-  teamOf(side: Side): SimPlayer[] { return this.players.filter((p) => p.side === side); }
+  /** Each side's players, listed once (nobody changes sides); the AI asks for them many times a step. Do not modify. */
+  private readonly sides: [SimPlayer[], SimPlayer[]] = [[], []];
+  teamOf(side: Side): SimPlayer[] { return this.sides[side]; }
   goalX(side: Side): number { return side === 0 ? this.length / 2 : -this.length / 2; } // the goal this side attacks
   ownGoalX(side: Side): number { return -this.goalX(side); }
   get minute(): number { return Math.floor((this.clock / (this.config.halfSeconds * 2)) * 40); }
@@ -528,6 +533,7 @@ export class MatchSim {
 
   /** Advance the simulation. dt is seconds (call with a fixed step). */
   step(dt: number, input: InputState, input2?: InputState): void {
+    this.stepDt = dt;
     if (this.phase === 'paused' || this.phase === 'fulltime') return;
     if (this.phase === 'goal') {
       this.phaseTimer += dt;
@@ -739,7 +745,7 @@ export class MatchSim {
       this.switchHolds[side] = 2.5;
       return;
     }
-    this.switchHolds[side] = Math.max(0, this.switchHolds[side] - 1 / 60);
+    this.switchHolds[side] = Math.max(0, this.switchHolds[side] - this.stepDt);
     if (this.switchHolds[side] > 0) return;
     // Auto-select the outfield player closest to where the ball is heading.
     const ahead = v(b.pos.x + b.vel.x * 0.4, b.pos.z + b.vel.z * 0.4);
@@ -1347,7 +1353,7 @@ export class MatchSim {
   private steer(p: SimPlayer, targetVel: V2, accel: number): void {
     const dx = targetVel.x - p.vel.x, dz = targetVel.z - p.vel.z;
     const d = Math.hypot(dx, dz);
-    const step = accel / 60;
+    const step = accel * this.stepDt;
     if (d <= step) p.vel = v(targetVel.x, targetVel.z);
     else p.vel = v(p.vel.x + (dx / d) * step, p.vel.z + (dz / d) * step);
   }

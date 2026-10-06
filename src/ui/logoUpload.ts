@@ -58,7 +58,10 @@ export function wireLogoControls(root: HTMLElement, resolve: (key: string) => Ba
       if (!file || !badge) return;
       if (file.size > 12 * 1024 * 1024) { alert('That picture is very big. Please pick one under 12 MB.'); return; }
       try {
-        badge.image = await fileToLogo(file);
+        const image = await fileToLogo(file);
+        // Left the screen while the picture was being shrunk: drop it rather than redraw a screen that has gone.
+        if (!btn.isConnected) return;
+        badge.image = image;
         onChange(key);
       } catch (e) {
         alert((e as Error).message || 'Sorry, that picture could not be used.');

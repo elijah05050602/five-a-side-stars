@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BallModel } from './BallModel';
-import { Input, type InputState } from './input';
+import { Input, PressLatch, type InputState } from './input';
 import { CAMERA_HEIGHT_SCALE, getControls } from '../data/controls';
 import { buildPitch, pitchExtras } from './Pitch';
 import { Crowd } from './Crowd';
@@ -8,7 +8,8 @@ import { Commentator } from './commentary';
 import { Weather, resolveConditions, type Conditions, type WeatherChoice } from './Weather';
 import { toonMaterial } from './toon';
 import { PlayerModel, type AnimState } from './PlayerModel';
-import type { Expression } from './playerFace';
+import { clearPlayerAtlasCache } from './playerAtlas';
+import { clearFaceCache, type Expression } from './playerFace';
 import type { Kit } from '../data/types';
 import { CROWD_SHOT_AT, DIVE_RECOVER, MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
@@ -19,6 +20,7 @@ import { getSettings } from '../data/storage';
 import { TutorialCoach } from './tutorial';
 import { batchStatic } from './batchStatic';
 import { graphicsProfile, type GraphicsProfile } from './graphics';
+import { EXPOSURE, TONE_MAPPING, disposeObject } from './renderer';
 
 export type SimMode = NonNullable<SimConfig['mode']>;
 
@@ -46,14 +48,14 @@ export interface MatchResult {
   shootout: [boolean[], boolean[]] | null;
   trainingPoints: number;
   twoPlayer: boolean;
-  /** Set by the tournament flow when a drawn match was won on penalties. */
-  shootoutWon?: boolean;
 }
 
 /**
  * Owns the Three.js scene for one match: builds the pitch and players from the
  * sim, runs the fixed-step loop, follows the action with the camera and drives
- * the HUD. Call dispose() when leaving the match.
+ * the HUD. Call dispose() when leaving the match. The renderer is borrowed (one
+ * for the app's lifetime, see renderer.ts), so it is set up afresh here and
+ * left for the next match afterwards.
  */
 export class MatchScene {
   readonly sim: MatchSim;
@@ -71,6 +73,8 @@ export class MatchScene {
   private readonly voice = new Commentary();
   readonly conditions: Conditions;
   private readonly weather: Weather;
+  private readonly pitch: THREE.Group;
+  private readonly sun: THREE.DirectionalLight;
   private readonly extras: ReturnType<typeof pitchExtras>;
   /** Rolling record of the last few seconds, oldest first. */
   private readonly history: ReplayFrame[] = [];
@@ -83,6 +87,8 @@ export class MatchScene {
   private raf = 0;
   private last = 0;
   private acc = 0;
+  /** Taps read on frames that ran no sim step, kept for the next step that does. */
+  private readonly latches = [new PressLatch(), new PressLatch()] as const;
   private readonly camTarget = new THREE.Vector3();
   private readonly camPos = new THREE.Vector3();
   private readonly camLook = new THREE.Vector3();
@@ -103,7 +109,7 @@ export class MatchScene {
   private frameMs = 16.7;
   private adaptTimer = -3;
 
-  constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, config: SimConfig, private readonly onFinish: (r: MatchResult) => void, private readonly onQuit: () => void, options: SceneOptions = {}) {
+  constructor(renderer: THREE.WebGLRenderer, uiRoot: HTMLElement, config: SimConfig, private readonly onFinish: (r: MatchResult) => void, private readonly onQuit: () => void, options: SceneOptions = {}) {
     this.sim = new MatchSim(config);
     this.conditions = resolveConditions(options.weather ?? 'random');
     this.commentator = new Commentator(this.conditions);
@@ -116,22 +122,26 @@ export class MatchScene {
     const controls = getControls();
     this.input = new Input(twoPlayer ? controls.keys.p1 : controls.keys.solo, twoPlayer ? 0 : 'any', controls.pad);
     this.input2 = twoPlayer ? new Input(controls.keys.p2, 1, controls.pad) : null;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    this.renderer = renderer;
     // The Graphics setting (Auto picks Low on phones) trades detail for a smooth frame rate.
     const gfx = graphicsProfile();
     this.gfx = gfx;
     this.pixelRatio = Math.min(window.devicePixelRatio, gfx.maxPixelRatio);
-    this.renderer.setPixelRatio(this.pixelRatio);
-    this.renderer.shadowMap.enabled = gfx.shadowMap;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    // Everything the match relies on is set here, whatever the last match (or Auto graphics) left behind.
+    renderer.setPixelRatio(this.pixelRatio);
+    renderer.shadowMap.enabled = gfx.shadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = TONE_MAPPING;
+    renderer.toneMappingExposure = EXPOSURE;
+    renderer.setClearColor(0x000000, 1);
+    renderer.info.reset();
     this.scene.background = new THREE.Color('#8fd3ff');
     this.scene.fog = new THREE.Fog('#8fd3ff', 70, 130);
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
 
     const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+    this.sun = sun;
     sun.position.set(-12, 30, 18);
     sun.castShadow = gfx.shadowMap;
     sun.shadow.mapSize.set(gfx.shadowSize, gfx.shadowSize);
@@ -148,6 +158,7 @@ export class MatchScene {
     const runoff = this.sim.mode === 'match';
     const pitch = buildPitch({ sceneryShadows: gfx.sceneryShadows, pbr: gfx.pbrGround, length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth, runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0 });
     this.scene.add(pitch);
+    this.pitch = pitch;
     this.extras = pitchExtras(pitch);
     this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, gfx);
     if (gfx.batchScenery) batchStatic(pitch, [...this.extras.nets.map((n) => n.group), this.extras.scoreboard.group]);
@@ -204,7 +215,7 @@ export class MatchScene {
     window.visualViewport?.addEventListener('resize', this.onResize);
     // Phones report the new size late after a turn, so also watch the canvas itself.
     this.resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(this.onResize);
-    this.resizeObserver?.observe(canvas);
+    this.resizeObserver?.observe(renderer.domElement);
     this.resize();
     this.camTarget.set(0, 0, 0);
     this.camPos.copy(this.cameraGoal(this.camTarget));
@@ -221,7 +232,8 @@ export class MatchScene {
    * was already too slow.
    */
   private adapt(ms: number): void {
-    if (!this.gfx.adaptive || ms > 250 || document.hidden) return;
+    // A frame that took no time (or claims to have ended before it began) says nothing about speed.
+    if (!this.gfx.adaptive || ms <= 0 || ms > 250 || document.hidden) return;
     this.frameMs += (ms - this.frameMs) * 0.05;
     this.adaptTimer += ms / 1000;
     const slow = this.frameMs > 25, smooth = this.frameMs < 19;
@@ -373,13 +385,17 @@ export class MatchScene {
   private frame = (now: number): void => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.frame);
-    const dt = Math.min(0.1, (now - this.last) / 1000);
-    this.adapt(now - this.last);
+    // The first frame can be stamped up to a second or so before the loop started (the browser dates it
+    // to a frame that fell due while the match was being built). Time must never run backwards: a
+    // negative step flings the camera far off the pitch.
+    const ms = Math.max(0, now - this.last);
+    const dt = Math.min(0.1, ms / 1000);
+    this.adapt(ms);
     this.last = now;
     if (this.sim.shootout && this.upfield && (this.sim.shootout.taking === 0 ? 1 : -1) !== this.upDir) this.updateView();
-    const input = this.toPitch(this.input.poll());
+    const input = this.latches[0].take(this.toPitch(this.input.poll()));
     const raw2 = this.input2?.poll();
-    const input2 = raw2 && this.toPitch(raw2);
+    const input2 = raw2 && this.latches[1].take(this.toPitch(raw2));
     if (input.pause || input2?.pause) this.sim.togglePause();
     // Fixed 60 Hz simulation steps for stable physics. The sim waits while a replay plays.
     const replaying = !!this.replay && this.replay.wait <= 0;
@@ -394,6 +410,9 @@ export class MatchScene {
       steps++;
     }
     if (replaying) this.acc = 0;
+    // The first step has used the taps (a paused sim steps too, and drops them). Taps during a replay
+    // are dropped as well, so they do not take the kick-off the moment it ends.
+    if (steps > 0 || replaying) { this.latches[0].clear(); this.latches[1].clear(); }
     for (const ev of this.sim.events) {
       this.sfx.play(ev);
       if (ev.type === 'fulltime') music.jingle(this.fullTimeJingle());
@@ -526,7 +545,20 @@ export class MatchScene {
     this.hud.destroy();
     this.models.forEach((m) => m.dispose());
     this.crowd.dispose();
-    this.renderer.dispose();
+    // The crowd frees its own meshes but not the textures it borrows from caches (kit shirts, the fans'
+    // faces): this frees their GPU copies too, and they are uploaded again if the next match wants them.
+    disposeObject(this.crowd.group);
+    // The grass, boards, scoreboard, nets and merged stadium; then the ball, the tutorial star and the sun's shadow map.
+    disposeObject(this.pitch);
+    this.ball.dispose();
+    disposeObject(this.marker);
+    this.sun.dispose();
+    // Nobody is wearing a kit or pulling a face now: free the cached ones, bar any still held.
+    clearPlayerAtlasCache();
+    clearFaceCache();
+    // The renderer outlives the match: let go of this scene's draw lists and blank the canvas.
+    this.renderer.renderLists.dispose();
+    this.renderer.info.reset();
     this.renderer.clear();
   }
 }
