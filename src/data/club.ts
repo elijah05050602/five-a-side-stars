@@ -14,15 +14,22 @@ export const CLUB_COLOURS = { orange: '#f26a1b', navy: '#13233a', cream: '#efe3c
 
 interface ClubPlayer { name: string; number: number; positions: Position[]; starter: boolean; look: Pick<Player, 'skin' | 'hair' | 'hairStyle' | 'build' | 'boots' | 'bootStyle'> }
 
-/** The U7 squad: name, number and the positions each kid plays, main position first. */
+/** How the club's kids look: light brown skin, dark hair. */
+const SKIN = '#d49a6a';
+const HAIR = '#1b1b1b';
+
+/** The U7 squad: name, number, the positions each kid plays (main position first) and how they look. */
 const SQUAD: ClubPlayer[] = [
-  { name: 'Ragnar', number: 19, positions: ['GK'], starter: true, look: { skin: '#d49a6a', hair: '#1b1b1b', hairStyle: 'short', build: 'tall', boots: '#ff7a00', bootStyle: 'toecap' } },
-  { name: 'Elijah', number: 8, positions: ['DEF', 'WING'], starter: true, look: { skin: '#eab98f', hair: '#2b1b0e', hairStyle: 'spiky', build: 'regular', boots: '#3da5f4', bootStyle: 'stripes' } },
-  { name: 'Baby Girl', number: 22, positions: ['WING', 'DEF'], starter: true, look: { skin: '#d49a6a', hair: '#1b1b1b', hairStyle: 'buns', build: 'small', boots: '#ff6fb5', bootStyle: 'twotone' } },
-  { name: 'Sage', number: 12, positions: ['WING', 'ATT'], starter: true, look: { skin: '#eab98f', hair: '#5a3a1a', hairStyle: 'long', build: 'regular', boots: '#ffffff', bootStyle: 'classic' } },
-  { name: 'Liam', number: 21, positions: ['ATT', 'DEF'], starter: true, look: { skin: '#a86b3c', hair: '#1b1b1b', hairStyle: 'short', build: 'sturdy', boots: '#222222', bootStyle: 'stripes' } },
-  { name: 'Randall', number: 10, positions: ['ATT', 'WING'], starter: false, look: { skin: '#d49a6a', hair: '#2b1b0e', hairStyle: 'curly', build: 'regular', boots: '#ffd23f', bootStyle: 'classic' } },
+  { name: 'Ragnar', number: 19, positions: ['GK'], starter: true, look: { skin: SKIN, hair: HAIR, hairStyle: 'short', build: 'tall', boots: '#ff7a00', bootStyle: 'toecap' } },
+  { name: 'Elijah', number: 8, positions: ['DEF', 'WING'], starter: true, look: { skin: SKIN, hair: HAIR, hairStyle: 'short', build: 'regular', boots: '#3da5f4', bootStyle: 'stripes' } },
+  { name: 'Baby Girl', number: 22, positions: ['WING', 'DEF'], starter: true, look: { skin: SKIN, hair: HAIR, hairStyle: 'buns', build: 'small', boots: '#ff6fb5', bootStyle: 'twotone' } },
+  { name: 'Sage', number: 12, positions: ['WING', 'ATT'], starter: true, look: { skin: SKIN, hair: HAIR, hairStyle: 'short', build: 'regular', boots: '#ffffff', bootStyle: 'classic' } },
+  { name: 'Liam', number: 21, positions: ['ATT', 'DEF'], starter: true, look: { skin: SKIN, hair: HAIR, hairStyle: 'short', build: 'tall', boots: '#222222', bootStyle: 'stripes' } },
+  { name: 'Randall', number: 10, positions: ['ATT', 'WING'], starter: false, look: { skin: SKIN, hair: HAIR, hairStyle: 'short', build: 'small', boots: '#ffd23f', bootStyle: 'classic' } },
 ];
+
+/** Bump when the club sends new details, so teams already saved on a device pick them up once. */
+const CLUB_VERSION = 2;
 
 /** A fresh copy of the club's U7 team, exactly as the club sent it. Everything stays editable. */
 export function davaoStrikersTeam(): Team {
@@ -44,13 +51,25 @@ export function davaoStrikersTeam(): Team {
   });
   // Elijah at the back, Baby Girl and Sage on the wings, Liam up top.
   team.formation = 'diamond';
+  team.clubVersion = CLUB_VERSION;
   return team;
 }
 
 /** The saved club team, made the first time someone opens the club page. */
 export function ensureClubTeam(): Team {
   const saved = getTeam(CLUB_TEAM_ID);
-  if (saved) return saved;
+  if (saved) {
+    if ((saved.clubVersion ?? 1) < CLUB_VERSION) {
+      // The club updated how its kids look: apply it to the players still on the squad, keep everything else.
+      for (const c of SQUAD) {
+        const p = saved.players.find((x) => x.name === c.name);
+        if (p) Object.assign(p, { skin: c.look.skin, hair: c.look.hair, hairStyle: c.look.hairStyle, build: c.look.build });
+      }
+      saved.clubVersion = CLUB_VERSION;
+      saveTeam(saved);
+    }
+    return saved;
+  }
   const team = davaoStrikersTeam();
   saveTeam(team);
   return team;

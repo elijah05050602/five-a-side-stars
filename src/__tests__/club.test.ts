@@ -27,6 +27,27 @@ describe('Davao Strikers FC U7', () => {
     for (const p of t.players) { expect(isNameOk(p.name)).toBe(true); expect(starsLeft(p.skills, 'U7', p.position)).toBeGreaterThanOrEqual(0); }
   });
 
+  it('looks the way the club described: light brown skin, short hair, Baby Girl in buns', () => {
+    const t = davaoStrikersTeam();
+    const look = Object.fromEntries(t.players.map((p) => [p.name, [p.build, p.hairStyle, p.skin]]));
+    expect(look).toEqual({
+      Ragnar: ['tall', 'short', '#d49a6a'], Elijah: ['regular', 'short', '#d49a6a'], 'Baby Girl': ['small', 'buns', '#d49a6a'],
+      Sage: ['regular', 'short', '#d49a6a'], Liam: ['tall', 'short', '#d49a6a'], Randall: ['small', 'short', '#d49a6a'],
+    });
+  });
+
+  it('updates the looks of a club team saved before, keeping other edits', () => {
+    const old = davaoStrikersTeam();
+    delete old.clubVersion;
+    old.players[1].hairStyle = 'spiky';
+    old.players[1].number = 99;
+    saveTeam(old);
+    const t = ensureClubTeam();
+    expect(t.players[1].hairStyle).toBe('short');
+    expect(t.players[1].number).toBe(99);
+    expect(getTeam(CLUB_TEAM_ID)!.clubVersion).toBe(2);
+  });
+
   it('wears kits that tell the outfield and the keeper apart', () => {
     const t = davaoStrikersTeam();
     expect(kitsClash(t.kit, t.keeperKit)).toBe(false);

@@ -100,6 +100,8 @@ export interface Team {
   createdAt: number;
   /** A career-mode team: its players grow by playing, so stars cannot be spent by hand. */
   career?: boolean;
+  /** Davao Strikers FC team only: which version of the club's squad details it has. */
+  clubVersion?: number;
   /** How the four outfield starters line up (see src/data/formations.ts). Box (2-2) when missing. */
   formation?: FormationId;
 }
