@@ -161,6 +161,13 @@ input, select {
 }
 input.is-invalid { border-color: #e63946; background: #ffe3e6; }
 input[type='number'] { max-width: 120px; text-align: center; }
+/* Chunky tick boxes: 28px with an ink outline, yellow with a navy tick when on. They sit in 44px-tall labels, so the whole label is the hit area. */
+input[type='checkbox'] {
+  appearance: none; -webkit-appearance: none; width: 28px; height: 28px; min-height: 0; flex: none; margin: 0; padding: 0;
+  border: var(--stroke); border-radius: 8px; background: var(--white) center / 20px no-repeat; cursor: pointer;
+}
+input[type='checkbox']:checked { background-color: var(--yellow); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4 10.5l4 4 8-9' fill='none' stroke='%231b2a41' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+@media (forced-colors: active) { input[type='checkbox'] { appearance: auto; -webkit-appearance: auto; } }
 .pills { display: flex; flex-wrap: wrap; gap: 8px; }
 .pill { font-family: var(--font); font-weight: 700; font-size: 16px; min-height: 44px; padding: 6px 18px; border-radius: 999px; border: 2.5px solid var(--navy); background: var(--white); cursor: pointer; color: var(--navy); display: inline-flex; align-items: center; gap: 6px; }
 .pill.is-active { background: var(--green); color: var(--navy); box-shadow: 0 3px 0 var(--navy); }
@@ -199,7 +206,6 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .goals-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; font-size: 18px; }
 .motm { background: var(--yellow); border-radius: 999px; padding: 10px 20px; border: 3px solid var(--navy); box-shadow: var(--drop); }
 .toggle { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 700; min-height: 44px; }
-.toggle input { width: 26px; height: 26px; min-height: 0; flex: none; }
 
 /* HUD */
 .hud { position: absolute; inset: 0; font-family: var(--font); }
@@ -212,6 +218,12 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .sb-team { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 20px; }
 .sb-score { font-size: 30px; font-weight: 700; display: flex; gap: 8px; align-items: center; }
 .sb-dash { color: #6b7a93; }
+/* Fixed-width numbers. Fredoka has no tabular figures, so the live score and clock sit in boxes as wide as their widest
+   digits (a 0 is 1ch; the colon is under half of one) and the score bug stops wobbling as they tick. tabular-nums covers
+   the fallback fonts, and lines up tables and results. */
+.scoreboard, .score-big, .fx-score, .league-table, .stat strong { font-variant-numeric: tabular-nums; }
+.sb-score > span:not(.sb-dash) { min-width: 1ch; text-align: center; }
+.sb-clock > span:first-child { min-width: 4.4ch; text-align: center; }
 .sb-clock { grid-column: 1 / -1; display: flex; justify-content: center; gap: 10px; font-size: 15px; font-weight: 600; color: #3a4a63; }
 .hud-pause { position: absolute; top: 12px; right: 12px; width: 52px; height: 52px; border-radius: 50%; border: 3px solid var(--navy); background: var(--card); font-size: 20px; font-weight: 700; color: var(--navy); cursor: pointer; box-shadow: 0 4px 0 var(--navy); }
 .hud-player-box { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -696,7 +708,6 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .sound-mixer { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 440px; }
 .mix-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .mix-toggle { display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--navy); text-align: left; min-height: 44px; }
-.mix-toggle input { width: 22px; height: 22px; min-height: 0; flex: none; accent-color: #cc5c00; }
 .mix-row input[type="range"] { flex: 1 1 140px; max-width: 200px; min-height: 44px; accent-color: #cc5c00; }
 .mix-row input[type="range"]:disabled { opacity: 0.4; }
 .overlay-card .sound-mixer { font-size: 15px; }
