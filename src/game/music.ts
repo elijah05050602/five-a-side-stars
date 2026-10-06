@@ -1,5 +1,5 @@
 import { getSettings } from '../data/storage';
-import { audioContext, channelBus, loadAudio } from './audio';
+import { afterPlayerModel, audioContext, channelBus, loadAudio, releaseAudio } from './audio';
 
 /**
  * Background music: ElevenLabs Music loops, the home theme on the menu pages
@@ -7,6 +7,12 @@ import { audioContext, channelBus, loadAudio } from './audio';
  * crossfading as you move between screens, plus short jingles at full time.
  * Starts on the first tap or key press (browsers require a gesture; the loading
  * screen asks for one) and fades right down during a match.
+ *
+ * Only the loop that is playing stays decoded. Each one is about 20 MB of
+ * samples (21-22 MB at 48 kHz), which matters on older iPhones and iPads next
+ * to the 3D match; the price is decoding the other loop again, from the
+ * cache, when the screens switch between them, which only delays the
+ * crossfade by a fraction of a second.
  */
 export type Track = 'home' | 'matchday';
 
@@ -17,6 +23,7 @@ export const TRACKS: Record<Track, { file: string; loop: number }> = {
   // A laid-back funk-pop groove from match preparation onwards (team sheet, then results).
   matchday: { file: 'audio/music-matchday.mp3', loop: 55.203 },
 };
+const TRACK_NAMES = Object.keys(TRACKS) as Track[];
 
 /** Which loop a screen plays: the matchday groove on match preparation and results, the home theme everywhere else. */
 export function trackFor(screen: string): Track {
@@ -56,6 +63,8 @@ class Music {
     this.playing = false;
     if (this.ctx && this.bus) this.bus.gain.setTargetAtTime(0, this.ctx.currentTime, 0.3);
     this.fadeOut(1.5);
+    // No loop needs to stay decoded now (the one fading out keeps its own until it stops).
+    this.release();
   }
 
   /** Pick the loop for the screen being shown; crossfades if music is playing. */
@@ -96,21 +105,33 @@ class Music {
     });
   }
 
-  /** Fetch the jingles ahead of full time so they play on cue. */
+  /** Fetch the jingles ahead of full time so they play on cue, once the player model is in (see afterPlayerModel). */
   preloadJingles(): void {
     if (!getSettings().music || !audioContext()) return;
-    void loadAudio('audio/win.mp3');
-    void loadAudio('audio/draw.mp3');
+    void afterPlayerModel().then(() => {
+      if (!getSettings().music) return;
+      void loadAudio('audio/win.mp3');
+      void loadAudio('audio/draw.mp3');
+    });
   }
 
   private switchTo(track: Track): void {
     if (this.current?.track === track) return;
     void loadAudio(TRACKS[track].file).then((buf) => {
       // Only start it if this is still the loop we want and nothing has beaten us to it.
-      if (!buf || !this.playing || this.want !== track || this.current?.track === track) return;
-      this.fadeOut(1.2);
-      this.playLoop(track, buf);
+      if (buf && this.playing && this.want === track && this.current?.track !== track) {
+        this.fadeOut(1.2);
+        this.playLoop(track, buf);
+      }
+      this.release();
     });
+  }
+
+  /** Let go of decoded loops nothing needs: only the one playing, and while music is on the one wanted next, are kept. */
+  private release(): void {
+    for (const t of TRACK_NAMES) {
+      if (t !== this.current?.track && !(this.playing && t === this.want)) releaseAudio(TRACKS[t].file);
+    }
   }
 
   private fadeOut(seconds: number): void {
