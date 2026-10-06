@@ -24,7 +24,7 @@ from kokoro_onnx import Kokoro
 
 HERE = os.path.dirname(__file__)
 OUT = os.path.join(HERE, '..', '..', 'public', 'audio')
-VOICE = 'bf_emma'  # a bright British voice, the clearest of Kokoro's English voices
+VOICE = 'bm_george'  # a warm British male voice, the classic football-commentator sound
 GAP = 0.25  # silence between clips in the sprite
 PAD = 0.06  # extra room either side of each clip, covering MP3 encoder delay
 
