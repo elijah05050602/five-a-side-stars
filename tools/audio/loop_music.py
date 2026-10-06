@@ -8,7 +8,7 @@ the start, so playing [0, loop length) on repeat never clicks or skips a beat.
 
 Usage (from the repo root):
   python3 -m pip install librosa soundfile
-  python3 tools/audio/loop_music.py generated.mp3 public/audio/menu.mp3
+  python3 tools/audio/loop_music.py generated.mp3 public/audio/music-home.mp3
 
 Prints the loop length; it must match LOOP_SECONDS in src/game/music.ts.
 
@@ -61,7 +61,7 @@ def main(src, dest):
     body *= 0.95 / (np.abs(body).max() or 1)
     tmp = dest + '.wav'
     sf.write(tmp, body.T, SR)
-    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', tmp, '-codec:a', 'libmp3lame', '-b:a', '112k', dest], check=True)
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', tmp, '-codec:a', 'libmp3lame', '-b:a', '96k', dest], check=True)
     subprocess.run(['rm', tmp], check=True)
     print(f'{bpm:.2f} bpm, {bars} bars, loop {loop:.3f}s (first beat at {first:.2f}s, usable to {usable:.1f}s)')
 

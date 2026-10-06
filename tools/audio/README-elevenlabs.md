@@ -26,8 +26,17 @@ SoundFont) still works if the audio ever needs rebuilding without an account.
 
 `eleven_music_v2_5`, instrumental:
 
-- **menu** (64 s, then `python3 tools/audio/loop_music.py raw.mp3 public/audio/menu.mp3`
-  and copy the printed loop length into `LOOP_SECONDS` in `src/game/music.ts`):
+- **home** (the homepage, 64 s, then `python3 tools/audio/loop_music.py raw.mp3 public/audio/music-home.mp3`
+  and copy the printed loop length into `TRACKS` in `src/game/music.ts`):
+  "Energetic, sunny football carnival anthem for the home screen of a kids'
+  football video game. 124 BPM samba-pop groove: punchy surdo and stadium kick
+  drums, shakers, timbales and claps, a bouncy slap bass, bright funky electric
+  guitar strums, and a big catchy trumpet and saxophone horn-section melody that
+  kids would hum, with stadium crowd "olé" whoops in the background. Joyful,
+  confident, festive and full of energy from the first second, steady groove all
+  the way through, no slow intro, no fade out, crisp modern production.
+  Instrumental, no vocals."
+- **pages** (every other screen, `music-pages.mp3`, same steps):
   "Upbeat, bright stadium pop-rock anthem for a kids' football video game menu,
   128 BPM with a driving four-on-the-floor kick, stomp-clap percussion and
   crowd-style "hey" chants, punchy electric guitar riff, bouncy synth bass and a
@@ -43,7 +52,7 @@ SoundFont) still works if the audio ever needs rebuilding without an account.
   ending on a bright but relaxed major chord. Cheerful, playful, not sad, 128
   BPM pop. Instrumental."
 
-After changing any file in `public/audio/`, bump `VERSION` in `public/sw.js` so
+Each loop costs about 960 credits for 64 s. After changing any file in `public/audio/`, bump `VERSION` in `public/sw.js` so
 phones fetch the new audio instead of their cached copy.
 
 ## Adding lines later

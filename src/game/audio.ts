@@ -20,6 +20,10 @@ export function audioContext(): AudioContext | null {
     if (!ctx) {
       const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!Ctor) return null;
+      // iPhones mute Web Audio when the ring/silent switch is on, which reads as "no music".
+      // Declaring a playback session (Safari 17+) lets the game play like a video does.
+      const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+      if (session) try { session.type = 'playback'; } catch { /* older browsers */ }
       ctx = new Ctor();
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -12;
