@@ -8,6 +8,7 @@ import { badgeSvg } from './kitPreview';
 
 export interface HudRefs {
   joystickZone: HTMLElement;
+  joystickBase: HTMLElement;
   joystickKnob: HTMLElement;
   btnShoot: HTMLElement;
   btnPass: HTMLElement;
@@ -98,17 +99,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       <div id="hud-live" aria-live="polite" style="position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap"></div>
       <div class="replay-frame" id="replay-frame" hidden><span class="replay-label">▶ REPLAY</span></div>
       <div class="hud-comm" id="hud-comm"><span class="hud-comm-mic">🎙️</span><span id="hud-comm-text"></span></div>
-      <div class="touch-controls ${getControls().touch.leftHanded ? 'is-lefty' : ''}" style="--tc-size:${getControls().touch.size};--tc-opacity:${getControls().touch.opacity}">
-        <div class="joystick" id="joy"><div class="joy-knob" id="joy-knob"></div></div>
-        <div class="action-buttons">
-          <button class="abtn abtn-lob" id="btn-lob">Lob</button>
-          <button class="abtn abtn-trick" id="btn-trick">Trick</button>
-          <button class="abtn abtn-switch" id="btn-switch">Switch</button>
-          <button class="abtn abtn-sprint" id="btn-sprint">Sprint</button>
-          <button class="abtn abtn-pass" id="btn-pass">Pass</button>
-          <button class="abtn abtn-shoot" id="btn-shoot">Shoot</button>
-        </div>
-      </div>
+      ${touchControlsHtml(getControls().touch)}
       <div class="overlay" id="overlay" hidden></div>
     </div>`;
   const q = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!;
@@ -119,6 +110,8 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   const playerBox = q('hud-player-box');
   const barStamina = q('bar-stamina');
   const barPower = q('bar-power');
+  const btnShoot = q('btn-shoot');
+  const btnSprint = q('btn-sprint');
   const playerBox2 = q('hud-player-box-2');
   const playerLabel2 = q('hud-player-2');
   const barStamina2 = q('bar-stamina-2');
@@ -302,11 +295,12 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   };
 
   return {
-    joystickZone: q('joy'),
+    joystickZone: q('joy-area'),
+    joystickBase: q('joy'),
     joystickKnob: q('joy-knob'),
-    btnShoot: q('btn-shoot'),
+    btnShoot,
     btnPass: q('btn-pass'),
-    btnSprint: q('btn-sprint'),
+    btnSprint,
     btnSwitch: q('btn-switch'),
     btnTrick: q('btn-trick'),
     btnLob: q('btn-lob'),
@@ -334,6 +328,8 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         barStamina.style.width = `${Math.round(s.controlled.stamina * 100)}%`;
         barPower.style.width = `${Math.round(s.controlled.charge * 100)}%`;
         barPower.parentElement!.parentElement!.classList.toggle('is-charging', s.controlled.charge > 0);
+        btnShoot.style.setProperty('--charge', s.controlled.charge.toFixed(2));
+        btnSprint.style.setProperty('--stamina', s.controlled.stamina.toFixed(2));
       } else playerBox.style.display = 'none';
       if (s.controlled2) {
         playerLabel2.textContent = `P2 · #${s.controlled2.info.number} ${s.controlled2.info.name}`;
@@ -459,4 +455,22 @@ function confetti(root: HTMLElement, c1: string, c2: string): void {
 
 export function esc(s: string): string {
   return s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
+}
+
+/** The touch buttons in thumb order, biggest first: icon, word and the action they press. */
+const TOUCH_BUTTONS = [
+  ['shoot', '⚽', 'Shoot'], ['pass', '➡️', 'Pass'], ['sprint', '⚡', 'Sprint'],
+  ['lob', '🌈', 'Lob'], ['switch', '🔄', 'Switch'], ['trick', '✨', 'Trick'],
+] as const;
+
+/** The joystick and buttons, for a match or (with `preview`) the Controls screen, where they are pictures only. */
+export function touchControlsHtml(t: { size: number; opacity: number; leftHanded: boolean }, preview = false): string {
+  const id = (name: string) => (preview ? '' : ` id="${name}"`);
+  const tag = preview ? 'span' : 'button';
+  return `<div class="touch-controls${preview ? ' tc-preview' : ''}${t.leftHanded ? ' is-lefty' : ''}" style="--tc-size:${t.size};--tc-opacity:${t.opacity}">
+        <div class="joy-area"${id('joy-area')}><div class="joystick"${id('joy')}><div class="joy-knob"${id('joy-knob')}></div></div></div>
+        <div class="action-buttons">
+          ${TOUCH_BUTTONS.map(([a, icon, word]) => `<${tag} class="abtn abtn-${a}"${id(`btn-${a}`)}${preview ? '' : ` aria-label="${word}"`}><span class="abtn-ico" aria-hidden="true">${icon}</span><span class="abtn-txt" aria-hidden="true">${word}</span></${tag}>`).join('')}
+        </div>
+      </div>`;
 }

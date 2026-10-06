@@ -13,6 +13,7 @@ export interface InputState {
 }
 
 import { getControls, type KeyMap, type PadMap } from '../data/controls';
+import { getSettings } from '../data/storage';
 
 export type { KeyMap } from '../data/controls';
 
@@ -76,8 +77,11 @@ export class Input {
     });
   }
 
-  /** Attach a virtual joystick to an element (bottom-left pad). */
-  attachJoystick(zone: HTMLElement, knob: HTMLElement): void {
+  /**
+   * Attach the floating joystick. A touch anywhere in `zone` (the left part of the screen) brings
+   * `base` to the thumb, unless it landed on the pad at home; on release the pad slides back.
+   */
+  attachJoystick(zone: HTMLElement, base: HTMLElement, knob: HTMLElement): void {
     let id: number | null = null;
     let ox = 0;
     let oy = 0;
@@ -86,10 +90,22 @@ export class Input {
     const start = (e: PointerEvent) => {
       if (id !== null) return;
       id = e.pointerId;
-      const r = zone.getBoundingClientRect();
+      base.style.transition = 'none';
+      base.style.transform = '';
+      const r = base.getBoundingClientRect();
       ox = r.left + r.width / 2;
       oy = r.top + r.height / 2;
       radius = r.width * 0.34;
+      if (Math.hypot(e.clientX - ox, e.clientY - oy) > r.width / 2) {
+        // Keep the whole pad inside the zone so it never slides under the edge of the screen.
+        const z = zone.getBoundingClientRect();
+        const half = r.width / 2;
+        const cx = Math.min(Math.max(e.clientX, z.left + half), z.right - half);
+        const cy = Math.min(Math.max(e.clientY, z.top + half), z.bottom - half);
+        base.style.transform = `translate(${cx - ox}px, ${cy - oy}px)`;
+        ox = cx;
+        oy = cy;
+      }
       zone.setPointerCapture(e.pointerId);
       move(e);
     };
@@ -114,6 +130,8 @@ export class Input {
       if (e.pointerId !== id) return;
       id = null;
       knob.style.transform = 'translate(0, 0)';
+      base.style.transition = getSettings().reduceMotion ? 'none' : 'transform 0.2s ease-out';
+      base.style.transform = '';
       this.touchMove = { x: 0, z: 0, active: false };
     };
     zone.addEventListener('pointerdown', start);

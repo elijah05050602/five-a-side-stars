@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { P1_RING } from './ringColours';
+import { getSettings } from '../data/storage';
 import type { BootStyle, Build, Kit, Player } from '../data/types';
 import { cloneRig, loadPlayerAsset, playerAssetNow, type PlayerAsset } from './playerAsset';
 import { contrastColour, numberTexture, playerAtlas } from './playerAtlas';
@@ -118,6 +120,9 @@ const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
  * Until the model file arrives nothing is drawn; if it fails to load, the old
  * procedural kid takes over so the game still plays.
  */
+/** Calm motion: the selection ring holds still. */
+const CALM = () => getSettings().reduceMotion;
+
 export class PlayerModel {
   readonly group = new THREE.Group();
   private readonly body = new THREE.Group();
@@ -233,17 +238,21 @@ export class PlayerModel {
     shadow.scale.setScalar(s);
     shadow.renderOrder = -1;
     this.shadow = shadow;
-    this.teamRing = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.5, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false }));
+    // The team ring is thin and soft: it only says which side someone is on.
+    this.teamRing = new THREE.Mesh(new THREE.RingGeometry(0.43, 0.49, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, depthWrite: false }));
     this.teamRing.rotation.x = -Math.PI / 2;
     this.teamRing.position.y = 0.016;
     this.teamRing.scale.setScalar(s);
-    // The controlled player's ring: bigger, brighter and pulsing, outside the team ring.
-    this.ring = new THREE.Mesh(new THREE.RingGeometry(0.56, 0.72, 40), new THREE.MeshBasicMaterial({ color: 0xff8a00, transparent: true, opacity: 0.95, depthWrite: false }));
+    // The controlled player's ring: thick and bright with a thin dark edge, pulsing gently, outside the team ring.
+    this.ring = new THREE.Mesh(new THREE.RingGeometry(0.54, 0.78, 40), new THREE.MeshBasicMaterial({ color: P1_RING, transparent: true, opacity: 1, depthWrite: false }));
+    const edge = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.82, 40), new THREE.MeshBasicMaterial({ color: 0x1b2a41, transparent: true, opacity: 0.85, depthWrite: false }));
+    edge.position.z = 0.004;
+    this.ring.add(edge);
     this.ring.rotation.x = -Math.PI / 2;
     this.ring.position.y = 0.02;
     this.ring.scale.setScalar(s);
     this.ring.visible = false;
-    this.marker = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.3, 4), new THREE.MeshBasicMaterial({ color: 0xff8a00 }));
+    this.marker = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.3, 4), new THREE.MeshBasicMaterial({ color: P1_RING }));
     this.marker.rotation.x = Math.PI;
     this.marker.position.y = 1.95 * s;
     this.marker.scale.setScalar(s);
@@ -463,7 +472,7 @@ export class PlayerModel {
     if (this.ring.visible) {
       this.markerT += dt;
       const s = this.baseScale;
-      this.ring.scale.setScalar(s * (1 + 0.05 * Math.sin(this.markerT * 6)));
+      this.ring.scale.setScalar(s * (CALM() ? 1 : 1 + 0.05 * Math.sin(this.markerT * 6)));
       this.marker.position.y = s * (1.95 + 0.06 * Math.sin(this.markerT * 5));
       this.marker.rotation.y += dt * 2;
     }

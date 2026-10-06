@@ -10,7 +10,6 @@ import { toonMaterial } from './toon';
 import { PlayerModel, type AnimState } from './PlayerModel';
 import { clearPlayerAtlasCache } from './playerAtlas';
 import { clearFaceCache, type Expression } from './playerFace';
-import type { Kit } from '../data/types';
 import { CROWD_SHOT_AT, DIVE_RECOVER, MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side, type SimEvent } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
@@ -22,6 +21,10 @@ import { batchStatic } from './batchStatic';
 import { graphicsProfile, type GraphicsProfile } from './graphics';
 import { EXPOSURE, TONE_MAPPING, disposeObject } from './renderer';
 import { BallTrail, Puffs } from './effects';
+import { P1_RING, P2_RING, teamRingColours } from './ringColours';
+
+/** Whether the touch buttons are showing (the same test the CSS uses). */
+const TOUCH_SCREEN = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 
 export type SimMode = NonNullable<SimConfig['mode']>;
 
@@ -224,7 +227,7 @@ export class MatchScene {
       onFinish: () => { const r = this.result(); this.dispose(); this.onFinish(r); },
       onCamera: () => this.updateView(),
     }, this.coach ?? undefined);
-    this.input.attachJoystick(this.hud.joystickZone, this.hud.joystickKnob);
+    this.input.attachJoystick(this.hud.joystickZone, this.hud.joystickBase, this.hud.joystickKnob);
     this.input.attachButton(this.hud.btnShoot, 'shoot');
     this.input.attachButton(this.hud.btnPass, 'pass');
     this.input.attachButton(this.hud.btnSprint, 'sprint');
@@ -518,7 +521,7 @@ export class MatchScene {
       m.animate(dt, st);
       const isP1 = p === this.sim.controlled;
       const isP2 = p === this.sim.controlled2;
-      m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? 0xff8a00 : isP2 ? 0x00e5ff : 0xffffff);
+      m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? P1_RING : isP2 ? P2_RING : 0xffffff);
     }
     this.ball.update(b.pos.x, b.y, b.pos.z, b.radius, b.vel.x, b.vel.z, dt);
 
@@ -536,6 +539,16 @@ export class MatchScene {
     if (!hero) {
       focus.x = THREE.MathUtils.clamp(focus.x, -this.sim.length * 0.32 * wide, this.sim.length * 0.32 * wide);
       focus.z = THREE.MathUtils.clamp(focus.z, -this.sim.width * 0.2 * wide * wide, this.sim.width * 0.2 * wide * wide);
+      // On a phone on its side the buttons sit over one bottom corner. Attacking that way, nudge the
+      // view towards the goal and the near touchline so the goal comes out from behind them.
+      if (c1 && !this.upfield && this.camera.aspect > 1.3 && TOUCH_SCREEN) {
+        const buttonsSide = getControls().touch.leftHanded ? -1 : 1;
+        const into = THREE.MathUtils.clamp((b.pos.x * buttonsSide) / (this.sim.length * 0.5), 0, 1);
+        if (this.sim.goalX(c1.side) * buttonsSide > 0 && into > 0) {
+          focus.x += buttonsSide * this.sim.length * 0.08 * into;
+          focus.z += this.sim.width * 0.12 * into;
+        }
+      }
     }
     this.camTarget.lerp(focus, 1 - Math.pow(0.02, dt));
     // After a goal in a match the camera follows the scorer's celebration (after the replay, which
@@ -621,14 +634,3 @@ export class MatchScene {
 
 export type { Side };
 
-/**
- * One identifying colour per team for the rings under the feet: the shirt colour, unless the two
- * shirts are too alike, in which case the away side falls back to its shorts or second colour.
- */
-function teamRingColours(home: Kit, away: Kit): [THREE.Color, THREE.Color] {
-  const far = (a: THREE.Color, b: THREE.Color) => Math.hypot(a.r - b.r, a.g - b.g, a.b - b.b) > 0.45;
-  const h = new THREE.Color(home.shirt);
-  const candidates = [away.shirt, away.shorts, away.shirt2, '#ffffff', '#1b2a41'].map((c) => new THREE.Color(c));
-  const a = candidates.find((c) => far(c, h)) ?? candidates[0];
-  return [h, a];
-}

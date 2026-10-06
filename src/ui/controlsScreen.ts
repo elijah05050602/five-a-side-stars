@@ -2,7 +2,7 @@ import {
   ACTIONS, ACTION_LABELS, CAMERA_HEIGHTS, CAMERA_HEIGHT_LABELS, KEY_SLOTS, PAD_SLOTS, PORTRAIT_VIEW_LABELS, bindKey, bindPad, clearSlot, getControls, keyLabel, padLabel, resetControls, saveControls,
   type Action, type CameraHeight, type ControlsConfig, type KeyProfile, type PortraitView,
 } from '../data/controls';
-import { esc } from './hud';
+import { esc, touchControlsHtml } from './hud';
 import { pageHead, shellBar } from './shell';
 import type { Router } from './screens';
 
@@ -67,12 +67,7 @@ export function renderControls(root: HTMLElement, router: Router, wire: (root: H
       <label class="toggle"><input type="checkbox" id="tc-lefty" ${c.touch.leftHanded ? 'checked' : ''}/> Left-handed: joystick on the right, buttons on the left</label>
     </div>
     <div class="touch-preview" aria-hidden="true">
-      <div class="touch-controls tc-preview ${c.touch.leftHanded ? 'is-lefty' : ''}" style="--tc-size:${c.touch.size};--tc-opacity:${c.touch.opacity}">
-        <div class="joystick"><div class="joy-knob"></div></div>
-        <div class="action-buttons">
-          <span class="abtn abtn-lob">Lob</span><span class="abtn abtn-trick">Trick</span><span class="abtn abtn-switch">Switch</span><span class="abtn abtn-sprint">Sprint</span><span class="abtn abtn-pass">Pass</span><span class="abtn abtn-shoot">Shoot</span>
-        </div>
-      </div>
+      ${touchControlsHtml(c.touch, true)}
     </div>`;
 
   const cameraPanel = () => `
