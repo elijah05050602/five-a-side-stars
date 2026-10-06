@@ -11,7 +11,7 @@
 .club-squad { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin: 14px 0; }
 .club-player { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
 .club-player.is-sub { opacity: .8; }
-.club-num { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 18px; background: #f26a1b; color: #fff; border: 3px solid #13233a; }
+.club-num { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 18px; background: #f26a1b; color: #13233a; border: 3px solid #13233a; }
 .club-name { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
 .club-name small { color: #4a5a73; }
 .club-player .chip-sub { margin-left: auto; }
@@ -33,10 +33,10 @@
 .fm-sub circle { fill: #ffffff; }
 .fm-bench { fill: #dfe6f2; stroke: var(--navy); stroke-width: 2; }
 .fm-bench-label { font: 700 8px var(--font); fill: #4a5a73; letter-spacing: .1em; }
-.fm-dot.is-picked circle, .fm-dot.is-drop-target circle { stroke: #ff7a00; stroke-width: 4; }
+.fm-dot.is-picked circle, .fm-dot.is-drop-target circle { stroke: var(--orange); stroke-width: 4; }
 .fm-dot.is-drop-target circle { fill: #ffd23f; }
 .fm-dot.is-dragging { opacity: .45; }
-.player-card.is-picked, .player-card.is-drop-target { outline: 4px solid #ff7a00; outline-offset: 2px; }
+.player-card.is-picked, .player-card.is-drop-target { outline: 4px solid var(--orange); outline-offset: 2px; }
 .player-card.is-lifted { transform: scale(1.05); box-shadow: 0 8px 0 var(--navy); }
 .player-card.is-dragging { opacity: .5; }
 .drag-ghost { position: fixed; left: 0; top: 0; z-index: 9000; pointer-events: none; margin: -22px 0 0 -40px; padding: 8px 14px; border-radius: 999px; background: var(--yellow); color: var(--navy); border: 3px solid var(--navy); box-shadow: 0 4px 0 var(--navy); font: 700 15px var(--font); white-space: nowrap; }
