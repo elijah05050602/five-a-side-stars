@@ -47,18 +47,33 @@ export const FALLBACK: Partial<Record<LineKey, LineKey>> = {
  * of 124 MB at 44.1 kHz or 135 MB at 48 kHz.
  */
 const SPRITE_RATE = 24000;
+/** After a failed download, how long (ms) before a line may try again, so an offline phone is not asked for every line. */
+const RETRY_MS = 10000;
 
-let spritePromise: Promise<{ sprite: Sprite; buffer: AudioBuffer } | null> | null = null;
+interface Loaded { sprite: Sprite; buffer: AudioBuffer }
+let spritePromise: Promise<Loaded | null> | null = null;
+/** The clips once they have arrived, for a Commentary to pick up straight away. */
+let loaded: Loaded | null = null;
+let retryAt = -Infinity;
 
-/** Fetch the clips (once). Called on the first tap so the opening kick-off line is ready in time. */
-export function preloadCommentary(): Promise<{ sprite: Sprite; buffer: AudioBuffer } | null> {
+/**
+ * Fetch the clips (once). Called on the first tap so the opening kick-off line
+ * is ready in time, when a match starts, when commentary is switched on, and
+ * by a line that finds the clips missing (commentary was off when the match
+ * started, or a download failed: that is tried again at most every ten seconds).
+ */
+export function preloadCommentary(): Promise<Loaded | null> {
   if (!getSettings().commentary || !audioContext()) return Promise.resolve(null);
   if (!spritePromise) {
+    if (performance.now() < retryAt) return Promise.resolve(null);
     spritePromise = Promise.all([
       fetch(`${import.meta.env.BASE_URL}audio/commentary.json`).then((r) => (r.ok ? (r.json() as Promise<Sprite>) : null)).catch(() => null),
       loadAudio('audio/commentary.mp3', SPRITE_RATE),
     ]).then(([sprite, buffer]) => (sprite && buffer ? { sprite, buffer } : null));
-    void spritePromise.then((got) => { if (!got) spritePromise = null; });
+    void spritePromise.then((got) => {
+      if (got) loaded = got;
+      else { spritePromise = null; retryAt = performance.now() + RETRY_MS; }
+    });
   }
   return spritePromise;
 }
@@ -69,12 +84,16 @@ export class Commentary {
   private playing: { srcs: AudioBufferSourceNode[]; gain: GainNode; prio: number; until: number } | null = null;
   private readonly last = new Map<string, number>();
   private disposed = false;
+  private loading = false;
   private pending: { key: LineKey; score?: readonly [number, number]; at: number } | null = null;
 
-  /** Start fetching the clips. Silent until they arrive; nothing breaks if they never do. */
+  /** Start fetching the clips. Silent until they arrive; nothing breaks if they never do. say() calls it again while they are missing. */
   load(): void {
-    if (this.buffer) return;
+    if (this.buffer || this.disposed || this.loading) return;
+    if (loaded) { this.sprite = loaded.sprite; this.buffer = loaded.buffer; return; }
+    this.loading = true;
     void preloadCommentary().then((got) => {
+      this.loading = false;
       if (this.disposed || !got) return;
       this.sprite = got.sprite;
       this.buffer = got.buffer;
@@ -87,7 +106,9 @@ export class Commentary {
 
   /** Speak a line for this commentary key, then the score if one is given. */
   say(key: LineKey, score?: readonly [number, number]): void {
-    if (!getSettings().commentary) return;
+    if (this.disposed || !getSettings().commentary) return;
+    // Commentary switched on mid-match, or the clips failed to arrive: pick them up or fetch them now.
+    this.load();
     if (!this.sprite || !this.buffer) {
       if (priority(key) >= 2) this.pending = { key, score: score && [score[0], score[1]], at: performance.now() };
       return;

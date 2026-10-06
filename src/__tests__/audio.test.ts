@@ -120,6 +120,21 @@ function serveSprite(seconds = 705.24): void {
   files['audio/commentary.mp3'] = () => fakeMp3(seconds);
 }
 
+/** Serve the commentary, but hold the recording back until the returned function is called. */
+function holdSprite(): () => void {
+  serveSprite();
+  let release = () => undefined as void;
+  files['audio/commentary.mp3'] = () => new Promise((resolve) => { release = () => resolve(fakeMp3(705.24)); });
+  return () => release();
+}
+
+/** What the commentator has started saying: each sprite source as its cue's key, when it starts and when it is told to stop. */
+function said(c: FakeContext): { key: string | undefined; at: number; stop: number | null }[] {
+  const keyAt = new Map<number, string>();
+  for (const [key, clips] of Object.entries(CLIPS)) for (const [start] of clips) keyAt.set(start, key);
+  return c.sources.filter((s) => s.buffer?.sampleRate === 24000 && s.startedAt !== null).map((s) => ({ key: keyAt.get(s.offset), at: s.startedAt!, stop: s.stoppedAt }));
+}
+
 function setHidden(hidden: boolean): void {
   doc.hidden = hidden;
   doc.visibilityState = hidden ? 'hidden' : 'visible';
@@ -127,7 +142,7 @@ function setHidden(hidden: boolean): void {
 }
 
 /** Let promise callbacks (fetches, decodes) run. */
-async function settle(): Promise<void> { for (let i = 0; i < 10; i++) await Promise.resolve(); }
+async function settle(): Promise<void> { for (let i = 0; i < 50; i++) await Promise.resolve(); }
 
 beforeEach(() => {
   vi.resetModules();
@@ -408,6 +423,96 @@ describe('music', () => {
     music.refresh();
     await settle();
     expect(fetches('matchday')).toBe(2);
+  });
+});
+
+describe('commentary: getting the clips', () => {
+  it('commentary switched on mid-match: the next line fetches the clips and is spoken when they arrive', async () => {
+    const { updateSettings } = await import('../data/storage');
+    updateSettings({ commentary: false });
+    serveSprite();
+    const { Commentary } = await import('../game/voice');
+    const v = new Commentary();
+    v.load(); // the match starts with commentary off
+    await settle();
+    expect(fetched).toEqual([]);
+    updateSettings({ commentary: true }); // switched on from the pause screen
+    v.say('save');
+    await settle();
+    expect(said(FakeContext.made[0]).map((s) => s.key)).toEqual(['save']);
+  });
+
+  it('switching commentary on in the sound mixer fetches the clips straight away', async () => {
+    const { updateSettings } = await import('../data/storage');
+    updateSettings({ commentary: false });
+    serveSprite();
+    const { wireSoundSettings } = await import('../ui/soundSettings');
+    type Input = { checked: boolean; value: string; disabled: boolean; on: Record<string, () => void>; addEventListener(type: string, fn: () => void): void };
+    const inputs = new Map<string, Input>();
+    const root = {
+      querySelector(sel: string): Input {
+        if (!inputs.has(sel)) inputs.set(sel, { checked: false, value: '100', disabled: false, on: {}, addEventListener(type, fn) { this.on[type] = fn; } });
+        return inputs.get(sel)!;
+      },
+    };
+    wireSoundSettings(root as unknown as HTMLElement);
+    const box = inputs.get('[data-mix-on="voice"]')!;
+    box.checked = true;
+    box.on.change();
+    await settle();
+    expect(fetched.filter((u) => u.endsWith('commentary.mp3'))).toHaveLength(1);
+    const { Commentary } = await import('../game/voice');
+    const v = new Commentary();
+    v.say('quietAttack'); // even chatter is spoken now: the clips are already here
+    expect(said(FakeContext.made[0]).map((s) => s.key)).toEqual(['quietAttack']);
+  });
+
+  it('after a failed download a later line tries again, but not more than every ten seconds', async () => {
+    vi.useFakeTimers();
+    const { Commentary } = await import('../game/voice');
+    const v = new Commentary();
+    const tries = () => fetched.filter((u) => u.endsWith('commentary.json')).length;
+    v.load(); // nothing is served yet: the download fails
+    await settle();
+    expect(tries()).toBe(1);
+    serveSprite();
+    v.say('save'); // too soon to ask again
+    await settle();
+    expect(tries()).toBe(1);
+    vi.advanceTimersByTime(10_000);
+    v.say('save');
+    await settle();
+    expect(tries()).toBe(2);
+    expect(said(FakeContext.made[0]).map((s) => s.key)).toEqual(['save']);
+  });
+
+  it('a line said while the clips are on their way is spoken when they arrive, if it is still fresh', async () => {
+    vi.useFakeTimers();
+    const release = holdSprite();
+    const { Commentary } = await import('../game/voice');
+    const v = new Commentary();
+    v.load();
+    await settle();
+    v.say('quietAttack'); // chatter is not kept for later
+    v.say('kickoffFirst');
+    await settle();
+    release();
+    await settle();
+    expect(said(FakeContext.made[0]).map((s) => s.key)).toEqual(['kickoffFirst']);
+  });
+
+  it('a line said too long before the clips arrive is not spoken late', async () => {
+    vi.useFakeTimers();
+    const release = holdSprite();
+    const { Commentary } = await import('../game/voice');
+    const v = new Commentary();
+    v.load();
+    v.say('save');
+    await settle();
+    vi.advanceTimersByTime(2000);
+    release();
+    await settle();
+    expect(said(FakeContext.made[0])).toEqual([]);
   });
 });
 

@@ -1,6 +1,7 @@
 import { getSettings, updateSettings } from '../data/storage';
 import { applyVolumes, type AudioChannel } from '../game/audio';
 import { music } from '../game/music';
+import { preloadCommentary } from '../game/voice';
 
 /**
  * On/off switches and volume sliders for music, the commentator and sound
@@ -33,8 +34,11 @@ export function wireSoundSettings(root: HTMLElement): void {
     box.addEventListener('change', () => {
       updateSettings({ [r.on]: box.checked });
       slider.disabled = !box.checked;
+      // From this tap: phones only let the audio start (or wake) inside a gesture.
       applyVolumes();
       if (r.ch === 'music') music.refresh();
+      // Fetch the commentator's clips now (perhaps mid-match, from the pause screen) so the next line is spoken.
+      if (r.ch === 'voice' && box.checked) void preloadCommentary();
     });
     slider.addEventListener('input', () => {
       updateSettings({ [r.vol]: Number(slider.value) / 100 });
