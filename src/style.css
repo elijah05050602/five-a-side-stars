@@ -731,6 +731,6 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 /* Console tabs draw both rings inside their own edge, so the sideways-scrolling tab strip on phones cannot clip them. */
 .shell-nav .shell-tab:focus-visible { outline-offset: -3px !important; box-shadow: inset 0 0 0 6px var(--white) !important; }
 /* A player picked for a swap keeps its orange ring while focused. */
-.player-card:is(.is-picked, .is-drop-target):focus-visible { outline-color: #ff7a00 !important; }
+.player-card:is(.is-picked, .is-drop-target):focus-visible { outline-color: var(--orange) !important; }
 /* Formation dots are SVG, which has no box-shadow: the navy outline frames the dot and its ring turns white. */
 .fm-dot:focus-visible circle { stroke: var(--white); stroke-width: 4; }
