@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { disposeObject, shared } from './renderer';
 import { addOutline, toonMaterial } from './toon';
 
 let ballTex: THREE.CanvasTexture | null = null;
@@ -52,7 +53,8 @@ function texture(): THREE.CanvasTexture {
     }
   }
   ctx.putImageData(img, 0, 0);
-  ballTex = new THREE.CanvasTexture(c);
+  // Painted once and kept: every match's ball wears it.
+  ballTex = shared(new THREE.CanvasTexture(c));
   ballTex.colorSpace = THREE.SRGBColorSpace;
   ballTex.anisotropy = 4;
   return ballTex;
@@ -85,5 +87,10 @@ export class BallModel {
     const sh = 1 / (1 + y * 0.8);
     this.shadow.scale.setScalar(sh);
     (this.shadow.material as THREE.MeshBasicMaterial).opacity = 0.3 * sh;
+  }
+
+  /** Free the ball's geometry and materials (the panel texture stays for the next ball). */
+  dispose(): void {
+    disposeObject(this.group);
   }
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { GraphicsProfile } from './graphics';
 import { floodlightPositions, grassTexture } from './Pitch';
+import { disposeObject } from './renderer';
 
 /**
  * Weather and time of day for a match: sky and fog colours, the sun's colour
@@ -251,13 +252,9 @@ export class Weather {
     }
   }
 
+  /** Frees the sky, rain and lamps. The snow painted on the grass goes with the pitch. */
   dispose(): void {
     this.scene.remove(this.group);
-    this.group.traverse((o) => {
-      if (o instanceof THREE.Mesh || o instanceof THREE.Points || o instanceof THREE.LineSegments) {
-        o.geometry.dispose();
-        (o.material as THREE.Material).dispose();
-      }
-    });
+    disposeObject(this.group);
   }
 }

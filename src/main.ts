@@ -8,6 +8,7 @@ import { music, trackFor } from './game/music';
 import { unlockAudio } from './game/audio';
 import { preloadCommentary } from './game/voice';
 import { loadPlayerAsset } from './game/playerAsset';
+import { gameRenderer, showDrawError } from './game/renderer';
 import { canLeaveScreen, finishMatch, goBack, leaveScreen, playAhead, renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
 import { armBack, initBackButton } from './ui/backButton';
 
@@ -17,7 +18,8 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => { /* offline play is a bonus, not a requirement */ });
 }
 
-const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
+/** The match canvas, looked up each time: it is swapped for a fresh one if its WebGL context is lost. */
+const canvas = (): HTMLCanvasElement => document.getElementById('game-canvas') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLElement;
 let match: MatchScene | null = null;
 /** Where the player is: a screen, or in a match. */
@@ -35,17 +37,23 @@ unlockAudio(() => { music.start(); void preloadCommentary(); });
 // Fetch the home theme behind the loading screen so it starts on the very first tap.
 music.preload('home');
 
-/** Clear the way for a match: the old screen and its listeners go, the pitch comes up and the music drops. */
-function enterMatch(): void {
+/**
+ * Clear the way for a match: the old screen and its listeners go, the pitch comes up and the music
+ * drops. Returns the shared renderer, or null (with a message on screen) when the pitch cannot be drawn.
+ */
+function enterMatch(): ReturnType<typeof gameRenderer> {
   leaveScreen();
-  if (match) match.dispose();
+  if (match) { match.dispose(); match = null; }
   ui.innerHTML = '';
   ui.className = 'match-ui';
-  canvas.classList.add('is-live');
+  const renderer = gameRenderer();
+  if (!renderer) { showDrawError(ui); return null; }
+  canvas().classList.add('is-live');
   document.body.classList.add('in-match');
   music.setQuiet(true);
   current = 'match';
   armBack();
+  return renderer;
 }
 
 const router: Router = {
@@ -53,7 +61,7 @@ const router: Router = {
     // A screen with unsaved changes (the team builder) asks first, and may keep the player there.
     if (!canLeaveScreen()) return;
     if (match) { match.dispose(); match = null; }
-    canvas.classList.remove('is-live');
+    canvas().classList.remove('is-live');
     document.body.classList.remove('in-match');
     music.setQuiet(false);
     music.setTrack(trackFor(screen.name));
@@ -63,11 +71,12 @@ const router: Router = {
     renderScreen(ui, screen, router);
   },
   startMatch(o: StartOptions) {
-    enterMatch();
+    const renderer = enterMatch();
+    if (!renderer) return;
     const mode = o.mode ?? 'match';
     // The rest of the league round (or the other cup semi) is played in the background meanwhile.
     const ahead = playAhead(o);
-    match = new MatchScene(canvas, ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode, cpuLevel: o.cpuLevel },
+    match = new MatchScene(renderer, ui, { home: o.home, away: o.away, difficulty: o.difficulty, halfSeconds: o.halfSeconds, humanSide: 0, humanSide2: o.twoPlayer && mode !== 'training' ? 1 : null, mode, cpuLevel: o.cpuLevel },
       (result) => {
         match = null;
         const stickers = recordResult(result);
@@ -86,8 +95,9 @@ const router: Router = {
     const home = getTeams()[0];
     const away = generateOpponent(home.ageGroup, home.kit);
     const leave = (next: Screen) => { match = null; updateSettings({ tutorialDone: true }); router.go(next); };
-    enterMatch();
-    match = new MatchScene(canvas, ui, { home, away, difficulty: 'easy', halfSeconds: 600, humanSide: 0, mode: 'tutorial' },
+    const renderer = enterMatch();
+    if (!renderer) return;
+    match = new MatchScene(renderer, ui, { home, away, difficulty: 'easy', halfSeconds: 600, humanSide: 0, mode: 'tutorial' },
       () => leave({ name: 'setup', homeId: home.id }),
       () => leave({ name: 'menu' }));
   },
