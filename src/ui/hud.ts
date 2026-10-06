@@ -265,7 +265,11 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       overlay.innerHTML = `
         <div class="card overlay-card">
           <h2>${mode === 'training' ? "Time's up!" : mode === 'shootout' ? 'Shoot-out over!' : 'Full time!'}</h2>
-          <p class="score-big">${mode === 'training' ? `${s.trainingPoints} points` : `${esc(home.short)} ${s.score[0]} – ${s.score[1]} ${esc(away.short)}`}</p>
+          ${mode === 'training' ? `<p class="score-big">${s.trainingPoints} points</p>` : `<div class="ft-score">
+            <div class="ft-team">${badgeSvg(home.badge, 48)}<span>${esc(home.name)}</span></div>
+            <p class="score-big">${s.score[0]} – ${s.score[1]}</p>
+            <div class="ft-team">${badgeSvg(away.badge, 48)}<span>${esc(away.name)}</span></div>
+          </div>`}
           <button class="btn btn-primary" id="ov-finish">See the results</button>
         </div>`;
       overlay.querySelector('#ov-finish')!.addEventListener('click', () => cb.onFinish());

@@ -28,7 +28,7 @@ Pages workflow runs the tests again before it deploys.
 - **Tournament**: a four-team cup with two semi-finals and a final. Draws go to penalties. The cup is saved, so you can leave and carry on later; in a two-player cup both players can reach the final.
 - **League**: a saved career through five tiers, from the Acorn League (Tier 5) up to the Star Premier League (Tier 1). Five matches a season, top two go up, bottom goes down, and the computer teams get stronger every tier.
 - **Career**: take one team from the Under 5s to the Under 10s, four mini seasons a year; players earn stars by playing.
-- **Beginner help**: a switch on the setup screen for new players. The computer team plays slower and gentler, and your shots are steered between the posts (the keeper can still save them). It stays on for every mode, league and career included, until it is switched off.
+- **🐣 Starter**: the first difficulty, before Easy, for the youngest players. The computer team plays slower and gentler, and your shots are steered between the posts (the keeper can still save them). League and career setups offer it too, and it stays picked until another difficulty is chosen.
 - **Penalties**: a best-of-five shoot-out, then sudden death. You take and save.
 - **Training**: just you and a keeper; score as many as you can before time runs out (rocket shots count double).
 - **Player stats**: seven star ratings per player. Outfielders have Speed, Dribbling, Passing, Shooting, Tackling, Stamina and Strength; keepers have Speed, Handling, Diving, Reflexes, Positioning, Kicking and Strength. The age group caps the stars and sets the budget to share out.

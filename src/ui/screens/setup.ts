@@ -34,6 +34,9 @@ export function renderSetup(root: HTMLElement, router: Router, homeId?: string, 
   let twoPlayer = false;
   let weather: WeatherChoice = 'random';
   let help = settings.beginnerHelp;
+  // League and career strength grows with the tiers, so there Starter is the only choice besides Normal.
+  const tiered = mode === 'league' || mode === 'career';
+  const levels: ('starter' | Difficulty)[] = tiered ? ['starter', 'normal'] : ['starter', 'easy', 'normal', 'hard'];
   const solo = mode === 'training' || mode === 'league' || mode === 'career';
   const hasKeyboard = window.matchMedia('(pointer: fine)').matches && !solo;
   const info = MODE_INFO[mode];
@@ -83,11 +86,10 @@ export function renderSetup(root: HTMLElement, router: Router, homeId?: string, 
             <div class="pills"><button class="pill ${!twoPlayer ? 'is-active' : ''}" data-players="1" ${pressed(!twoPlayer)}>1 player</button><button class="pill ${twoPlayer ? 'is-active' : ''}" data-players="2" ${pressed(twoPlayer)}>2 players, one keyboard</button></div>
             ${twoPlayer ? `<p class="muted">Player 1: ${esc(controlsSentence('p1'))}.<br/>Player 2: ${esc(controlsSentence('p2'))}.<br/>Plug in two controllers and each player gets one. <button class="link-btn" data-nav="controls">Change controls</button></p>` : ''}
           </div>` : ''}
-          ${mode === 'career' ? `<div class="field"><span>The journey</span><div class="age-ladder">${CAREER_AGES.map((a) => `<span class="rung-age">${a}</span>`).join('<span class="rung-arrow">→</span>')}</div><p class="muted small">${SEASONS_PER_YEAR} mini seasons a year · promotion and relegation between tiers carry over · stars grow up to each age group's cap.</p></div>` : mode === 'league' ? `<div class="field"><span>Tiers</span><ol class="tier-list">${TIERS.map((t) => `<li><strong>Tier ${t.tier}</strong> ${esc(t.name)}</li>`).join('')}</ol></div>` : `<div class="field"><span>Computer difficulty</span>
-            <div class="pills">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="pill ${d === difficulty ? 'is-active' : ''}" data-diff="${d}" ${pressed(d === difficulty)}>${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div>
-          </div>`}
-          <div class="field"><span>Beginner help</span>
-            <label class="toggle"><input type="checkbox" id="s-help" ${help ? 'checked' : ''}/> 🐣 A slower computer team, and help aiming shots. Stays on for every match until you switch it off.</label>
+          ${mode === 'career' ? `<div class="field"><span>The journey</span><div class="age-ladder">${CAREER_AGES.map((a) => `<span class="rung-age">${a}</span>`).join('<span class="rung-arrow">→</span>')}</div><p class="muted small">${SEASONS_PER_YEAR} mini seasons a year · promotion and relegation between tiers carry over · stars grow up to each age group's cap.</p></div>` : mode === 'league' ? `<div class="field"><span>Tiers</span><ol class="tier-list">${TIERS.map((t) => `<li><strong>Tier ${t.tier}</strong> ${esc(t.name)}</li>`).join('')}</ol></div>` : ''}
+          <div class="field"><span>Computer difficulty</span>
+            <div class="pills">${levels.map((d) => { const on = d === (help ? 'starter' : tiered ? 'normal' : difficulty); return `<button class="pill ${on ? 'is-active' : ''}" data-diff="${d}" ${pressed(on)}>${d === 'starter' ? '🐣 Starter' : d[0].toUpperCase() + d.slice(1)}</button>`; }).join('')}</div>
+            ${help ? '<p class="muted small">🐣 Starter, for the youngest players: a slower computer team, and help aiming shots.</p>' : ''}
           </div>
           ${lengthLabel ? `<div class="field"><span>${lengthLabel}</span>
             <div class="pills">${lengths.map((s) => `<button class="pill ${s === halfSeconds ? 'is-active' : ''}" data-len="${s}" ${pressed(s === halfSeconds)}>${s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`}</button>`).join('')}</div>
@@ -111,8 +113,12 @@ export function renderSetup(root: HTMLElement, router: Router, homeId?: string, 
     root.querySelector<HTMLSelectElement>('#s-away')?.addEventListener('change', (e) => { opponentId = (e.target as HTMLSelectElement).value; render(); });
     wireLogoControls(root, () => away.badge, () => { if (opponentId !== 'cpu') saveTeam(away); render(); });
     root.querySelector('#s-reroll')?.addEventListener('click', () => { cpu = generateOpponent(home.ageGroup, home.kit); opponentId = 'cpu'; render(); });
-    root.querySelectorAll<HTMLElement>('[data-diff]').forEach((b) => b.addEventListener('click', () => { difficulty = b.dataset.diff as Difficulty; render(); }));
-    root.querySelector<HTMLInputElement>('#s-help')?.addEventListener('change', (e) => { help = (e.target as HTMLInputElement).checked; updateSettings({ beginnerHelp: help }); });
+    root.querySelectorAll<HTMLElement>('[data-diff]').forEach((b) => b.addEventListener('click', () => {
+      // Starter is beginner help on an Easy computer team (MatchConfig.assist).
+      help = b.dataset.diff === 'starter';
+      if (!help && !tiered) difficulty = b.dataset.diff as Difficulty;
+      render();
+    }));
     root.querySelectorAll<HTMLElement>('[data-players]').forEach((b) => b.addEventListener('click', () => {
       twoPlayer = b.dataset.players === '2';
       if (twoPlayer && mode === 'tournament' && opponentId === 'cpu') pickSecondTeam();
@@ -121,6 +127,7 @@ export function renderSetup(root: HTMLElement, router: Router, homeId?: string, 
     root.querySelectorAll<HTMLElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { halfSeconds = Number(b.dataset.len); render(); }));
     root.querySelectorAll<HTMLElement>('[data-weather]').forEach((b) => b.addEventListener('click', () => { weather = b.dataset.weather as WeatherChoice; render(); }));
     root.querySelector('#s-go')!.addEventListener('click', () => {
+      updateSettings({ beginnerHelp: help });
       if (mode !== 'training') updateSettings({ difficulty, halfLengthSeconds: halfSeconds });
       const awayTeam = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
       if (mode === 'tournament') {

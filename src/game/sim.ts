@@ -365,8 +365,9 @@ export class MatchSim {
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
     this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null };
-    const base = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.difficulty];
-    // Beginner help: the computer team runs and thinks slower, tackles and saves softer, and shoots worse from closer in.
+    // Beginner help (Starter) starts from an Easy computer team, whatever was picked before, and then it runs and
+    // thinks slower, tackles and saves softer, and shoots worse from closer in. League play keeps its tier's strength.
+    const base = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.assist ? 'easy' : config.difficulty];
     this.diff = config.assist ? { speed: base.speed * 0.85, think: base.think + 0.3, accuracy: base.accuracy * 0.7, tackle: base.tackle * 0.6, humanTackle: base.humanTackle * 1.3, shootRange: base.shootRange * 0.85 } : base;
     const diff = this.diff;
     ([0, 1] as Side[]).forEach((side) => {
