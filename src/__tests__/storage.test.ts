@@ -138,6 +138,16 @@ describe('a damaged save never costs the rest of it', () => {
     expect(['GK', 'DEF', 'MID', 'WING', 'ATT']).toContain(mine.players[2].position);
   });
 
+  it('swaps a saved short code that spells a rude word', () => {
+    const save = goodSave();
+    const t = save.teams.find((x: { id: string }) => x.id === 'mine');
+    t.name = 'Super Eagles';
+    t.short = 'SEX';
+    localStorage.setItem(KEY, JSON.stringify(save));
+    reloadSave();
+    expect(getTeam('mine')!.short).toBe('SUP');
+  });
+
   it('keeps a real uploaded logo', () => {
     const save = goodSave();
     const logo = 'data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==';

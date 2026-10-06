@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isNameOk } from '../data/wordFilter';
-import { FIRST_NAMES, TEAM_WORDS_A, TEAM_WORDS_B } from '../data/defaults';
+import { FIRST_NAMES, TEAM_WORDS_A, TEAM_WORDS_B, shortCode } from '../data/defaults';
 import { CLUB_NAME, davaoStrikersTeam } from '../data/club';
 
 /** The names in a list that the filter blocks. For innocent names this should be empty. */
@@ -151,5 +151,23 @@ describe('judgement calls', () => {
 
   it('passes the mild Tagalog words for "stupid" and the ones that are also names', () => {
     expect(blocked(['Tanga', 'Bobo', 'Gaga', 'Lady Gaga', 'Leche Flan', 'Paki'])).toEqual([]);
+  });
+});
+
+describe('short codes on the scoreboard', () => {
+  it('keeps the usual initials and starts of names', () => {
+    expect(['Rocket Rovers', 'Davao Strikers', 'Red Owls Rule OK', 'Thunder', 'Jo', '⚽ Stars', 'Straße', ''].map(shortCode)).toEqual(['RRX', 'DSX', 'ROR', 'THU', 'JOX', 'STA', 'STR', 'TMX']);
+  });
+
+  it('never spells a rude word, even when the name is fine', () => {
+    const teams = TEAM_WORDS_A.flatMap((a) => TEAM_WORDS_B.map((b) => `${a} ${b}`));
+    expect(teams.map(shortCode).filter((c) => !isNameOk(c))).toEqual([]);
+    const names = ['Super Eagles', 'Sunny Eagles', 'Fire And Glory', 'Gold And Yellow', 'Tigers In Training', 'Titans', 'Assassins', 'Fuchsia', 'Cumbria', 'Poole', 'Sexton'];
+    expect(blocked(names)).toEqual([]);
+    expect(names.map(shortCode)).toEqual(['SUP', 'SUN', 'FIR', 'GOL', 'TIG', 'TIA', 'ASA', 'FUH', 'CUB', 'POL', 'SET']);
+  });
+
+  it('is always three characters', () => {
+    expect(['ßß', 'ß', 'Æsir', '😀😀', 'A B C D E'].map((n) => Array.from(shortCode(n)).length)).toEqual([3, 3, 3, 3, 3]);
   });
 });

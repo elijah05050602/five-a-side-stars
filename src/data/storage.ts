@@ -6,6 +6,7 @@ import { ensureSkills, fitSkills } from './skills';
 import { freshProgress, type Progress } from './progress';
 import { AGE_GROUPS, BADGE_SHAPES, BOOT_STYLES, BUILDS, HAIR_STYLES, KIT_PATTERNS, POSITIONS, SPECIALS, type Kit, type Player, type Team } from './types';
 import { FORMATIONS } from './formations';
+import { isNameOk } from './wordFilter';
 import type { GraphicsQuality } from '../game/graphics';
 
 const KEY = 'five-a-side-stars:v1';
@@ -138,7 +139,7 @@ function migrateTeam(raw: unknown): Team {
     ...t,
     id: text(t.id, uid(), 80),
     name,
-    short: typeof t.short === 'string' && /^[\p{L}\p{N}]{1,3}$/u.test(t.short) ? t.short : shortCode(name),
+    short: typeof t.short === 'string' && /^[\p{L}\p{N}]{1,3}$/u.test(t.short) && isNameOk(t.short) ? t.short : shortCode(name),
     ageGroup,
     badge,
     kit,

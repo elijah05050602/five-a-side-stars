@@ -1,4 +1,4 @@
-// @ts-ignore The project has no Node typings (tsconfig types: vite/client); vitest runs this file in Node.
+// @ts-expect-error The project has no Node typings (tsconfig types: vite/client); vitest runs this file in Node.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CELL } from '../game/playerAtlas';

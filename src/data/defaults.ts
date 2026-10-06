@@ -1,6 +1,7 @@
 import { BADGE_ICONS, type AgeGroup, type Badge, type Kit, type Player, type Position, type Team } from './types';
 import { randomSkills } from './skills';
 import { FORMATIONS, applyFormation } from './formations';
+import { isNameOk } from './wordFilter';
 
 export const SKIN_TONES = ['#f6d7c3', '#eab98f', '#d49a6a', '#a86b3c', '#7a4a26', '#4a2d17'];
 export const HAIR_COLOURS = ['#2b1b0e', '#5a3a1a', '#a0522d', '#d9a441', '#f2e2a0', '#1b1b1b', '#c0392b'];
@@ -30,11 +31,18 @@ export function randomPlayerName(): string {
   return pick(FIRST_NAMES);
 }
 
+/** The three letters on the scoreboard: the initials, or the start of a one-word name, but never a rude word. */
 export function shortCode(name: string): string {
   // Letters and digits only, counted by character: an emoji in the name would be cut in half on the scoreboard.
   const words = name.trim().split(/\s+/).map((w) => Array.from(w).filter((c) => /[\p{L}\p{N}]/u.test(c))).filter((w) => w.length > 0);
-  const code = words.length >= 2 ? words.slice(0, 3).map((w) => w[0]).join('') : (words[0] ?? ['T', 'M']).slice(0, 3).join('');
-  return code.toUpperCase().padEnd(3, 'X');
+  const first = words[0] ?? ['T', 'M'];
+  const tries = [words.length >= 2 ? words.slice(0, 3).map((w) => w[0]) : first.slice(0, 3), first.slice(0, 3)];
+  // Initials can spell what the name doesn't ("Fire And Glory", or "Super Eagles" padded out to SEX):
+  // then try the start of the first word, then its first letter with any two letters that follow.
+  const letters = words.flat().slice(0, 12);
+  for (let i = 1; i < letters.length; i++) for (let j = i + 1; j < letters.length; j++) tries.push([letters[0], letters[i], letters[j]]);
+  const code = (t: string[]) => Array.from(t.join('').toUpperCase()).slice(0, 3).join('').padEnd(3, 'X');
+  return code(tries.find((t) => isNameOk(code(t))) ?? ['T', 'M']);
 }
 
 export function makePlayer(position: Position, number: number, name = randomPlayerName(), starter = true, ageGroup: AgeGroup = 'U8'): Player {
