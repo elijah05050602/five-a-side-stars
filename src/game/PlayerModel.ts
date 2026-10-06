@@ -212,6 +212,7 @@ export class PlayerModel {
   private blinkIn = 2 + Math.random() * 4;
   private blinkLeft = 0;
 
+  private lashes = false;
   constructor(private readonly player: Player, kit: Kit, scale: number) {
     this.kit = kit; this.number = player.number; this.skin = player.skin; this.hair = player.hair;
     this.boots = player.boots ?? '#222222'; this.bootStyle = player.bootStyle ?? 'classic'; this.hairStyle = player.hairStyle ?? 'short'; this.build = player.build ?? 'regular';
@@ -220,7 +221,8 @@ export class PlayerModel {
     // Yaw first, so roll (x) and pitch (z) stay about the kid's own forward and side axes whichever way they face.
     this.body.rotation.order = 'YXZ';
     this.material = toonMaterial({ map: this.atlas() });
-    this.faceMat = toonMaterial({ map: faceTexture(this.skin, 'neutral', 0, 0, this.hair) });
+    this.lashes = player.gender === 'girl';
+    this.faceMat = toonMaterial({ map: faceTexture(this.skin, 'neutral', 0, 0, this.hair, this.lashes) });
     this.hairMat = toonMaterial({ color: this.hair });
 
     const s = scale * MODEL_SCALE;
@@ -400,6 +402,12 @@ export class PlayerModel {
     releaseTexture(old);
   }
 
+  /** Girls' faces get eyelashes; the next frame repaints the face. */
+  setGender(gender: Player['gender']): void {
+    this.lashes = gender === 'girl';
+    this.faceKey = '';
+  }
+
   setLook(skin: string, hair: string, hairStyle?: Player['hairStyle'], boots?: string, bootStyle?: BootStyle): void {
     this.skin = skin; this.hair = hair;
     if (boots) this.boots = boots;
@@ -447,7 +455,7 @@ export class PlayerModel {
     const key = `${expr}|${gx}|${gy}`;
     if (key === this.faceKey) return;
     this.faceKey = key;
-    this.swapMap(this.faceMat, faceTexture(this.skin, expr, gx, gy, this.hair));
+    this.swapMap(this.faceMat, faceTexture(this.skin, expr, gx, gy, this.hair, this.lashes));
   }
 
   /** Drives the clips and the procedural layer (leans, hops, slides) from the sim state. */

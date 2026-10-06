@@ -45,7 +45,7 @@ describe('Davao Strikers FC U7', () => {
     const t = ensureClubTeam();
     expect(t.players[1].hairStyle).toBe('short');
     expect(t.players[1].number).toBe(99);
-    expect(getTeam(CLUB_TEAM_ID)!.clubVersion).toBe(2);
+    expect(getTeam(CLUB_TEAM_ID)!.clubVersion).toBe(3);
   });
 
   it('wears kits that tell the outfield and the keeper apart', () => {

@@ -46,6 +46,24 @@ function pensDots(res: boolean[]): string {
   return out;
 }
 
+/** Confetti in the scorer's colours and a pop on their score, unless motion is set to calm. */
+function celebrate(root: HTMLElement, kit: { shirt: string; shirt2: string }, side: number): void {
+  if (getSettings().reduceMotion) return;
+  const box = document.createElement('div');
+  box.className = 'confetti';
+  box.setAttribute('aria-hidden', 'true');
+  const colours = [kit.shirt, kit.shirt2, '#ffd23f'];
+  for (let i = 0; i < 48; i++) {
+    const bit = document.createElement('i');
+    bit.style.cssText = `left:${(Math.random() * 100).toFixed(1)}%;background:${colours[i % colours.length]};animation-delay:${(Math.random() * 0.4).toFixed(2)}s;animation-duration:${(1.6 + Math.random() * 1.2).toFixed(2)}s`;
+    box.appendChild(bit);
+  }
+  root.appendChild(box);
+  setTimeout(() => box.remove(), 3400);
+  const score = root.querySelector<HTMLElement>(side === 0 ? '#sb-h' : '#sb-a');
+  if (score) { score.classList.remove('is-pop'); void score.offsetWidth; score.classList.add('is-pop'); }
+}
+
 export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void; onCamera?(): void }, coach?: TutorialCoach): HudRefs {
   const [home, away] = sim.teams;
   const mode = sim.mode;
@@ -330,6 +348,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
           const own = s.goals[s.goals.length - 1]?.ownGoal;
           showBanner(`<div class="goal-text">GOAL!</div><div class="goal-sub">${esc(ev.player.name)} #${ev.player.number}${own ? ' (own goal)' : ''} · ${esc(team.name)}</div><div class="commentary">${esc(said ?? (own ? 'Oh no, into their own net!' : pickLine(GOAL_LINES)))}</div>`, 3000);
           announce(`Goal for ${team.name}! ${ev.player.name}${own ? ', own goal' : ''}. ${scoreLine(s)}.`);
+          if (mode !== 'training') celebrate(root, team.kit, ev.side!);
           confetti(root, team.kit.shirt, team.kit.shirt2);
         } else if (ev.type === 'save') {
           showBanner(`<div class="save-text">${pickLine(SAVE_LINES)} Great save, ${esc(ev.player?.name ?? 'keeper')}!</div>`, 1200);

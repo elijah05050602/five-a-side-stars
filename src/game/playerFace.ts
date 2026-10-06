@@ -19,8 +19,8 @@ const NAVY = '#1b2a41';
  * cache stays small. Each call holds the face: hand it back with releaseTexture()
  * once it is not shown.
  */
-export function faceTexture(skin: string, expr: Expression, gazeX = 0, gazeY = 0, hair = '#3b2314'): THREE.CanvasTexture {
-  return cache.acquire(`${skin}|${expr}|${gazeX}|${gazeY}|${hair}`, () => paintFace(skin, expr, gazeX, gazeY, hair));
+export function faceTexture(skin: string, expr: Expression, gazeX = 0, gazeY = 0, hair = '#3b2314', lashes = false): THREE.CanvasTexture {
+  return cache.acquire(`${skin}|${expr}|${gazeX}|${gazeY}|${hair}|${lashes ? 'lashes' : ''}`, () => paintFace(skin, expr, gazeX, gazeY, hair, lashes));
 }
 
 /** Dispose every face nobody is pulling. A match calls this when it ends. */
@@ -28,7 +28,7 @@ export function clearFaceCache(): void {
   cache.clearIdle();
 }
 
-function paintFace(skin: string, expr: Expression, gazeX: number, gazeY: number, hair: string): THREE.CanvasTexture {
+function paintFace(skin: string, expr: Expression, gazeX: number, gazeY: number, hair: string, lashes: boolean): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = SIZE; c.height = SIZE;
   const ctx = c.getContext('2d')!;
@@ -129,6 +129,17 @@ function paintFace(skin: string, expr: Expression, gazeX: number, gazeY: number,
       cheeks();
       smile(11, 9);
       break;
+  }
+  if (lashes) {
+    // Girls: two little lashes flicking out from the top outer corner of each eye.
+    ctx.strokeStyle = '#1b1b2a';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    for (const x of eyes) {
+      const out = x < SIZE / 2 ? -1 : 1;
+      ctx.beginPath(); ctx.moveTo(x + out * 8, eyeY - 10); ctx.lineTo(x + out * 15, eyeY - 15); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + out * 4, eyeY - 12); ctx.lineTo(x + out * 9, eyeY - 19); ctx.stroke();
+    }
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;

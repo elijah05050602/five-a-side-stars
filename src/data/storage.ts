@@ -158,6 +158,7 @@ function migrateTeam(raw: unknown): Team {
       ...p,
       id: text(old.id, uid(), 80),
       name: text(old.name, `Player ${i + 1}`, 30),
+      gender: old.gender === 'boy' || old.gender === 'girl' ? old.gender : undefined,
       number: Number.isInteger(old.number) && old.number! >= 1 && old.number! <= 99 ? old.number! : i + 1,
       position,
       positions: Array.isArray(old.positions) ? old.positions.filter((x) => POSITIONS.includes(x)) : undefined,
