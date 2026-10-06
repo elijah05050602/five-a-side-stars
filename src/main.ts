@@ -5,6 +5,7 @@ import { getSettings, getTeams, loadSave, updateSettings } from './data/storage'
 import { generateOpponent } from './data/defaults';
 import { applyMotionSetting } from './ui/motion';
 import { music } from './game/music';
+import { unlockAudio } from './game/audio';
 import { preloadCommentary } from './game/voice';
 import { loadPlayerAsset } from './game/playerAsset';
 import { renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
@@ -18,9 +19,7 @@ applyMotionSetting();
 // Fetch the kid model now so the first match and the team builder start with it ready.
 loadPlayerAsset().catch(() => { /* PlayerModel falls back to the procedural kid */ });
 // Music (and fetching the commentator's clips) can only start after a tap or key press.
-const startMusic = () => { music.start(); void preloadCommentary(); window.removeEventListener('pointerdown', startMusic); window.removeEventListener('keydown', startMusic); };
-window.addEventListener('pointerdown', startMusic);
-window.addEventListener('keydown', startMusic);
+unlockAudio(() => { music.start(); void preloadCommentary(); });
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => { /* offline play is a bonus, not a requirement */ }); });
 }
@@ -31,6 +30,7 @@ const router: Router = {
     canvas.classList.remove('is-live');
     document.body.classList.remove('in-match');
     music.setQuiet(false);
+    music.start(); // in case it never got going (no-op when already playing, or switched off)
     renderScreen(ui, screen, router);
   },
   startMatch(o: StartOptions) {

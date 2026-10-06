@@ -2,16 +2,16 @@ import { getSettings } from '../data/storage';
 import { audioContext, channelBus, loadAudio, midiToHz, noiseBurst, tone } from './audio';
 
 /**
- * The menu music: a stadium anthem recorded with real sampled instruments
- * (public/audio/menu.mp3, made by tools/audio/compose_music.py) played as a
+ * The menu music: a stadium pop-rock anthem (public/audio/menu.mp3, made with
+ * ElevenLabs Music and looped by tools/audio/loop_music.py) played as a
  * seamless loop, plus short jingles at full time. Starts on the first tap or
  * key press (browsers require a gesture) and fades right down during a match.
- * While the recording loads, or if it cannot be played, the same tune plays
+ * While the recording loads, or if it cannot be played, a simple tune plays
  * on oscillators so there is never silence.
  */
 const BPM = 132;
 const STEPS_PER_BAR = 8; // eighth notes
-const LOOP_SECONDS = 60; // 32 bars at 128 bpm, see compose_music.py
+const LOOP_SECONDS = 56.255; // 30 bars at 128 bpm, see tools/audio/loop_music.py
 
 // Chords per bar: [root midi, third, fifth] in a comfortable register.
 const C = [60, 64, 67], G = [59, 62, 67], Am = [57, 60, 64], F = [57, 60, 65];

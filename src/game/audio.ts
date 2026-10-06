@@ -31,11 +31,64 @@ export function audioContext(): AudioContext | null {
       master.gain.value = 0.9;
       master.connect(comp).connect(ctx.destination);
     }
-    if (ctx.state === 'suspended') void ctx.resume();
+    // iPhones report 'interrupted' (not 'suspended') after a call or app switch.
+    if (ctx.state !== 'running' && ctx.state !== 'closed') void ctx.resume().catch(() => undefined);
     return ctx;
   } catch {
     return null;
   }
+}
+
+const UNLOCK_EVENTS = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const;
+
+/**
+ * Browsers only start audio from a real tap or key press, and phones count a
+ * finger lifting (touchend / pointerup / click) rather than touching down. So
+ * listen to all of them and keep listening until the context is really
+ * running, calling `onRunning` each time a gesture gets it going. Also wake
+ * the audio again when the game comes back from the background (phones
+ * suspend it on a call or app switch).
+ */
+export function unlockAudio(onRunning: () => void): void {
+  let armed = false;
+  const tryUnlock = () => {
+    const c = audioContext();
+    if (!c) return;
+    // Older iPhones only unlock audio once a sound actually starts inside the gesture.
+    if (c.state !== 'running') {
+      const blip = c.createBufferSource();
+      blip.buffer = c.createBuffer(1, 1, c.sampleRate);
+      blip.connect(c.destination);
+      blip.start();
+    }
+    onRunning();
+    const done = () => {
+      if (c.state !== 'running' || !armed) return;
+      armed = false;
+      for (const ev of UNLOCK_EVENTS) window.removeEventListener(ev, tryUnlock, true);
+    };
+    done();
+    if (c.state !== 'running') void c.resume().then(() => { done(); if (c.state === 'running') onRunning(); }, () => undefined);
+  };
+  const arm = () => {
+    if (armed) return;
+    armed = true;
+    for (const ev of UNLOCK_EVENTS) window.addEventListener(ev, tryUnlock, { capture: true, passive: true });
+  };
+  arm();
+  let watched: AudioContext | null = null;
+  const watch = () => {
+    // If the audio stops later (a phone call, the app going to the background),
+    // the next tap starts it again.
+    if (!ctx || watched === ctx) return;
+    watched = ctx;
+    ctx.addEventListener('statechange', () => { if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') arm(); });
+  };
+  for (const ev of UNLOCK_EVENTS) window.addEventListener(ev, watch, { capture: true, passive: true });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || !ctx) return;
+    if (ctx.state !== 'running') { void ctx.resume().catch(() => undefined); arm(); }
+  });
 }
 
 /** Where every sound plugs in. Only valid after audioContext() returned a context. */
