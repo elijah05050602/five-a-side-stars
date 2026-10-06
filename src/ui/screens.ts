@@ -103,6 +103,18 @@ export function renderScreen(root: HTMLElement, screen: Screen, router: Router):
   currentRouter = router;
   root.innerHTML = '';
   root.className = 'screen-root';
+  drawScreen(root, screen, router);
+  // A new screen: name it in the tab, and start keyboard and screen-reader users at its heading.
+  const heading = root.querySelector<HTMLElement>('h1');
+  const title = heading?.textContent?.replace(/\s+/g, ' ').trim();
+  document.title = title && screen.name !== 'menu' ? `${title} · Goal Rush!` : 'Goal Rush!';
+  if (heading && !root.contains(document.activeElement)) {
+    heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
+  }
+}
+
+function drawScreen(root: HTMLElement, screen: Screen, router: Router): void {
   switch (screen.name) {
     case 'menu': return renderMenu(root, router);
     case 'teams': return renderTeams(root, router);
