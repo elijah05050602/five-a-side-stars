@@ -370,6 +370,12 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .parents .toggle { display: flex; gap: 10px; align-items: center; padding: 6px 0; font-size: 1.05rem; }
 .plain-list { padding-left: 18px; line-height: 1.45; }
 .plain-list li { margin-bottom: 6px; }
+/* Calmer motion: the system's reduce-motion setting and the game's own switch (body.reduce-motion) both make the decorative
+   movement (sparkles, bobbing mascot, glowing launcher, pulses, blinks, pops and slides) finish at once. Hover, press and
+   focus feedback still happens, just instantly. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
 body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 
 /* ---------- League mode ---------- */
@@ -544,7 +550,6 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .bind-empty { border-style: dashed; box-shadow: none; color: var(--muted); background: transparent; }
 .bind.is-listening { background: var(--yellow); border-style: solid; animation: bind-pulse 0.9s ease-in-out infinite; }
 @keyframes bind-pulse { 50% { box-shadow: 0 0 0 6px rgba(255,210,63,0.45); } }
-body.reduce-motion .bind.is-listening { animation: none; }
 .controls-note { min-height: 22px; margin: 0; font-weight: 700; color: var(--green-ink); }
 .controls-actions { justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
 .pad-status { margin: 0; padding: 10px 14px; border-radius: var(--radius-sm); font-weight: 700; display: flex; flex-wrap: wrap; gap: 6px 16px; }
