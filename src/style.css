@@ -160,7 +160,6 @@ input, select {
   font-family: var(--font); font-weight: 600; font-size: 19px; padding: 10px 14px; border-radius: var(--radius-sm); border: var(--stroke);
   min-height: 50px; flex: 1; min-width: 0; background: var(--white); color: var(--navy);
 }
-input:focus-visible, select:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 input.is-invalid { border-color: #e63946; background: #ffe3e6; }
 input[type='number'] { max-width: 120px; text-align: center; }
 .pills { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -711,3 +710,19 @@ body.reduce-motion .bind.is-listening { animation: none; }
   .overlay-card .mix-row input[type="range"] { flex: none; width: 120px; }
   .overlay-card .mix-toggle { font-size: 13px; }
 }
+
+/* ---------- Keyboard focus ---------- */
+/* A white ring inside a navy ring: one of the two always stands out, on white cards, bright fills and the dark stadium.
+   :focus-visible keeps it for keyboard and switch users; a tap or a click does not light it up. Scoped to the app so
+   the loading screen keeps its own style; !important so no component shadow or animation can hide it. */
+:where(#app) :where(button, a[href], summary, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--navy) !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 0 3px var(--white) !important;
+}
+/* Console tabs draw both rings inside their own edge, so the sideways-scrolling tab strip on phones cannot clip them. */
+.shell-nav .shell-tab:focus-visible { outline-offset: -3px !important; box-shadow: inset 0 0 0 6px var(--white) !important; }
+/* A player picked for a swap keeps its orange ring while focused. */
+.player-card:is(.is-picked, .is-drop-target):focus-visible { outline-color: #ff7a00 !important; }
+/* Formation dots are SVG, which has no box-shadow: the navy outline frames the dot and its ring turns white. */
+.fm-dot:focus-visible circle { stroke: var(--white); stroke-width: 4; }
