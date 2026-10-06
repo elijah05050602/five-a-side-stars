@@ -1,5 +1,6 @@
 import { getLeague, getSettings, updateSettings } from '../data/storage';
 import { music } from '../game/music';
+import { applyVolumes } from '../game/audio';
 import { esc } from './hud';
 import type { Router } from './screens';
 
@@ -29,7 +30,7 @@ export function shellBar(active: ShellTab): string {
         ${TABS.map((t) => `<button class="shell-tab ${t.id === active ? 'is-active' : ''}" data-nav="${t.id}"><span class="shell-tab-icon">${t.icon}</span>${t.label}${t.id === 'league' && league ? '<span class="shell-live">LIVE</span>' : ''}</button>`).join('')}
       </nav>
       <div class="shell-tools">
-        <button class="shell-icon" data-sound aria-label="${s.sound || s.music ? 'Mute sound' : 'Turn sound on'}" title="Sound">${s.sound || s.music ? '🔊' : '🔇'}</button>
+        <button class="shell-icon" data-sound aria-label="${s.sound || s.music || s.commentary ? 'Mute sound' : 'Turn sound on'}" title="Sound">${s.sound || s.music || s.commentary ? '🔊' : '🔇'}</button>
         <button class="shell-icon" data-nav="controls" aria-label="Controls" title="Controls">🎮</button>
         <button class="shell-icon shell-icon-parents" data-nav="parents" aria-label="Parents zone" title="Parents zone">🛡️</button>
       </div>
@@ -64,8 +65,9 @@ export function wireShell(root: HTMLElement, router: Router): void {
   }));
   root.querySelector<HTMLElement>('[data-sound]')?.addEventListener('click', (e) => {
     const s = getSettings();
-    const on = !(s.sound || s.music);
-    updateSettings({ sound: on, music: on });
+    const on = !(s.sound || s.music || s.commentary);
+    updateSettings({ sound: on, music: on, commentary: on });
+    applyVolumes();
     music.refresh();
     const btn = e.currentTarget as HTMLElement;
     btn.textContent = on ? '🔊' : '🔇';

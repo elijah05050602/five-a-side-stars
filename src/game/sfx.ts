@@ -1,5 +1,5 @@
 import { getSettings } from '../data/storage';
-import { audioContext, masterBus, midiToHz, noiseBuffer, noiseBurst, tone } from './audio';
+import { audioContext, channelBus, midiToHz, noiseBuffer, noiseBurst, tone } from './audio';
 import type { MatchSim, SimEvent } from './sim';
 
 /**
@@ -24,7 +24,7 @@ export class Sfx {
       this.ctx = c;
       this.bus = c.createGain();
       this.bus.gain.value = 1;
-      this.bus.connect(masterBus());
+      this.bus.connect(channelBus('sfx'));
     }
     return c;
   }

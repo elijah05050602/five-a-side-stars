@@ -5,6 +5,7 @@ import { getSettings, getTeams, loadSave, updateSettings } from './data/storage'
 import { generateOpponent } from './data/defaults';
 import { applyMotionSetting } from './ui/motion';
 import { music } from './game/music';
+import { preloadCommentary } from './game/voice';
 import { loadPlayerAsset } from './game/playerAsset';
 import { renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
 
@@ -16,8 +17,8 @@ loadSave();
 applyMotionSetting();
 // Fetch the kid model now so the first match and the team builder start with it ready.
 loadPlayerAsset().catch(() => { /* PlayerModel falls back to the procedural kid */ });
-// Music can only start after a tap or key press.
-const startMusic = () => { music.start(); window.removeEventListener('pointerdown', startMusic); window.removeEventListener('keydown', startMusic); };
+// Music (and fetching the commentator's clips) can only start after a tap or key press.
+const startMusic = () => { music.start(); void preloadCommentary(); window.removeEventListener('pointerdown', startMusic); window.removeEventListener('keydown', startMusic); };
 window.addEventListener('pointerdown', startMusic);
 window.addEventListener('keydown', startMusic);
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

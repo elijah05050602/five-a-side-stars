@@ -1,4 +1,5 @@
 import type { MatchSim, SimEvent } from '../game/sim';
+import { soundSettings, wireSoundSettings } from './soundSettings';
 import { TUTORIAL_STEPS, type TutorialCoach, type TutorialStep } from '../game/tutorial';
 import { getSettings } from '../data/storage';
 import { CAMERA_HEIGHTS, CAMERA_HEIGHT_LABELS, PORTRAIT_VIEW_LABELS, controlsSentence, firstKey, getControls, moveKeysLabel, saveControls, type CameraHeight, type PortraitView } from '../data/controls';
@@ -179,12 +180,14 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
                   ? '<p class="muted">Drag the stick to run, hold Shoot to power up, then let go. The orange ring marks your player.</p>'
                   : `<p class="muted">${esc(controlsSentence('solo'))}. Hold shoot to power up, then let go. A controller works too. The orange ring and arrow mark your player; the small rings show each team's colour.</p>`}
           ${cameraPicker()}
+          ${soundSettings()}
           <div class="row">
             <button class="btn btn-primary" id="ov-resume">Keep playing</button>
             <button class="btn btn-ghost" id="ov-quit">${mode === 'tutorial' ? 'Skip tutorial' : 'Quit match'}</button>
           </div>
         </div>`;
       overlay.querySelector('#ov-resume')!.addEventListener('click', () => cb.onResume());
+      wireSoundSettings(overlay);
       overlay.querySelectorAll<HTMLElement>('[data-cam-height], [data-cam-view]').forEach((b) => b.addEventListener('click', () => {
         const c = structuredClone(getControls());
         if (b.dataset.camHeight) c.camera.height = b.dataset.camHeight as CameraHeight;

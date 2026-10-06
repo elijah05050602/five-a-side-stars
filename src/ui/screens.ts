@@ -1,4 +1,6 @@
 import { AGE_STATS } from '../data/ageGroups';
+import { soundSettings, wireSoundSettings } from './soundSettings';
+import { applyVolumes } from '../game/audio';
 import { BOOT_COLOURS, HAIR_COLOURS, KIT_COLOURS, SKIN_TONES, generateOpponent, makePlayer, makeTeam, randomPlayerName, randomTeamName, shortCode } from '../data/defaults';
 import { deleteTeam, getCareer, getLeague, getSettings, getTeam, getTeams, resetAll, saveTeam, setCareer, setLeague, updateSettings } from '../data/storage';
 import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, POSITIONS, POSITION_LABELS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type Difficulty, type FormationId, type HairStyle, type Kit, type Position, type SkillKey, type Special, type Team } from '../data/types';
@@ -1240,8 +1242,7 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
       ${topBar('Parents Zone')}
       <div class="card">
         <h2>Settings</h2>
-        <label class="toggle"><input type="checkbox" id="pa-sound" ${s.sound ? 'checked' : ''}/> Sound effects</label>
-        <label class="toggle"><input type="checkbox" id="pa-music" ${s.music ? 'checked' : ''}/> Music</label>
+        ${soundSettings()}
         <label class="toggle"><input type="checkbox" id="pa-motion" ${s.reduceMotion ? 'checked' : ''}/> Reduce motion (no confetti or wobbling, calmer animations)</label>
       </div>
       <div class="card">
@@ -1263,11 +1264,10 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
-  root.querySelector<HTMLInputElement>('#pa-sound')!.addEventListener('change', (e) => updateSettings({ sound: (e.target as HTMLInputElement).checked }));
-  root.querySelector<HTMLInputElement>('#pa-music')!.addEventListener('change', (e) => { updateSettings({ music: (e.target as HTMLInputElement).checked }); music.refresh(); });
+  wireSoundSettings(root);
   root.querySelector<HTMLInputElement>('#pa-motion')!.addEventListener('change', (e) => { updateSettings({ reduceMotion: (e.target as HTMLInputElement).checked }); applyMotionSetting(); });
   root.querySelector('#pa-reset')!.addEventListener('click', () => {
-    if (confirm('Delete every team, sticker and setting on this device and start again?')) { resetAll(); music.refresh(); router.go({ name: 'menu' }); }
+    if (confirm('Delete every team, sticker and setting on this device and start again?')) { resetAll(); applyVolumes(); music.refresh(); router.go({ name: 'menu' }); }
   });
   void deleteTeam;
 }

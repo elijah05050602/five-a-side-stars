@@ -13,6 +13,8 @@ import type { Kit } from '../data/types';
 import { DIVE_RECOVER, MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
+import { Commentary } from './voice';
+import { music } from './music';
 import { getSettings } from '../data/storage';
 import { TutorialCoach } from './tutorial';
 
@@ -64,6 +66,7 @@ export class MatchScene {
   private readonly sfx = new Sfx();
   private readonly crowd: Crowd;
   private readonly commentator: Commentator;
+  private readonly voice = new Commentary();
   readonly conditions: Conditions;
   private readonly weather: Weather;
   private readonly extras: ReturnType<typeof pitchExtras>;
@@ -92,6 +95,9 @@ export class MatchScene {
     this.sim = new MatchSim(config);
     this.conditions = resolveConditions(options.weather ?? 'random');
     this.commentator = new Commentator(this.conditions);
+    this.commentator.onSay = (key, score) => this.voice.say(key, score);
+    this.voice.load();
+    music.preloadJingles();
     this.sfx.setWeather(this.conditions.weather);
     const twoPlayer = config.humanSide2 != null;
     // Two players: the first gamepad joins player 1 and the second joins player 2.
@@ -321,6 +327,7 @@ export class MatchScene {
     if (replaying) this.acc = 0;
     for (const ev of this.sim.events) {
       this.sfx.play(ev);
+      if (ev.type === 'fulltime') music.jingle(this.fullTimeJingle());
       this.crowd.onEvent(ev);
       if (ev.type === 'goal') {
         this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, this.sim.score[0], this.sim.score[1]);
@@ -418,6 +425,13 @@ export class MatchScene {
     this.renderer.render(this.scene, this.camera);
   };
 
+  /** A fanfare when the player wins (or in two-player and training), a warm "well played" otherwise. */
+  private fullTimeJingle(): 'win' | 'draw' {
+    const me = this.sim.config.humanSide;
+    if (me === null || this.sim.config.humanSide2 != null || this.sim.mode === 'training') return 'win';
+    return this.sim.score[me] > this.sim.score[1 - me] ? 'win' : 'draw';
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -429,6 +443,7 @@ export class MatchScene {
     this.input.dispose();
     this.input2?.dispose();
     this.sfx.dispose();
+    this.voice.dispose();
     this.weather.dispose();
     this.hud.destroy();
     this.models.forEach((m) => m.dispose());
