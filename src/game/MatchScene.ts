@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BallModel } from './BallModel';
-import { Input } from './input';
-import { getControls } from '../data/controls';
+import { Input, type InputState } from './input';
+import { CAMERA_HEIGHT_SCALE, getControls } from '../data/controls';
 import { buildPitch, pitchExtras } from './Pitch';
 import { Crowd } from './Crowd';
 import { Commentator } from './commentary';
@@ -80,6 +80,10 @@ export class MatchScene {
   private readonly camLook = new THREE.Vector3();
   private disposed = false;
   private readonly onResize = () => this.resize();
+  private readonly resizeObserver: ResizeObserver | null;
+  /** Upright screens can look up the pitch instead of across it; `dir` is the way "up" points along x. */
+  private upfield = false;
+  private upDir: 1 | -1 = 1;
   /** First-time tutorial coach and its glowing star, when this is the tutorial. */
   private readonly coach: TutorialCoach | null = null;
   private readonly marker = new THREE.Group();
@@ -164,6 +168,7 @@ export class MatchScene {
       onResume: () => this.sim.togglePause(),
       onQuit: () => { this.dispose(); this.onQuit(); },
       onFinish: () => { const r = this.result(); this.dispose(); this.onFinish(r); },
+      onCamera: () => this.updateView(),
     }, this.coach ?? undefined);
     this.input.attachJoystick(this.hud.joystickZone, this.hud.joystickKnob);
     this.input.attachButton(this.hud.btnShoot, 'shoot');
@@ -174,6 +179,11 @@ export class MatchScene {
     this.input.attachButton(this.hud.btnLob, 'lob');
 
     window.addEventListener('resize', this.onResize);
+    window.addEventListener('orientationchange', this.onResize);
+    window.visualViewport?.addEventListener('resize', this.onResize);
+    // Phones report the new size late after a turn, so also watch the canvas itself.
+    this.resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(this.onResize);
+    this.resizeObserver?.observe(canvas);
     this.resize();
     this.camTarget.set(0, 0, 0);
     this.camPos.copy(this.cameraGoal(this.camTarget));
@@ -218,10 +228,35 @@ export class MatchScene {
   }
 
   private resize(): void {
-    const w = window.innerWidth, h = window.innerHeight;
+    const canvas = this.renderer.domElement;
+    const w = canvas.clientWidth || window.innerWidth, h = canvas.clientHeight || window.innerHeight;
+    if (!w || !h) return;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.updateView();
+  }
+
+  /** Pick side-on or up-the-pitch for the current screen shape and camera choice. Call after a resize or a camera change. */
+  updateView(): void {
+    const wasUp = this.upfield, wasDir = this.upDir;
+    const so = this.sim.shootout;
+    // Look the way the player attacks: behind the penalty taker in a shoot-out, from your own goal otherwise.
+    const side = so ? so.taking : (this.sim.config.humanSide ?? 0);
+    this.upDir = side === 0 ? 1 : -1;
+    this.upfield = this.camera.aspect < 0.9 && getControls().camera.portrait === 'upfield';
+    if (wasUp !== this.upfield || wasDir !== this.upDir) {
+      // Cut rather than swoop across the pitch.
+      this.camPos.copy(this.cameraGoal(this.camTarget));
+      this.camLook.set(this.camTarget.x, 0.5, this.camTarget.z);
+    }
+  }
+
+  /** The stick and keys work in screen directions; turn them into pitch directions for the current view. */
+  private toPitch(i: InputState): InputState {
+    if (!this.upfield) return i;
+    const d = this.upDir;
+    return { ...i, moveX: -d * i.moveZ, moveZ: d * i.moveX };
   }
 
   private result(): MatchResult {
@@ -242,11 +277,22 @@ export class MatchScene {
     };
   }
 
-  /** Camera sits above and "south" of the focus point, looking down at a tilt. */
+  /**
+   * Camera sits above and "south" of the focus point, looking down at a tilt. On an upright
+   * screen it can instead sit behind the player's own goal, so the pitch runs up the screen.
+   */
   private cameraGoal(target: THREE.Vector3): THREE.Vector3 {
     const aspect = this.camera.aspect;
-    // A little more tilt than straight down, so faces, kits and the stand show.
-    const height = (this.sim.width * 0.84) / Math.min(1.9, Math.max(1.0, aspect)) + 4.2;
+    const zoom = CAMERA_HEIGHT_SCALE[getControls().camera.height];
+    if (this.upfield) {
+      // Fit most of the pitch's width across the narrow screen; the camera slides sideways for the rest.
+      const height = ((this.sim.width * 0.5) / Math.max(0.42, aspect) + 2) * zoom;
+      return new THREE.Vector3(target.x - this.upDir * height * 0.9, height, target.z);
+    }
+    // A little more tilt than straight down, so faces, kits and the stand show. A phone on its
+    // side is short, so it sits a bit higher to keep both touchlines in view.
+    const short = this.renderer.domElement.clientHeight < 520;
+    const height = ((this.sim.width * 0.84) / Math.min(short ? 1.6 : 1.9, Math.max(1.0, aspect)) + 4.2) * zoom;
     return new THREE.Vector3(target.x, height, target.z + height * 0.9);
   }
 
@@ -255,8 +301,10 @@ export class MatchScene {
     this.raf = requestAnimationFrame(this.frame);
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
-    const input = this.input.poll();
-    const input2 = this.input2?.poll();
+    if (this.sim.shootout && this.upfield && (this.sim.shootout.taking === 0 ? 1 : -1) !== this.upDir) this.updateView();
+    const input = this.toPitch(this.input.poll());
+    const raw2 = this.input2?.poll();
+    const input2 = raw2 && this.toPitch(raw2);
     if (input.pause || input2?.pause) this.sim.togglePause();
     // Fixed 60 Hz simulation steps for stable physics. The sim waits while a replay plays.
     const replaying = !!this.replay && this.replay.wait <= 0;
@@ -374,6 +422,9 @@ export class MatchScene {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('orientationchange', this.onResize);
+    window.visualViewport?.removeEventListener('resize', this.onResize);
+    this.resizeObserver?.disconnect();
     this.input.dispose();
     this.input2?.dispose();
     this.sfx.dispose();

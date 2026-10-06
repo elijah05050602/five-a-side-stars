@@ -1,12 +1,12 @@
 import {
-  ACTIONS, ACTION_LABELS, KEY_SLOTS, PAD_SLOTS, bindKey, bindPad, clearSlot, getControls, keyLabel, padLabel, resetControls, saveControls,
-  type Action, type ControlsConfig, type KeyProfile,
+  ACTIONS, ACTION_LABELS, CAMERA_HEIGHTS, CAMERA_HEIGHT_LABELS, KEY_SLOTS, PAD_SLOTS, PORTRAIT_VIEW_LABELS, bindKey, bindPad, clearSlot, getControls, keyLabel, padLabel, resetControls, saveControls,
+  type Action, type CameraHeight, type ControlsConfig, type KeyProfile, type PortraitView,
 } from '../data/controls';
 import { esc } from './hud';
 import { pageHead, shellBar } from './shell';
 import type { Router } from './screens';
 
-type Tab = 'keyboard' | 'pad' | 'touch';
+type Tab = 'keyboard' | 'pad' | 'touch' | 'camera';
 
 /** What the screen is waiting for: a key or button for one slot. */
 type Capture = { kind: 'key'; profile: KeyProfile; action: Action; slot: number } | { kind: 'pad'; action: Action; slot: number };
@@ -75,6 +75,14 @@ export function renderControls(root: HTMLElement, router: Router, wire: (root: H
       </div>
     </div>`;
 
+  const cameraPanel = () => `
+    <div class="touch-settings">
+      <div class="cam-row"><span class="cam-label">📷 Camera height</span><div class="pills">${CAMERA_HEIGHTS.map((h) => `<button class="pill ${h === c.camera.height ? 'is-active' : ''}" data-cam-height="${h}">${CAMERA_HEIGHT_LABELS[h]}</button>`).join('')}</div></div>
+      <p class="muted">Higher shows more of the pitch and both goals; lower shows the players up close.</p>
+      <div class="cam-row"><span class="cam-label">📱 Phone held upright</span><div class="pills">${(['upfield', 'side'] as PortraitView[]).map((v) => `<button class="pill ${v === c.camera.portrait ? 'is-active' : ''}" data-cam-view="${v}">${PORTRAIT_VIEW_LABELS[v]}</button>`).join('')}</div></div>
+      <p class="muted">Up the pitch turns the view so you attack up the screen and can see the goal ahead. Side on keeps the usual sideways view. You can change both from the pause menu too.</p>
+    </div>`;
+
   const render = () => {
     root.innerHTML = `
       <div class="screen controls-screen">
@@ -84,6 +92,7 @@ export function renderControls(root: HTMLElement, router: Router, wire: (root: H
           <button class="pill ${tab === 'keyboard' ? 'is-active' : ''}" data-tab="keyboard">⌨️ Keyboard</button>
           <button class="pill ${tab === 'pad' ? 'is-active' : ''}" data-tab="pad">🎮 Controller</button>
           <button class="pill ${tab === 'touch' ? 'is-active' : ''}" data-tab="touch">👆 Touch screen</button>
+          <button class="pill ${tab === 'camera' ? 'is-active' : ''}" data-tab="camera">📷 Camera</button>
         </div>
         <div class="card controls-card">
           ${tab === 'keyboard' ? `
@@ -94,11 +103,11 @@ export function renderControls(root: HTMLElement, router: Router, wire: (root: H
             <div id="pad-status">${padStatus()}</div>
             <p class="muted">The left stick always moves your player. Tap a box, then press a button on the controller. <kbd>Esc</kbd> cancels. In a two-player match the first controller is Player 1 and the second is Player 2. Buttons light up when you press them.</p>
             <div class="bind-list">${padRows()}</div>`
-          : touchPanel()}
+          : tab === 'touch' ? touchPanel() : cameraPanel()}
           <p class="controls-note" role="status">${esc(note)}</p>
         </div>
         <div class="row controls-actions">
-          <button class="btn btn-ghost" id="ctl-reset">↺ Reset ${tab === 'keyboard' ? 'keyboard' : tab === 'pad' ? 'controller' : 'touch'} to defaults</button>
+          <button class="btn btn-ghost" id="ctl-reset">↺ Reset ${tab === 'keyboard' ? 'keyboard' : tab === 'pad' ? 'controller' : tab === 'touch' ? 'touch' : 'camera'} to defaults</button>
           <button class="btn btn-ghost" id="ctl-reset-all">Reset all controls</button>
           <button class="btn btn-primary" data-back>Done</button>
         </div>
@@ -120,7 +129,7 @@ export function renderControls(root: HTMLElement, router: Router, wire: (root: H
     root.querySelector('#ctl-reset')!.addEventListener('click', () => {
       const d = resetControls();
       // resetControls clears everything; put back the parts this tab is not resetting.
-      if (tab === 'keyboard') c.keys = d.keys; else if (tab === 'pad') c.pad = d.pad; else c.touch = d.touch;
+      if (tab === 'keyboard') c.keys = d.keys; else if (tab === 'pad') c.pad = d.pad; else if (tab === 'touch') c.touch = d.touch; else c.camera = d.camera;
       commit();
       capture = null;
       note = 'Back to the default controls.';
@@ -145,6 +154,8 @@ export function renderControls(root: HTMLElement, router: Router, wire: (root: H
       size!.nextElementSibling!.textContent = `${Math.round(c.touch.size * 100)}%`;
       opacity!.nextElementSibling!.textContent = `${Math.round(c.touch.opacity * 100)}%`;
     };
+    root.querySelectorAll<HTMLElement>('[data-cam-height]').forEach((b) => b.addEventListener('click', () => { c.camera.height = b.dataset.camHeight as CameraHeight; commit(); render(); }));
+    root.querySelectorAll<HTMLElement>('[data-cam-view]').forEach((b) => b.addEventListener('click', () => { c.camera.portrait = b.dataset.camView as PortraitView; commit(); render(); }));
     size?.addEventListener('input', onTouch);
     opacity?.addEventListener('input', onTouch);
     lefty?.addEventListener('change', onTouch);

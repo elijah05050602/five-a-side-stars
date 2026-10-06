@@ -1,7 +1,7 @@
 import type { MatchSim, SimEvent } from '../game/sim';
 import { TUTORIAL_STEPS, type TutorialCoach, type TutorialStep } from '../game/tutorial';
 import { getSettings } from '../data/storage';
-import { controlsSentence, firstKey, getControls, moveKeysLabel } from '../data/controls';
+import { CAMERA_HEIGHTS, CAMERA_HEIGHT_LABELS, PORTRAIT_VIEW_LABELS, controlsSentence, firstKey, getControls, moveKeysLabel, saveControls, type CameraHeight, type PortraitView } from '../data/controls';
 import { badgeSvg } from './kitPreview';
 
 export interface HudRefs {
@@ -44,7 +44,7 @@ function pensDots(res: boolean[]): string {
   return out;
 }
 
-export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void }, coach?: TutorialCoach): HudRefs {
+export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void; onCamera?(): void }, coach?: TutorialCoach): HudRefs {
   const [home, away] = sim.teams;
   const mode = sim.mode;
   root.innerHTML = `
@@ -175,13 +175,27 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
               ? '<p class="muted">Collect the ball, run at goal and hold shoot to power up. Hard shots that fly in are worth 2 points.</p>'
               : s.config.humanSide2 != null
                 ? `<p class="muted"><strong>Player 1:</strong> ${esc(controlsSentence('p1'))}.<br/><strong>Player 2:</strong> ${esc(controlsSentence('p2'))}.</p>`
-                : `<p class="muted">${esc(controlsSentence('solo'))}. Hold shoot to power up, then let go. A controller works too. The orange ring and arrow mark your player; the small rings show each team's colour.</p>`}
+                : touch
+                  ? '<p class="muted">Drag the stick to run, hold Shoot to power up, then let go. The orange ring marks your player.</p>'
+                  : `<p class="muted">${esc(controlsSentence('solo'))}. Hold shoot to power up, then let go. A controller works too. The orange ring and arrow mark your player; the small rings show each team's colour.</p>`}
+          ${cameraPicker()}
           <div class="row">
             <button class="btn btn-primary" id="ov-resume">Keep playing</button>
             <button class="btn btn-ghost" id="ov-quit">${mode === 'tutorial' ? 'Skip tutorial' : 'Quit match'}</button>
           </div>
         </div>`;
       overlay.querySelector('#ov-resume')!.addEventListener('click', () => cb.onResume());
+      overlay.querySelectorAll<HTMLElement>('[data-cam-height], [data-cam-view]').forEach((b) => b.addEventListener('click', () => {
+        const c = structuredClone(getControls());
+        if (b.dataset.camHeight) c.camera.height = b.dataset.camHeight as CameraHeight;
+        if (b.dataset.camView) c.camera.portrait = b.dataset.camView as PortraitView;
+        saveControls(c);
+        const now = getControls().camera;
+        overlay.querySelectorAll<HTMLElement>('[data-cam-height]').forEach((x) => x.classList.toggle('is-active', x.dataset.camHeight === now.height));
+        overlay.querySelectorAll<HTMLElement>('[data-cam-view]').forEach((x) => x.classList.toggle('is-active', x.dataset.camView === now.portrait));
+        cb.onCamera?.();
+      }));
+      overlay.querySelector('#ov-full')?.addEventListener('click', () => { toggleFullscreen(); });
       overlay.querySelector('#ov-quit')!.addEventListener('click', () => cb.onQuit());
     } else if (s.phase === 'halftime') {
       overlay.hidden = false;
@@ -302,6 +316,23 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
 }
 
 const touch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+
+/** Camera height pills, plus the upright-phone view and a full-screen button on touch screens. */
+function cameraPicker(): string {
+  const cam = getControls().camera;
+  const canFull = touch && typeof document !== 'undefined' && document.fullscreenEnabled;
+  return `
+    <div class="cam-picker">
+      <div class="cam-row"><span class="cam-label">📷 Camera</span><div class="pills">${CAMERA_HEIGHTS.map((h) => `<button class="pill ${h === cam.height ? 'is-active' : ''}" data-cam-height="${h}">${CAMERA_HEIGHT_LABELS[h]}</button>`).join('')}</div></div>
+      ${touch ? `<div class="cam-row"><span class="cam-label">📱 Phone upright</span><div class="pills">${(['upfield', 'side'] as PortraitView[]).map((v) => `<button class="pill ${v === cam.portrait ? 'is-active' : ''}" data-cam-view="${v}">${PORTRAIT_VIEW_LABELS[v]}</button>`).join('')}</div></div>` : ''}
+      ${canFull ? '<button class="btn btn-ghost btn-small" id="ov-full">⛶ Full screen</button>' : ''}
+    </div>`;
+}
+
+function toggleFullscreen(): void {
+  if (document.fullscreenElement) { document.exitFullscreen().catch(() => { /* already out */ }); return; }
+  document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => { /* not allowed here */ });
+}
 const tipKeys = (profile: 'solo' | 'p1' | 'p2') => ({ shoot: firstKey(profile, 'shoot'), pass: firstKey(profile, 'pass') });
 const TOUCH_TIP_KEYS = { shoot: 'Shoot', pass: 'Pass' };
 

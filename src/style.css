@@ -54,6 +54,8 @@ body:not(.in-match)::before {
 .screen-root:not(.lobby-root) .team-card-new { background: rgba(255,255,255,0.88); }
 .screen-root:not(.lobby-root) .btn-back { background-color: var(--white); border: var(--stroke); box-shadow: var(--drop); color: var(--navy); }
 #app { position: fixed; inset: 0; }
+/* Menus keep clear of notches and rounded corners; the match itself runs edge to edge. */
+#ui:not(.match-ui) { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 #game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: none; touch-action: none; }
 #game-canvas.is-live { display: block; }
 #ui { position: absolute; inset: 0; z-index: 1; overflow: auto; }
@@ -230,18 +232,18 @@ input[type='number'] { max-width: 120px; text-align: center; }
 .confetti i { position: absolute; top: -20px; width: 12px; height: 18px; border-radius: 3px; animation: fall linear forwards; }
 @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
 
-.touch-controls { position: absolute; inset: 0; pointer-events: none; display: none; --tc-size: 1; --tc-opacity: 1; }
+.touch-controls { position: absolute; inset: 0; pointer-events: none; display: none; --tc-size: 1; --tc-opacity: 1; --tc-btn: 1; }
 @media (pointer: coarse) { .touch-controls { display: block; } }
 .joystick { position: absolute; left: 24px; bottom: 24px; width: calc(140px * var(--tc-size)); height: calc(140px * var(--tc-size)); border-radius: 50%; background: rgba(255,255,255,0.3); border: 3px solid rgba(255,255,255,0.7); pointer-events: auto; touch-action: none; opacity: var(--tc-opacity); }
 .joy-knob { position: absolute; left: 50%; top: 50%; width: calc(64px * var(--tc-size)); height: calc(64px * var(--tc-size)); transform-origin: center; margin: calc(-32px * var(--tc-size)) 0 0 calc(-32px * var(--tc-size)); border-radius: 50%; background: var(--yellow); border: 3px solid var(--navy); pointer-events: none; }
-.action-buttons { position: absolute; right: 20px; bottom: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: calc(12px * var(--tc-size)); pointer-events: auto; opacity: var(--tc-opacity); }
-.abtn { width: calc(84px * var(--tc-size)); height: calc(84px * var(--tc-size)); border-radius: 50%; border: 3px solid var(--navy); font-family: var(--font); font-weight: 700; font-size: calc(16px * var(--tc-size)); color: var(--navy); box-shadow: 0 4px 0 var(--navy); touch-action: none; display: inline-flex; align-items: center; justify-content: center; }
+.action-buttons { position: absolute; right: 20px; bottom: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: calc(12px * var(--tc-size) * var(--tc-btn)); pointer-events: auto; opacity: var(--tc-opacity); }
+.abtn { width: calc(84px * var(--tc-size) * var(--tc-btn)); height: calc(84px * var(--tc-size) * var(--tc-btn)); border-radius: 50%; border: 3px solid var(--navy); font-family: var(--font); font-weight: 700; font-size: calc(16px * var(--tc-size) * max(var(--tc-btn), 0.85)); color: var(--navy); box-shadow: 0 4px 0 var(--navy); touch-action: none; display: inline-flex; align-items: center; justify-content: center; }
 .abtn.is-down { transform: translateY(3px); box-shadow: 0 1px 0 var(--navy); filter: brightness(0.9); }
 .abtn-shoot { background: #e63946; color: var(--white); }
 .abtn-pass { background: var(--blue); color: var(--white); }
 .abtn-sprint { background: var(--green); color: var(--white); }
 .abtn-switch { background: var(--white); }
-.abtn-trick, .abtn-lob { justify-self: center; width: calc(68px * var(--tc-size)); height: calc(68px * var(--tc-size)); font-size: calc(14px * var(--tc-size)); color: var(--white); }
+.abtn-trick, .abtn-lob { justify-self: center; width: calc(68px * var(--tc-size) * var(--tc-btn)); height: calc(68px * var(--tc-size) * var(--tc-btn)); font-size: calc(14px * var(--tc-size) * max(var(--tc-btn), 0.85)); color: var(--white); }
 .abtn-trick { background: #9b5de5; }
 .abtn-lob { background: #f4a261; }
 /* Left-handed: joystick on the right, buttons mirrored on the left. */
@@ -612,3 +614,65 @@ body.reduce-motion .bind.is-listening { animation: none; }
 .kit-strip-btn.is-active { border-color: var(--navy); background: var(--yellow); box-shadow: 0 3px 0 var(--navy); }
 .team-card .row { flex-wrap: nowrap; }
 .team-delete { margin-left: auto; }
+
+/* ---------- Phones: landscape and upright layouts for the match ---------- */
+.cam-picker { display: flex; flex-direction: column; gap: 10px; align-items: center; width: 100%; }
+.cam-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; }
+.cam-label { font-weight: 700; color: var(--navy); }
+.cam-picker .pill { min-height: 38px; padding: 4px 14px; font-size: 15px; }
+.controls-card .cam-row { justify-content: flex-start; }
+/* Keep the HUD out from under notches, rounded corners and the home bar. */
+.joystick { left: calc(24px + env(safe-area-inset-left)); bottom: calc(24px + env(safe-area-inset-bottom)); }
+.action-buttons { right: calc(20px + env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom)); }
+.touch-controls.is-lefty .joystick { right: calc(24px + env(safe-area-inset-right)); }
+.touch-controls.is-lefty .action-buttons { left: calc(20px + env(safe-area-inset-left)); }
+.hud-pause { top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); }
+.hud-player-box { top: calc(12px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); }
+.scoreboard { top: env(safe-area-inset-top); }
+
+/* Phone on its side: little height, so a slimmer scoreboard and smaller action buttons. The stick keeps its size. */
+@media (max-height: 520px) and (orientation: landscape) {
+  .touch-controls { --tc-btn: 0.74; }
+  .scoreboard { padding: 2px 12px 4px; border-radius: 0 0 18px 18px; column-gap: 8px; }
+  .sb-team { font-size: 15px; gap: 5px; }
+  .sb-team .badge { width: 22px; height: 22px; }
+  .sb-score { font-size: 22px; gap: 5px; }
+  .sb-clock { font-size: 12px; }
+  .hud-pause { width: 42px; height: 42px; font-size: 16px; }
+  .hud-player { display: none; }
+  .hud-player-box { gap: 4px; }
+  .bar { width: 120px; padding: 2px 8px; }
+  .bar-label { font-size: 11px; width: 40px; }
+  .bar-track { height: 8px; }
+  .hud-comm { top: 64px; font-size: 14px; padding: 5px 12px; }
+  .hud-tip { top: 70px; font-size: 0.95rem; }
+  .goal-sub { font-size: 18px; }
+  .save-text { font-size: 24px; }
+  .overlay { overflow-y: auto; align-items: flex-start; padding: 10px 0; }
+  .overlay-card { margin: auto; padding: 12px 18px; gap: 8px; }
+  .overlay-card h2 { font-size: 28px; }
+  .tut-card { top: 6px; }
+}
+
+/* Phone held upright: smaller action buttons so more of the pitch shows. The stick keeps its size. */
+@media (orientation: portrait) and (max-width: 600px) {
+  .touch-controls { --tc-btn: 0.7; }
+  .scoreboard { padding: 2px 10px 4px; column-gap: 6px; border-radius: 0 0 18px 18px; }
+  .sb-team { font-size: 14px; gap: 4px; }
+  .sb-team .badge { width: 22px; height: 22px; }
+  .sb-score { font-size: 22px; gap: 4px; }
+  .sb-clock { font-size: 12px; }
+  .hud-pause { width: 42px; height: 42px; font-size: 16px; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); }
+  /* Sprint and power sit under the scoreboard instead of beside it. */
+  .hud-player { display: none; }
+  .hud-player-box { top: calc(66px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); flex-direction: row; gap: 6px; }
+  .hud-player-box-p2 { top: calc(96px + env(safe-area-inset-top)); right: auto; }
+  .bar { width: 116px; padding: 2px 8px; }
+  .bar-label { font-size: 11px; width: 40px; }
+  .bar-track { height: 8px; }
+  .hud-comm { top: 104px; font-size: 14px; }
+  .hud-tip { top: 136px; font-size: 1rem; }
+  .goal-sub { font-size: 18px; }
+  .save-text { font-size: 22px; }
+  .overlay-card h2 { font-size: 30px; }
+}
