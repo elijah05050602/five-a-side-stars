@@ -516,6 +516,113 @@ describe('commentary: getting the clips', () => {
   });
 });
 
+describe('commentary: who speaks when', () => {
+  /** A commentator with the clips loaded, on a context whose clock the test moves. */
+  async function ready() {
+    serveSprite();
+    const { Commentary } = await import('../game/voice');
+    const v = new Commentary();
+    v.load();
+    await settle();
+    const c = FakeContext.made[0];
+    const at = (t: number) => { c.currentTime = t; };
+    return { v, c, at };
+  }
+  /** The fade a line was given: the time its gain was sent towards silence. */
+  const fadedAt = (src: FakeSource) => ([...src.outputs][0] as FakeGain).gain.events.find((e) => e.type === 'target' && e.value === 0)?.time;
+  const lineSources = (c: FakeContext) => c.sources.filter((s) => s.buffer?.sampleRate === 24000);
+
+  it('a bigger moment cuts in: the line being spoken fades out quickly and stops', async () => {
+    const { v, c, at } = await ready();
+    at(10);
+    v.say('quietAttack'); // chatter, 1.5 s
+    at(10.5);
+    v.say('goalOpener', [1, 0]);
+    const [chatter, goal, score] = lineSources(c);
+    expect(fadedAt(chatter)).toBe(10.5);
+    expect(chatter.stoppedAt).toBeCloseTo(10.7);
+    expect(said(c).map((s) => s.key)).toEqual(['quietAttack', 'goalOpener', 'score_1_0']);
+    expect(goal.startedAt).toBeCloseTo(10.52);
+    expect(score.startedAt).toBeCloseTo(10.52 + 3 + 0.08);
+  });
+
+  it('chatter is dropped while anything is being spoken', async () => {
+    const { v, c, at } = await ready();
+    at(1);
+    v.say('save');
+    at(1.4);
+    v.say('quietAttack');
+    expect(said(c).map((s) => s.key)).toEqual(['save']);
+    at(2.6); // the save line is over: chatter is spoken into the silence
+    v.say('quietAttack');
+    expect(said(c).map((s) => s.key)).toEqual(['save', 'quietAttack']);
+  });
+
+  it('a goal at the whistle: the full-time call waits for the goal call instead of being dropped', async () => {
+    const { v, c, at } = await ready();
+    at(20);
+    v.say('goalOpener', [1, 0]); // goal 3 s + score 1 s: until 24.1
+    at(21);
+    v.say('fulltimeWin', [1, 0]);
+    expect(said(c).map((s) => s.key)).toEqual(['goalOpener', 'score_1_0', 'fulltimeWin', 'score_1_0']);
+    const [goal, goalScore, fulltime, finalScore] = lineSources(c);
+    expect(goal.stoppedAt).toBeNull();
+    expect(goalScore.stoppedAt).toBeNull();
+    expect(fulltime.startedAt).toBeCloseTo(20.02 + 3 + 0.08 + 1 + 0.05);
+    expect(finalScore.startedAt).toBeCloseTo(fulltime.startedAt! + 2.5 + 0.08);
+  });
+
+  it('one line waits at most: a newer one takes its place, unless the waiting one matters more', async () => {
+    const { v, c, at } = await ready();
+    at(30);
+    v.say('goalOpener', [1, 0]);
+    at(31);
+    v.say('kickoffFirst'); // waits
+    at(31.5);
+    v.say('fulltimeWin', [2, 1]); // newer and bigger: takes the kick-off line's place
+    at(32);
+    v.say('save'); // the full-time call keeps its place
+    expect(said(c).map((s) => s.key)).toEqual(['goalOpener', 'score_1_0', 'kickoffFirst', 'fulltimeWin', 'score_2_1']);
+    const [, , kickoff, fulltime] = lineSources(c);
+    // The kick-off line was stopped before it ever started.
+    expect(kickoff.stoppedAt!).toBeLessThan(kickoff.startedAt!);
+    expect(fulltime.stoppedAt).toBeNull();
+  });
+
+  it('a cut-in silences every line still sounding, not just the newest one', async () => {
+    const { v, c, at } = await ready();
+    at(40);
+    v.say('save'); // 1.5 s
+    at(41);
+    v.say('foul'); // waits for the save line, starting at 41.57
+    at(41.2);
+    v.say('goalOpener', [1, 0]);
+    const [save, foul, goal] = lineSources(c);
+    expect(fadedAt(save)).toBe(41.2);
+    expect(save.stoppedAt).toBeCloseTo(41.4);
+    expect(foul.stoppedAt).toBeCloseTo(41.4);
+    expect(goal.startedAt).toBeCloseTo(41.22);
+  });
+
+  it('leaving the match fades the commentator out instead of stopping dead', async () => {
+    const { v, c, at } = await ready();
+    at(50);
+    v.say('goalOpener', [2, 1]);
+    at(51);
+    v.say('kickoffFirst');
+    at(51.5);
+    v.dispose();
+    const all = lineSources(c);
+    expect(all).toHaveLength(3); // the goal call, its score call and the waiting kick-off line
+    for (const src of all) {
+      expect(fadedAt(src)).toBe(51.5);
+      expect(src.stoppedAt).toBeCloseTo(51.7);
+    }
+    v.say('save'); // nothing more after the match is gone
+    expect(lineSources(c)).toHaveLength(3);
+  });
+});
+
 describe('match sounds', () => {
   it('fades out, then stops and unplugs the looping crowd and weather when the match ends', async () => {
     vi.useFakeTimers();

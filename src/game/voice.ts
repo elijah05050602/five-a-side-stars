@@ -8,10 +8,15 @@ import type { LineKey } from './commentary';
  * with an index of where each line starts. Clips are generic ("What a save!")
  * so they suit any team; the ticker still shows the full line with names.
  * After a goal, at half time and at full time a score call follows ("It's two,
- * one."). Big moments cut in over chatter; chatter waits its turn or is dropped.
+ * one."). A bigger moment cuts in over a smaller one; any other important line
+ * waits for the one being spoken (one line waits at most, and a newer line
+ * takes its place unless the waiting one matters more); chatter is only spoken
+ * into silence.
  */
 type Clip = [start: number, duration: number];
 interface Sprite { clips: Partial<Record<string, Clip[]>> }
+/** A line (and its score call) scheduled on the context: being spoken, or waiting for the one before it. */
+interface Spoken { srcs: AudioBufferSourceNode[]; gain: GainNode; prio: number; until: number }
 
 /** How much a line matters: a higher one interrupts a lower one already playing. */
 export function priority(key: LineKey): number {
@@ -79,9 +84,11 @@ export function preloadCommentary(): Promise<Loaded | null> {
 }
 
 export class Commentary {
+  private ctx: AudioContext | null = null;
   private sprite: Sprite | null = null;
   private buffer: AudioBuffer | null = null;
-  private playing: { srcs: AudioBufferSourceNode[]; gain: GainNode; prio: number; until: number } | null = null;
+  /** The line being spoken, then at most one waiting for it. Any of their sources may still sound. */
+  private lines: Spoken[] = [];
   private readonly last = new Map<string, number>();
   private disposed = false;
   private loading = false;
@@ -119,17 +126,26 @@ export class Commentary {
     if (!clips?.length) return;
     const prio = priority(key);
     const now = c.currentTime;
-    if (this.playing && this.playing.until > now) {
-      if (prio <= this.playing.prio) {
-        // Chatter never queues. An important line waits for the one before it if it is nearly done.
-        if (prio === 1 || this.playing.until - now > 0.8) return;
+    this.ctx = c;
+    this.lines = this.lines.filter((l) => l.until > now);
+    const [speaking, waiting] = this.lines;
+    let start = now + 0.02;
+    if (speaking) {
+      if (prio > speaking.prio) {
+        // A bigger moment cuts in over the line being spoken and the one waiting behind it.
+        for (const l of this.lines) this.cut(l, now);
+        this.lines = [];
+      } else if (prio === 1 || (waiting && waiting.prio > prio)) {
+        // Chatter is only spoken into silence, and a waiting line that matters more keeps its place.
+        return;
       } else {
-        this.playing.gain.gain.setTargetAtTime(0, now, 0.04);
-        for (const src of this.playing.srcs) src.stop(now + 0.2);
-        this.playing = null;
+        // Wait for the line being spoken (a goal at the whistle still gets its final score), taking
+        // the place of any line already waiting, so the commentary never falls far behind the play.
+        if (waiting) this.cut(waiting, now);
+        this.lines = [speaking];
+        start = speaking.until + 0.05;
       }
     }
-    const start = this.playing && this.playing.until > now ? this.playing.until + 0.05 : now + 0.02;
     const i = pickClip(clips.length, this.last.get(key));
     this.last.set(key, i);
     const gain = c.createGain();
@@ -142,13 +158,21 @@ export class Commentary {
       srcs.push(this.play(c, gain, scoreClips[0], until + 0.08));
       until += 0.08 + scoreClips[0][1];
     }
-    this.playing = { srcs, gain, prio, until };
+    this.lines.push({ srcs, gain, prio, until });
   }
 
   dispose(): void {
     this.disposed = true;
-    for (const src of this.playing?.srcs ?? []) { try { src.stop(); } catch { /* already stopped */ } }
-    this.playing = null;
+    this.pending = null;
+    // A quick fade rather than stopping dead, which clicks.
+    if (this.ctx) for (const l of this.lines) this.cut(l, this.ctx.currentTime);
+    this.lines = [];
+  }
+
+  /** Fade a line out quickly and stop it, whether it is being spoken or still waiting to start. */
+  private cut(l: Spoken, now: number): void {
+    l.gain.gain.setTargetAtTime(0, now, 0.04);
+    for (const src of l.srcs) { try { src.stop(now + 0.2); } catch { /* already stopped */ } }
   }
 
   private play(c: AudioContext, out: AudioNode, [offset, dur]: Clip, at: number): AudioBufferSourceNode {
