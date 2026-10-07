@@ -11,6 +11,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
  * weather paints snow and lights the lamps); materials stay shared, so later colour changes still show.
  */
 export function batchStatic(root: THREE.Object3D, keep: THREE.Object3D[]): void {
+  shareMaterials(root, keep);
   root.updateMatrixWorld(true);
   const toRoot = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const groups = new Map<string, { mat: THREE.Material; cast: boolean; receive: boolean; geos: THREE.BufferGeometry[]; meshes: THREE.Mesh[] }>();
@@ -44,4 +45,39 @@ export function batchStatic(root: THREE.Object3D, keep: THREE.Object3D[]): void 
     for (const m of g.meshes) m.layers.disableAll();
     root.add(mesh);
   }
+}
+
+/** What makes two plain materials draw the same, or null for a material with its own shader changes. */
+function materialKey(m: THREE.Material): string | null {
+  if (Object.prototype.hasOwnProperty.call(m, 'onBeforeCompile')) return null;
+  const x = m as THREE.Material & { color?: THREE.Color; emissive?: THREE.Color; emissiveIntensity?: number; map?: THREE.Texture | null; gradientMap?: THREE.Texture | null; roughness?: number; metalness?: number };
+  return [m.type, x.color?.getHexString(), x.emissive?.getHexString(), x.emissiveIntensity, x.map?.uuid, x.gradientMap?.uuid, x.roughness, x.metalness,
+    m.side, m.transparent, m.opacity, m.depthWrite, m.vertexColors, m.alphaTest, m.blending, (m as THREE.MeshBasicMaterial).fog, m.toneMapped].join('|');
+}
+
+/**
+ * Many parts of the stadium make their own material of the same colour (each post, roof and frame),
+ * which would keep them in separate draw calls. Swap each still mesh's material for the first one that
+ * looks exactly the same, so batching can merge them.
+ */
+function shareMaterials(root: THREE.Object3D, keep: THREE.Object3D[]): void {
+  const first = new Map<string, THREE.Material>();
+  const dropped = new Set<THREE.Material>();
+  const visit = (o: THREE.Object3D): void => {
+    if (keep.includes(o)) return;
+    const m = o as THREE.Mesh;
+    if (m.isMesh && !m.userData.dynamic && !Array.isArray(m.material)) {
+      const key = materialKey(m.material);
+      if (key) {
+        const same = first.get(key);
+        if (!same) first.set(key, m.material);
+        else if (same !== m.material) { dropped.add(m.material); m.material = same; }
+      }
+    }
+    for (const c of o.children) visit(c);
+  };
+  visit(root);
+  // Anything still using a dropped material (a kept or moving part) keeps it.
+  root.traverse((o) => { const mat = (o as THREE.Mesh).material; if (mat && !Array.isArray(mat)) dropped.delete(mat); });
+  for (const m of dropped) m.dispose();
 }
