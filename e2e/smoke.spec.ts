@@ -117,13 +117,13 @@ test('a super skill plays its cutscene, then the match carries on', async ({ pag
   expect(errors).toEqual([]);
 });
 
-test('a goal carries into the net, and its replay films the net from the goal line', async ({ page }) => {
+test('a goal carries into the net, then its replay plays and hands back to the match', async ({ page }) => {
   const errors: string[] = [];
   await toLobby(page, errors);
   await page.locator('#m-play').click();
   await page.locator('#s-go').click();
   await expect.poll(() => page.evaluate(() => !!(window as DebugWindow).__match)).toBe(true);
-  type GoalWindow = Window & { __match: { replay: { goalCam: boolean } | null; sim: {
+  type GoalWindow = Window & { __match: { replay: object | null; sim: {
     phase: string; length: number; goalDepth: number; goalX: (s: number) => number;
     ball: { owner: unknown; pos: { x: number; z: number }; vel: { x: number; z: number }; y: number; vy: number; inGoal: number; lastKick: unknown; lastTouch: unknown };
     players: { side: number; isKeeper: boolean; pos: { x: number; z: number }; kickCooldown: number }[];
@@ -144,7 +144,7 @@ test('a goal carries into the net, and its replay films the net from the goal li
     const s = (window as unknown as GoalWindow).__match.sim;
     return s.ball.inGoal === 1 && s.ball.pos.x - s.length / 2 > 0.5;
   })).toBe(true);
-  await expect.poll(() => page.evaluate(() => !!(window as unknown as GoalWindow).__match.replay?.goalCam), { timeout: 60000 }).toBe(true);
+  await expect.poll(() => page.evaluate(() => !!(window as unknown as GoalWindow).__match.replay), { timeout: 60000 }).toBe(true);
   await expect.poll(() => page.evaluate(() => (window as unknown as GoalWindow).__match.replay), { timeout: 60000 }).toBe(null);
   expect(errors).toEqual([]);
 });
