@@ -235,11 +235,19 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 @keyframes subs-pop { 50% { transform: scale(1.12); } }
 .subs-card { width: min(640px, 94vw); }
 .subs-card h2 { font-size: 34px; }
+/* The card scrolls when the screen is short; its rows keep their height instead of squashing the players. */
+.subs-card > * { flex-shrink: 0; }
 .subs-status { min-height: 2.6em; margin: 0; }
 .subs-label { align-self: flex-start; font-weight: 700; }
 .subs-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; width: 100%; padding: 10px; border: 3px solid var(--navy); border-radius: 16px; box-sizing: border-box; }
 .subs-pitch { background: #3fbf6a; }
 .subs-bench { background: #dfe7f1; border-style: dashed; min-height: 60px; }
+.subs-hint { font-size: 13px; font-weight: 700; color: var(--navy); opacity: 0.8; margin: -2px 0; }
+/* A finger picks a tile up straight away (no hold), so the browser must not scroll, select or show a callout under it.
+   The card still scrolls from anywhere between the tiles. */
+.subs-player { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* While a sub is being dragged, the players they could swap with glow. */
+.subs-card:has(.subs-bench .is-dragging) .subs-pitch .subs-player, .subs-card:has(.subs-pitch .is-dragging) .subs-bench .subs-player { outline: 3px dashed var(--orange); outline-offset: 2px; }
 .subs-player { position: relative; width: 100px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 6px 9px; background: var(--card); color: var(--navy); border: 3px solid var(--navy); border-radius: 14px; box-shadow: 0 3px 0 var(--navy); font: 700 14px var(--font); cursor: grab; }
 .subs-num { width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--navy); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 15px; text-shadow: -1px -1px 0 var(--navy), 1px -1px 0 var(--navy), -1px 1px 0 var(--navy), 1px 1px 0 var(--navy); }
 .subs-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -251,6 +259,7 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 .subs-player.is-on { background: #fff7cf; }
 .subs-player.is-off { opacity: 0.8; }
 .subs-player.is-picked, .subs-player.is-drop-target { outline: 4px solid var(--orange); outline-offset: 2px; }
+.subs-card:has(.is-dragging) .subs-row .subs-player.is-drop-target { outline: 4px solid var(--orange); background: #fff7cf; }
 .subs-player.is-lifted { transform: scale(1.05); box-shadow: 0 8px 0 var(--navy); }
 .subs-player.is-dragging { opacity: 0.5; }
 .hud-player-box { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -784,6 +793,7 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
   .subs-player { width: 88px; padding: 5px 4px 6px; font-size: 13px; }
   .subs-num { width: 26px; height: 26px; font-size: 13px; }
   .subs-card h2 { font-size: 24px; }
+  .subs-hint { display: none; } /* the line under the title says the same, and the card is short of room */
   .hud-player { display: none; }
   .hud-player-box { gap: 4px; }
   .bar { width: 120px; padding: 2px 8px; }

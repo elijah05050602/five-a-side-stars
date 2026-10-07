@@ -180,6 +180,11 @@ test('a sub picked on the subs card comes on at the next stoppage', async ({ pag
   await page.locator('.subs-pitch .subs-player').nth(1).click();
   await expect(page.locator('.subs-pitch .subs-player').nth(1)).toContainText(sub);
   await expect(page.locator('.subs-bench .subs-player').first()).toContainText(off);
+  // Dragging works too, straight away and either way round: put them back, then drag the sub on again.
+  await page.locator('.subs-bench .subs-player').first().dragTo(page.locator('.subs-pitch .subs-player').nth(1));
+  await expect(page.locator('.subs-pitch .subs-player').nth(1)).toContainText(off);
+  await page.locator('.subs-bench .subs-player').first().dragTo(page.locator('.subs-pitch .subs-player').nth(1));
+  await expect(page.locator('.subs-pitch .subs-player').nth(1)).toContainText(sub);
   await page.locator('#subs-done').click();
   // The ball was dead for the kick-off, so the sub is on straight away.
   await expect.poll(onPitch).toContain(sub);
