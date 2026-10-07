@@ -1,10 +1,9 @@
 import { generateOpponent } from '../../data/defaults';
-import { cupInProgress, getCareer, getLeague, getSettings, getTeam, getTeams, saveTeam, setCareer, setLeague, setTournament, updateSettings } from '../../data/storage';
+import { cupInProgress, getLeague, getSettings, getTeam, getTeams, saveTeam, setLeague, setTournament, updateSettings } from '../../data/storage';
 import type { Difficulty, Team } from '../../data/types';
-import { CAREER_AGES, SEASONS_PER_YEAR, createCareer } from '../../game/career';
+import { renderCareerStart } from './careerStart';
 import { kitsClash } from '../../game/kitTexture';
 import { WEATHER_CHOICES, type WeatherChoice } from '../../game/Weather';
-import { recordCareer } from '../../data/progress';
 import { TIERS, createLeague } from '../../game/league';
 import { createTournament } from '../../game/tournament';
 import { esc } from '../hud';
@@ -19,11 +18,13 @@ const MODE_INFO: Record<SetupMode, { title: string; go: string; blurb: string }>
   tournament: { title: 'Tournament', go: '🏆 Start the cup!', blurb: 'Four teams, two semi-finals and a final. Win both of your games to lift the trophy. Draws go to penalties!' },
   shootout: { title: 'Penalty Shoot-out', go: '🥅 Start the shoot-out!', blurb: 'Best of five penalties each, then sudden death. Hold shoot to power up and aim with the stick. In goal, move to dive!' },
   training: { title: 'Shooting Training', go: '🎯 Start training!', blurb: 'Just you, a keeper and a bag of balls. Score as many as you can before the time runs out. Rocket shots count double!' },
-  career: { title: 'Career', go: '🌱 Start in the Under 5s!', blurb: 'Take a team all the way from the Under 5s to the Under 10s. Every year has four mini seasons of five matches. Your players start tiny and grow by playing: goals, passes, tackles and saves all earn stars. Pick the team whose name, kits and kids you want to take on the journey; a copy starts at U5 so your original is untouched. Then choose your Star: the player the career follows, who earns training points and milestones while you play with the whole team.' },
+  career: { title: 'Career', go: '', blurb: '' },
   league: { title: 'League', go: '📋 Start in Tier 5!', blurb: 'Five leagues, from the Acorn League at Tier 5 up to the Star Premier League at Tier 1. Play five matches a season: finish in the top two to go up, bottom to go down. The teams get tougher every tier. Your league is saved, so you can come back any time.' },
 };
 
 export function renderSetup(root: HTMLElement, router: Router, homeId?: string, mode: SetupMode = 'match'): void {
+  // A career starts by choosing your Star and then a team: a screen of its own.
+  if (mode === 'career') { renderCareerStart(root, router, homeId); return; }
   const teams = getTeams();
   const settings = getSettings();
   let home = (homeId && getTeam(homeId)) || teams[0];
@@ -34,10 +35,10 @@ export function renderSetup(root: HTMLElement, router: Router, homeId?: string, 
   let twoPlayer = false;
   let weather: WeatherChoice = 'random';
   let help = settings.beginnerHelp;
-  // League and career strength grows with the tiers, so there Starter is the only choice besides Normal.
-  const tiered = mode === 'league' || mode === 'career';
+  // League strength grows with the tiers, so there Starter is the only choice besides Normal.
+  const tiered = mode === 'league';
   const levels: ('starter' | Difficulty)[] = tiered ? ['starter', 'normal'] : ['starter', 'easy', 'normal', 'hard'];
-  const solo = mode === 'training' || mode === 'league' || mode === 'career';
+  const solo = mode === 'training' || mode === 'league';
   const hasKeyboard = window.matchMedia('(pointer: fine)').matches && !solo;
   const info = MODE_INFO[mode];
   const lengthLabel = mode === 'training' ? 'Time' : mode === 'shootout' ? '' : 'Half length';
@@ -86,7 +87,7 @@ export function renderSetup(root: HTMLElement, router: Router, homeId?: string, 
             <div class="pills"><button class="pill ${!twoPlayer ? 'is-active' : ''}" data-players="1" ${pressed(!twoPlayer)}>1 player</button><button class="pill ${twoPlayer ? 'is-active' : ''}" data-players="2" ${pressed(twoPlayer)}>2 players, one keyboard</button></div>
             ${twoPlayer ? `<p class="muted">Player 1: ${esc(controlsSentence('p1'))}.<br/>Player 2: ${esc(controlsSentence('p2'))}.<br/>Plug in two controllers and each player gets one. <button class="link-btn" data-nav="controls">Change controls</button></p>` : ''}
           </div>` : ''}
-          ${mode === 'career' ? `<div class="field"><span>The journey</span><div class="age-ladder">${CAREER_AGES.map((a) => `<span class="rung-age">${a}</span>`).join('<span class="rung-arrow">→</span>')}</div><p class="muted small">${SEASONS_PER_YEAR} mini seasons a year · promotion and relegation between tiers carry over · stars grow up to each age group's cap.</p></div>` : mode === 'league' ? `<div class="field"><span>Tiers</span><ol class="tier-list">${TIERS.map((t) => `<li><strong>Tier ${t.tier}</strong> ${esc(t.name)}</li>`).join('')}</ol></div>` : ''}
+          ${mode === 'league' ? `<div class="field"><span>Tiers</span><ol class="tier-list">${TIERS.map((t) => `<li><strong>Tier ${t.tier}</strong> ${esc(t.name)}</li>`).join('')}</ol></div>` : ''}
           <div class="field"><span>Computer difficulty</span>
             <div class="pills">${levels.map((d) => { const on = d === (help ? 'starter' : tiered ? 'normal' : difficulty); return `<button class="pill ${on ? 'is-active' : ''}" data-diff="${d}" ${pressed(on)}>${d === 'starter' ? '🐣 Starter' : d[0].toUpperCase() + d.slice(1)}</button>`; }).join('')}</div>
             ${help ? '<p class="muted small">🐣 Starter, for the youngest players: a slower computer team, and help aiming shots.</p>' : ''}
@@ -94,7 +95,7 @@ export function renderSetup(root: HTMLElement, router: Router, homeId?: string, 
           ${lengthLabel ? `<div class="field"><span>${lengthLabel}</span>
             <div class="pills">${lengths.map((s) => `<button class="pill ${s === halfSeconds ? 'is-active' : ''}" data-len="${s}" ${pressed(s === halfSeconds)}>${s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`}</button>`).join('')}</div>
           </div>` : ''}
-          ${mode === 'tournament' || mode === 'league' || mode === 'career' ? '' : `<div class="field"><span>Weather</span>
+          ${mode === 'tournament' || mode === 'league' ? '' : `<div class="field"><span>Weather</span>
             <div class="pills">${WEATHER_CHOICES.map((w) => `<button class="pill ${w.id === weather ? 'is-active' : ''}" data-weather="${w.id}" ${pressed(w.id === weather)}>${w.label}</button>`).join('')}</div>
           </div>`}
         </div>
@@ -141,15 +142,6 @@ export function renderSetup(root: HTMLElement, router: Router, homeId?: string, 
         if (getLeague() && !confirm('Start a new league career? Your current league will be deleted.')) return;
         setLeague(createLeague(home, halfSeconds));
         router.go({ name: 'league' });
-        return;
-      }
-      if (mode === 'career') {
-        if (getCareer() && !confirm('Start a new career? Your current career will be deleted (the team stays in My Teams).')) return;
-        const { career, team } = createCareer(home, halfSeconds);
-        saveTeam(team);
-        setCareer(career);
-        recordCareer({ started: true });
-        router.go({ name: 'career' });
         return;
       }
       const [h, a] = resolveKits(home, awayTeam);

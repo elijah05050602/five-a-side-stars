@@ -220,3 +220,45 @@ describe('Trial Day', () => {
   });
 });
 
+describe('starting a career with a Star', () => {
+  it('a player from the team itself becomes the Star', () => {
+    const src = team('src', 'Own Stars', 'U8');
+    const { career: c, team: you } = createCareer(src, 60, src.players[2]);
+    expect(c.starPicked).toBe(true);
+    expect(careerStar(c, you)?.name).toBe(src.players[2].name);
+    expect(you.players).toHaveLength(5);
+  });
+
+  it('a player you make up joins as a starter in their position, and the one they replace goes to the bench', () => {
+    const src = team('src', 'Joiners', 'U8');
+    const made = makePlayer('ATT', 9, 'Zed', true, 'U5');
+    const { career: c, team: you } = createCareer(src, 60, made);
+    const star = careerStar(c, you)!;
+    expect(star.name).toBe('Zed');
+    expect(star.id).not.toBe(made.id);
+    expect(star.number).not.toBe(9); // number 9 was taken
+    expect(startingFive(you)).toContain(star);
+    expect(you.players).toHaveLength(6);
+    expect(you.players.filter((p) => p.starter)).toHaveLength(5);
+    expect(you.players.filter((p) => !p.starter).map((p) => p.position)).toEqual(['ATT']);
+    for (const k of skillKeys(star.position)) expect(star.skills[k]).toBeLessThanOrEqual(STAR_CAP.U5);
+  });
+
+  it('a midfielder joining a team without one lines up in an outfield spot, still a midfielder by nature', () => {
+    const src = team('src', 'No Mids', 'U8');
+    const { career: c, team: you } = createCareer(src, 60, makePlayer('MID', 6, 'Mo', true, 'U8'));
+    const star = careerStar(c, you)!;
+    expect(star.starter).toBe(true);
+    expect(star.positions).toEqual(['MID']);
+    expect(startingFive(you).filter((p) => p.position === 'GK')).toHaveLength(1);
+  });
+
+  it('a full squad of eight lets a sub go to make room', () => {
+    const src = team('src', 'Full', 'U8');
+    src.players.push(makePlayer('ATT', 11, 'S1', false), makePlayer('DEF', 12, 'S2', false), makePlayer('MID', 14, 'S3', false));
+    const { team: you } = createCareer(src, 60, makePlayer('WING', 17, 'Wiz', true));
+    expect(you.players).toHaveLength(8);
+    expect(you.players.some((p) => p.name === 'S3')).toBe(false);
+  });
+});
+
