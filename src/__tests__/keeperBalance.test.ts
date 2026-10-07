@@ -45,4 +45,74 @@ describe('keepers', () => {
     expect(scored(0, 'easy', true)).toBeLessThan(0.15);
     expect(scored(1, 'easy', true)).toBeLessThan(0.15);
   });
+
+  it('never let a long shot pass through their body, whichever team shoots', () => {
+    // Every goal from 8 to 22 metres out: the ball's path must never have crossed the keeper's body.
+    let through = 0, goals = 0;
+    for (const difficulty of ['easy', 'hard'] as Difficulty[]) for (const side of [0, 1] as Side[]) for (const from of [8, 14, 20]) for (let i = 0; i < 20; i++) {
+      const s = new MatchSim({ home, away, difficulty, halfSeconds: 600, humanSide: 0, mode: 'match' });
+      s.phase = 'play';
+      const shooter = s.players.find((p) => p.side === side && !p.isKeeper)!;
+      const keeper = s.players.find((p) => p.side !== side && p.isKeeper)!;
+      const line = s.goalX(side), dir = side === 0 ? 1 : -1;
+      for (const p of s.players) if (!p.isKeeper && p !== shooter) p.pos = { x: -line * 0.9, z: 7 };
+      shooter.pos = { x: line - dir * from, z: ((i % 5) - 2) * 1.2 };
+      keeper.pos = { x: line - dir * 0.7, z: 0 };
+      s.ball.pos = { ...shooter.pos };
+      s.ball.owner = shooter;
+      s.shoot(shooter, null, i % 2 ? 1.4 : 1);
+      let closest = Infinity, heightThere = 0;
+      const before = s.score[side];
+      for (let k = 0; k < 400 && s.phase === 'play' && !s.ball.owner; k++) {
+        const a = { ...s.ball.pos };
+        s.step(1 / 60, IDLE_INPUT);
+        // The nearest the ball came to the keeper's middle along this step's path, not just at its ends.
+        const b = s.ball.pos, kx = keeper.pos.x - a.x, kz = keeper.pos.z - a.z, dx = b.x - a.x, dz = b.z - a.z;
+        const t = Math.max(0, Math.min(1, (kx * dx + kz * dz) / (dx * dx + dz * dz || 1)));
+        const d = Math.hypot(kx - dx * t, kz - dz * t);
+        if (d < closest) { closest = d; heightThere = s.ball.y; }
+      }
+      if (s.score[side] <= before) continue;
+      goals++;
+      if (closest < keeper.radius + s.ball.radius && heightThere < 1.7 * s.stats.scale) through++;
+    }
+    expect(goals).toBeGreaterThan(20);
+    expect(through).toBe(0);
+  });
+
+  it('never stand still while a long shot they could reach goes past them', () => {
+    // A goal that passed within diving reach of the keeper must have had them diving for it.
+    let stood = 0, goals = 0;
+    for (const difficulty of ['easy', 'normal', 'hard'] as Difficulty[]) for (const side of [0, 1] as Side[]) for (let i = 0; i < 20; i++) {
+      const s = new MatchSim({ home, away, difficulty, halfSeconds: 600, humanSide: 0, mode: 'match' });
+      s.phase = 'play';
+      const shooter = s.players.find((p) => p.side === side && !p.isKeeper)!;
+      const keeper = s.players.find((p) => p.side !== side && p.isKeeper)!;
+      const line = s.goalX(side), dir = side === 0 ? 1 : -1;
+      for (const p of s.players) if (!p.isKeeper && p !== shooter) p.pos = { x: -line * 0.9, z: 7 };
+      shooter.pos = { x: line - dir * 16, z: ((i % 5) - 2) * 1.5 };
+      keeper.pos = { x: line - dir * 0.7, z: 0 };
+      s.ball.pos = { ...shooter.pos };
+      // Low and hard at a spot along the goal line.
+      const aim = ((i % 7) / 3 - 1) * s.goalWidth * 0.45;
+      const run = Math.hypot(line - s.ball.pos.x, aim - s.ball.pos.z);
+      s.ball.vel = { x: (line - s.ball.pos.x) / run * 14, z: (aim - s.ball.pos.z) / run * 14 };
+      s.ball.owner = null;
+      shooter.kickCooldown = 1; // the shooter must not just collect it again
+      s.ball.flightId++;
+      s.ball.lastKick = s.ball.lastTouch = shooter;
+      let dived = false, nearest = Infinity;
+      for (let k = 0; k < 120 && s.phase === 'play' && !s.ball.owner; k++) {
+        s.step(1 / 60, IDLE_INPUT);
+        if (keeper.diveAnim > 0) dived = true;
+        nearest = Math.min(nearest, Math.hypot(s.ball.pos.x - keeper.pos.x, s.ball.pos.z - keeper.pos.z));
+      }
+      if (s.score[side] === 0) continue;
+      goals++;
+      if (!dived && nearest < s.stats.keeperReach) stood++;
+    }
+    expect(goals).toBeGreaterThan(5);
+    expect(stood).toBe(0);
+  });
+
 });
