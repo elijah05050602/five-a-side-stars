@@ -98,6 +98,27 @@ export function swapPlayers(team: Team, a: Player, b: Player): void {
   team.players[j] = a;
 }
 
+/**
+ * Give a player a new main position in the builder. Only one keeper starts, but a
+ * squad can carry a spare keeper on the bench: a sub who becomes a keeper leaves the
+ * starting keeper alone. A starter who goes in goal swaps places with the starting keeper.
+ */
+export function setPosition(team: Team, p: Player, pos: Position): void {
+  if (p.position === pos) return;
+  // Their main position changes; the others they can play stay ticked.
+  const also = canPlay(p).filter((x) => x !== p.position && x !== pos);
+  p.positions = [pos, ...also];
+  if (pos === 'GK') {
+    const oldGk = p.starter ? team.players.find((x) => x !== p && x.starter && x.position === 'GK') : undefined;
+    if (oldGk) oldGk.position = p.position;
+  } else if (p.position === 'GK' && p.starter && !team.players.some((x) => x !== p && x.starter && x.position === 'GK')) {
+    // Keep a keeper in the starting five: a spare keeper is not picked here, so the first other starter goes in goal.
+    const other = team.players.find((x) => x !== p && x.starter) ?? team.players.find((x) => x !== p);
+    if (other) other.position = 'GK';
+  }
+  p.position = pos;
+}
+
 /** Pick a formation for a team: the outfield starters take the positions it asks for. */
 export function applyFormation(team: Team, id: FormationId): void {
   team.formation = id;

@@ -4,7 +4,7 @@ import { getLeague, getTeam, saveTeam } from '../../data/storage';
 import { AGE_GROUPS, BADGE_ICONS, BADGE_SHAPES, BOOT_STYLES, BOOT_STYLE_LABELS, BUILDS, GENDERS, HAIR_STYLES, HAIR_STYLE_LABELS, KIT_PATTERNS, POSITIONS, POSITION_LABELS, SPECIALS, type AgeGroup, type BadgeShape, type BootStyle, type Build, type FormationId, type Gender, type HairStyle, type Kit, type Position, type SkillKey, type Special, type Team } from '../../data/types';
 import { STAR_BUDGET, STAR_CAP, fitSkills, randomSkills, skillKeys, skillLabel, starsLeft, starsText, totalStars } from '../../data/skills';
 import { kitsClash } from '../../game/kitTexture';
-import { FORMATIONS, applyFormation, assignSlots, canPlay, formationById, formationFor, swapPlayers } from '../../data/formations';
+import { FORMATIONS, applyFormation, assignSlots, canPlay, formationById, formationFor, setPosition, swapPlayers } from '../../data/formations';
 import { wireDragSwap } from '../dragSwap';
 import { contrastColour } from '../../game/playerAtlas';
 import { lockedIcons, unlockedIcons } from '../../data/progress';
@@ -142,7 +142,9 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
     if (rude) { alert(`Let's pick a different name for player #${rude.number}, that one is not allowed.`); step = 2; render(); return false; }
     const starters = team.players.filter((p) => p.starter);
     if (starters.length !== 5) { alert(`Pick exactly 5 starters (you have ${starters.length}). The rest are subs.`); step = 2; render(); return false; }
-    if (!starters.some((p) => p.position === 'GK')) { alert('One of your starters must be the keeper.'); step = 2; render(); return false; }
+    const keepers = starters.filter((p) => p.position === 'GK').length;
+    if (!keepers) { alert('One of your starters must be the keeper.'); step = 2; render(); return false; }
+    if (keepers > 1) { alert('Only one keeper can start. Make the other keeper a sub.'); step = 2; render(); return false; }
     if (!team.career) {
       const greedy = team.players.find((p) => starsLeft(p.skills, team.ageGroup, p.position) < 0);
       if (greedy) { alert(`${greedy.name} has ${-starsLeft(greedy.skills, team.ageGroup, greedy.position)} too many stars for the ${AGE_STATS[team.ageGroup].label}. Take some off.`); step = 2; render(); return false; }
@@ -377,19 +379,7 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
     }));
     form.querySelectorAll<HTMLElement>('[data-pos]').forEach((b) => b.addEventListener('click', () => {
       const pos = b.dataset.pos as Position;
-      // Their main position changes; the others they can play stay ticked.
-      const also = canPlay(p).filter((x) => x !== p.position && x !== pos);
-      p.positions = [pos, ...also];
-      if (pos === 'GK') {
-        // Only one keeper: the old keeper swaps into this player's old position.
-        const oldGk = team.players.find((x) => x.position === 'GK' && x !== p);
-        if (oldGk) oldGk.position = p.position === 'GK' ? 'DEF' : p.position;
-      } else if (p.position === 'GK') {
-        // Keep a keeper on the team: make the first other player the keeper.
-        const other = team.players.find((x) => x !== p)!;
-        other.position = 'GK';
-      }
-      p.position = pos;
+      setPosition(team, p, pos);
       // If the starters now fit a formation, switch to it so the pitch matches what they picked.
       const fits = formationFor(team);
       if (fits) team.formation = fits;
