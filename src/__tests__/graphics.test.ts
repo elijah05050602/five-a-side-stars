@@ -11,13 +11,13 @@ describe('graphics quality', () => {
 
   it('keeps High as the full original look', () => {
     const high = graphicsProfile('high');
-    expect(high).toMatchObject({ adaptive: false, maxPixelRatio: 2, shadowMap: true, shadowSize: 2048, sceneryShadows: true, playerOutlines: true, liteCrowd: false, spotlights: true, pbrGround: true, batchScenery: false });
+    expect(high).toMatchObject({ adaptive: false, maxPixelRatio: 2, shadowMap: true, shadowSize: 2048, sceneryShadows: true, playerOutlines: true, liteCrowd: false, spotlights: true, pbrGround: true, batchScenery: false, netDetail: 'cloth', netCols: 16 });
   });
 
   it('makes Low the lightest choice', () => {
     const low = graphicsProfile('low'), medium = graphicsProfile('medium');
     expect(low.maxPixelRatio).toBeLessThan(medium.maxPixelRatio);
-    expect(low).toMatchObject({ shadowMap: false, spotlights: false, liteCrowd: true, batchScenery: true });
+    expect(low).toMatchObject({ shadowMap: false, spotlights: false, liteCrowd: true, batchScenery: true, netDetail: 'dent' });
   });
 
   it('remembers the choice in the save', () => {

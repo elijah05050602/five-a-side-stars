@@ -117,6 +117,38 @@ test('a super skill plays its cutscene, then the match carries on', async ({ pag
   expect(errors).toEqual([]);
 });
 
+test('a goal carries into the net, and its replay films the net from the goal line', async ({ page }) => {
+  const errors: string[] = [];
+  await toLobby(page, errors);
+  await page.locator('#m-play').click();
+  await page.locator('#s-go').click();
+  await expect.poll(() => page.evaluate(() => !!(window as DebugWindow).__match)).toBe(true);
+  type GoalWindow = Window & { __match: { replay: { goalCam: boolean } | null; sim: {
+    phase: string; length: number; goalDepth: number; goalX: (s: number) => number;
+    ball: { owner: unknown; pos: { x: number; z: number }; vel: { x: number; z: number }; y: number; vy: number; inGoal: number; lastKick: unknown; lastTouch: unknown };
+    players: { side: number; isKeeper: boolean; pos: { x: number; z: number }; kickCooldown: number }[];
+  } } };
+  // A few seconds of the match to replay, then a firm shot at the empty net.
+  await page.waitForTimeout(3000);
+  await page.evaluate(() => {
+    const s = (window as unknown as GoalWindow).__match.sim, b = s.ball, x = s.goalX(0);
+    s.phase = 'play';
+    const shooter = s.players.find((p) => p.side === 0 && !p.isKeeper)!;
+    for (const p of s.players) { p.pos = { x: -x * 0.3, z: 3 }; p.kickCooldown = 99; }
+    b.owner = null; b.lastKick = b.lastTouch = shooter;
+    b.pos = { x: x - 6, z: 0 }; b.y = 0.3; b.vy = 2.5; b.vel = { x: 16, z: 0.5 };
+  });
+  await expect.poll(() => page.evaluate(() => (window as unknown as GoalWindow).__match.sim.phase)).toBe('goal');
+  // The ball ends up in the goal, well behind the line, not stuck on it.
+  await expect.poll(() => page.evaluate(() => {
+    const s = (window as unknown as GoalWindow).__match.sim;
+    return s.ball.inGoal === 1 && s.ball.pos.x - s.length / 2 > 0.5;
+  })).toBe(true);
+  await expect.poll(() => page.evaluate(() => !!(window as unknown as GoalWindow).__match.replay?.goalCam), { timeout: 60000 }).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as unknown as GoalWindow).__match.replay), { timeout: 60000 }).toBe(null);
+  expect(errors).toEqual([]);
+});
+
 test('a cup run survives leaving the cup screen', async ({ page }) => {
   const errors: string[] = [];
   await toLobby(page, errors);
