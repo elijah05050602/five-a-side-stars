@@ -3,6 +3,7 @@ import { IDLE_INPUT, MatchSim, RUNOFF_END, skillMuls } from '../game/sim';
 import { AGE_STATS } from '../data/ageGroups';
 import { AGE_GROUPS } from '../data/types';
 import { cpuMatch, runUntil, team } from './helpers';
+import { seedRandom } from './setup';
 
 describe('match engine: setup', () => {
   it('builds a pitch and ten players from the home team\'s age group', () => {
@@ -190,6 +191,26 @@ describe('penalty shoot-out', () => {
     // Nobody takes more than one kick ahead of the other side.
     expect(Math.abs(a.length - b.length)).toBeLessThanOrEqual(1);
     expect(a.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('only celebrates the kick that wins it, and the winners are the ones celebrating', () => {
+    for (const seed of [1, 2, 3, 4]) {
+      seedRandom(seed);
+      const sim = cpuMatch({ mode: 'shootout', halfSeconds: 60 });
+      const celebrations: { side: number; winner: number | null }[] = [];
+      let was = sim.phase;
+      for (let i = 0; i < 60 * 60 * 5 && sim.phase !== 'fulltime'; i++) {
+        sim.step(1 / 60, IDLE_INPUT);
+        if (sim.phase === 'goal' && was !== 'goal') {
+          expect(sim.celebrator !== null).toBe(sim.shootoutWinner() !== null);
+          if (sim.celebrator) celebrations.push({ side: sim.celebrator.side, winner: sim.shootoutWinner() });
+        }
+        was = sim.phase;
+      }
+      expect(sim.phase).toBe('fulltime');
+      expect(celebrations).toHaveLength(1);
+      expect(celebrations[0].side).toBe(sim.score[0] > sim.score[1] ? 0 : 1);
+    }
   });
 });
 

@@ -145,7 +145,43 @@ test('a goal carries into the net, then its replay plays and hands back to the m
     return s.ball.inGoal === 1 && s.ball.pos.x - s.length / 2 > 0.5;
   })).toBe(true);
   await expect.poll(() => page.evaluate(() => !!(window as unknown as GoalWindow).__match.replay), { timeout: 60000 }).toBe(true);
+  // The replay plays on a clean screen in cinema bars.
+  await expect(page.locator('#replay-frame')).toBeVisible({ timeout: 60000 });
+  await expect(page.locator('#hud-pause')).toBeHidden();
+  await expect(page.locator('.scoreboard')).toBeHidden();
   await expect.poll(() => page.evaluate(() => (window as unknown as GoalWindow).__match.replay), { timeout: 60000 }).toBe(null);
+  await expect(page.locator('#hud-pause')).toBeVisible();
+  await expect(page.locator('#replay-frame')).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('a tap on the goal replay skips it and kicks nothing', async ({ page }) => {
+  const errors: string[] = [];
+  await toLobby(page, errors);
+  await page.locator('#m-play').click();
+  await page.locator('#s-go').click();
+  await expect.poll(() => page.evaluate(() => !!(window as DebugWindow).__match)).toBe(true);
+  type GoalWindow = Window & { __match: { replay: object | null; sim: {
+    phase: string; goalX: (s: number) => number; score: number[];
+    ball: { owner: unknown; pos: { x: number; z: number }; vel: { x: number; z: number }; y: number; vy: number; lastKick: unknown; lastTouch: unknown };
+    players: { side: number; isKeeper: boolean; pos: { x: number; z: number }; kickCooldown: number }[];
+  } } };
+  await page.waitForTimeout(3000);
+  await page.evaluate(() => {
+    const s = (window as unknown as GoalWindow).__match.sim, b = s.ball, x = s.goalX(0);
+    s.phase = 'play';
+    const shooter = s.players.find((p) => p.side === 0 && !p.isKeeper)!;
+    for (const p of s.players) { p.pos = { x: -x * 0.3, z: 3 }; p.kickCooldown = 99; }
+    b.owner = null; b.lastKick = b.lastTouch = shooter;
+    b.pos = { x: x - 6, z: 0 }; b.y = 0.3; b.vy = 2.5; b.vel = { x: 16, z: 0.5 };
+  });
+  await expect(page.locator('#replay-frame')).toBeVisible({ timeout: 60000 });
+  await expect(page.locator('.replay-label')).toBeVisible();
+  await page.mouse.click(550, 310);
+  await expect.poll(() => page.evaluate(() => (window as unknown as GoalWindow).__match.replay)).toBe(null);
+  await expect(page.locator('#hud-pause')).toBeVisible();
+  // Still the one goal, and the match carries on to its kick-off.
+  expect(await page.evaluate(() => (window as unknown as GoalWindow).__match.sim.score.join('-'))).toBe('1-0');
   expect(errors).toEqual([]);
 });
 
