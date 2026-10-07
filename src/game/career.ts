@@ -1,6 +1,6 @@
-import { AGE_GROUPS, SKILL_KEYS, type AgeGroup, type Player, type SkillKey, type Skills, type Team } from '../data/types';
+import { AGE_GROUPS, SKILL_KEYS, type AgeGroup, type Player, type Position, type SkillKey, type Skills, type Team } from '../data/types';
 import { STAR_CAP, randomSkills, skillKeys, skillLabel } from '../data/skills';
-import { startingFive, uid } from '../data/defaults';
+import { FIRST_NAMES, makePlayer, pick, startingFive, uid } from '../data/defaults';
 import { applyLeagueResult, createLeague, seasonOutcome, seasonOver, type LeagueState, type SeasonRecord } from './league';
 import type { MatchResult } from './MatchScene';
 import { freshMatchStats, type PlayerMatchStats } from './sim';
@@ -58,7 +58,24 @@ export interface CareerState {
   trainingPoints: number;
   /** Ids of the Star milestones reached (see STAR_MILESTONES). */
   milestones: string[];
+  /** After moving up an age group: who moved on, and the youngsters on trial. Null the rest of the time. */
+  trialDay: TrialDay | null;
 }
+
+/** Squad changes when the team moves up an age group: someone moves on, and the player signs one of three triallists. */
+export interface TrialDay {
+  /** Team-mates who moved to another club (already out of the squad). */
+  left: { name: string; number: number; position: Position }[];
+  /** Line-up spots the leavers had, which a new signing fills. */
+  openSpots: Position[];
+  /** Three youngsters to choose from. */
+  players: Player[];
+}
+
+/** The biggest squad a team can have (the builder allows 5 to 8). */
+export const MAX_SQUAD = 8;
+/** A squad this size or smaller loses nobody, so a Trial Day always leaves at least six. */
+const KEEP_ALL_AT = 5;
 
 export interface StarMilestone {
   id: string;
@@ -121,7 +138,7 @@ export function createCareer(source: Team, halfSeconds: number): { career: Caree
   const career: CareerState = {
     teamId: team.id, year: 1, season: 1, league, halfSeconds,
     seasonStats: {}, careerStats: {}, history: [], titles: 0, done: false, pendingGrowth: [],
-    starId: defaultStar(team), starPicked: false, trainingPoints: 0, milestones: [],
+    starId: defaultStar(team), starPicked: false, trainingPoints: 0, milestones: [], trialDay: null,
   };
   return { career, team };
 }
@@ -350,6 +367,8 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
       c.season = 1;
       team.ageGroup = careerAge(c);
       movedUp = true;
+      // Someone moves on first, so the growth spurt below is only for the players who stay.
+      c.trialDay = startTrialDay(c, team);
       // Banked progress turns into stars now that the cap has risen.
       c.pendingGrowth = team.players.flatMap((p) => levelUp(p, team.ageGroup));
     }
@@ -363,6 +382,82 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
     c.league = league;
   }
   return { record, movedUp, finished };
+}
+
+/**
+ * Who moves on when the team moves up: whoever has played least (never the Star, never
+ * the only keeper). Nobody leaves a squad of five, one leaves six or seven, two leave eight,
+ * and one triallist signs, so the squad ends up six to seven strong.
+ */
+export function chooseLeavers(c: CareerState, team: Team): Player[] {
+  const count = team.players.length <= KEEP_ALL_AT ? 0 : team.players.length >= MAX_SQUAD ? 2 : 1;
+  const played = (p: Player) => c.careerStats[p.id]?.played ?? 0;
+  const stars = (p: Player) => skillKeys(p.position).reduce((n, k) => n + p.skills[k], 0);
+  const keepers = team.players.filter((p) => p.position === 'GK').length;
+  return team.players
+    .filter((p) => p.id !== c.starId && !(p.position === 'GK' && keepers <= 1))
+    .sort((a, b) => played(a) - played(b) || stars(a) - stars(b))
+    .slice(0, count);
+}
+
+/** Send the leavers off and line up three triallists. Mutates the team. */
+export function startTrialDay(c: CareerState, team: Team): TrialDay {
+  const age = careerAge(c);
+  const leavers = chooseLeavers(c, team);
+  team.players = team.players.filter((p) => !leavers.includes(p));
+  const usedNames = new Set(team.players.map((p) => p.name));
+  const usedNumbers = new Set(team.players.map((p) => p.number));
+  const freeName = () => {
+    const names = FIRST_NAMES.filter((n) => !usedNames.has(n));
+    const n = names.length ? pick(names) : pick(FIRST_NAMES);
+    usedNames.add(n);
+    return n;
+  };
+  const freeNumber = (wanted?: number) => {
+    let n = wanted && !usedNumbers.has(wanted) ? wanted : 2;
+    while (usedNumbers.has(n) && n < 99) n++;
+    usedNumbers.add(n);
+    return n;
+  };
+  // One triallist plays where the first leaver did (or fills a gap), the others anywhere outfield.
+  const outfield: Position[] = ['DEF', 'MID', 'WING', 'ATT'];
+  const first = leavers[0]?.position ?? (team.players.some((p) => p.position === 'GK') ? pick(outfield) : 'GK');
+  const positions: Position[] = [first, pick(outfield), pick(outfield)];
+  // Triallists are rated like a squad that has played a year in the age group below, so a new face
+  // is a fair swap for the kids who have grown up in the career, not an instant upgrade.
+  const below = CAREER_AGES[Math.max(0, CAREER_AGES.indexOf(age) - 1)];
+  const players = positions.map((pos, i) => {
+    const p = makePlayer(pos, freeNumber(i === 0 ? leavers[0]?.number : undefined), freeName(), false, age);
+    p.skills = randomSkills(pos, below);
+    p.xp = zeroSkills();
+    return p;
+  });
+  // One of them is a bit better than the rest: an extra star where there is room for one.
+  const standout = pick(players);
+  const room = skillKeys(standout.position).filter((k) => standout.skills[k] < STAR_CAP[age]);
+  if (room.length) standout.skills[pick(room)]++;
+  return {
+    left: leavers.map((p) => ({ name: p.name, number: p.number, position: p.position })),
+    openSpots: leavers.filter((p) => p.starter).map((p) => p.position),
+    players,
+  };
+}
+
+/** Sign one triallist: they join the squad, starting in a leaver's spot if one is open. Ends the Trial Day. */
+export function signTriallist(c: CareerState, team: Team, playerId: string): Player | null {
+  const t = c.trialDay;
+  const p = t?.players.find((x) => x.id === playerId);
+  if (!t || !p || team.players.length >= MAX_SQUAD) return null;
+  const spot = t.openSpots[0];
+  // Only a keeper goes in goal; an outfield triallist waits on the bench for a goalkeeper's spot.
+  if (spot && (spot !== 'GK' || p.position === 'GK') && team.players.filter((x) => x.starter).length < 5) {
+    if (spot !== p.position) p.positions = [p.position];
+    p.position = spot;
+    p.starter = true;
+  }
+  team.players.push(p);
+  c.trialDay = null;
+  return p;
 }
 
 /** Rows for the season (or whole career) stat cards, best performers first. */

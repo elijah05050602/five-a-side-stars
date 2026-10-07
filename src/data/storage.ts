@@ -1,10 +1,10 @@
 import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, uid } from './defaults';
 import type { LeagueState } from '../game/league';
-import { defaultStar, type CareerState } from '../game/career';
+import { defaultStar, type CareerState, type TrialDay } from '../game/career';
 import type { TournamentState } from '../game/tournament';
 import { ensureSkills, fitSkills } from './skills';
 import { freshProgress, type Progress } from './progress';
-import { AGE_GROUPS, BADGE_SHAPES, BOOT_STYLES, BUILDS, HAIR_STYLES, KIT_PATTERNS, POSITIONS, SPECIALS, type Kit, type Player, type Team } from './types';
+import { AGE_GROUPS, BADGE_SHAPES, BOOT_STYLES, BUILDS, HAIR_STYLES, KIT_PATTERNS, POSITIONS, SPECIALS, type AgeGroup, type Kit, type Player, type Position, type Team } from './types';
 import { FORMATIONS } from './formations';
 import { isNameOk } from './wordFilter';
 import type { GraphicsQuality } from '../game/graphics';
@@ -267,6 +267,21 @@ function mendStar(c: CareerState, teams: Team[]): void {
   } else c.starPicked = raw.starPicked === true;
   c.trainingPoints = typeof raw.trainingPoints === 'number' && Number.isFinite(raw.trainingPoints) && raw.trainingPoints >= 0 ? Math.floor(raw.trainingPoints) : 0;
   c.milestones = Array.isArray(raw.milestones) ? raw.milestones.filter((m): m is string => typeof m === 'string') : [];
+  c.trialDay = readTrialDay(raw.trialDay, team?.ageGroup ?? 'U5');
+}
+
+/** A Trial Day in progress, or null if there is none or it cannot be read (the squad is whole either way). */
+function readTrialDay(v: unknown, age: AgeGroup): TrialDay | null {
+  if (!isObj(v) || !Array.isArray(v.left) || !Array.isArray(v.openSpots) || !Array.isArray(v.players) || v.players.length === 0) return null;
+  const isPlayer = (p: unknown): p is Player => isObj(p) && typeof p.id === 'string' && typeof p.name === 'string' && isNameOk(p.name)
+    && POSITIONS.includes(p.position as Position) && Number.isInteger(p.number) && isObj(p.skills);
+  if (!v.players.every(isPlayer)) return null;
+  const left = v.left.filter((l): l is TrialDay['left'][number] => isObj(l) && typeof l.name === 'string' && Number.isInteger(l.number) && POSITIONS.includes(l.position as Position));
+  return {
+    left,
+    openSpots: v.openSpots.filter((x): x is Position => POSITIONS.includes(x as Position)),
+    players: v.players.map((p) => ensureSkills({ ...p, starter: false }, age)),
+  };
 }
 
 function isTournament(v: unknown): v is TournamentState {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { CAREER_YEARS, SEASONS_PER_YEAR, TRAINING_STEP, advanceCareer, applyCareerMatch, careerAge, careerSeasonOver, careerStar, createCareer, pickStar, trainStar } from '../game/career';
+import { CAREER_YEARS, SEASONS_PER_YEAR, TRAINING_STEP, advanceCareer, applyCareerMatch, careerAge, careerSeasonOver, careerStar, chooseLeavers, createCareer, freshSeasonStats, pickStar, signTriallist, startTrialDay, trainStar } from '../game/career';
+import { makePlayer } from '../data/defaults';
 import { nextFixture } from '../game/league';
-import { STAR_CAP, skillKeys } from '../data/skills';
+import { STAR_BUDGET, STAR_CAP, skillKeys } from '../data/skills';
 import { startingFive } from '../data/defaults';
 import { freshMatchStats } from '../game/sim';
 import type { MatchResult } from '../game/MatchScene';
@@ -141,3 +142,81 @@ describe('your Star', () => {
     expect(trainStar(c, you, 'speed')).toBeNull();
   });
 });
+
+describe('Trial Day', () => {
+  /** Play a whole first year (four mini seasons) and move up to the Under 6s. */
+  function finishYear(c: ReturnType<typeof createCareer>['career'], you: Team) {
+    for (let season = 0; season < SEASONS_PER_YEAR; season++) {
+      while (!careerSeasonOver(c)) play(c, you, 2, 1);
+      advanceCareer(c, you);
+    }
+  }
+
+  it('nobody leaves a squad of five, and one triallist joins', () => {
+    const { career: c, team: you } = createCareer(team('src', 'Fivers', 'U8'), 60);
+    pickStar(c, you, you.players[3].id);
+    finishYear(c, you);
+    expect(careerAge(c)).toBe('U6');
+    expect(c.trialDay).not.toBeNull();
+    expect(c.trialDay!.left).toEqual([]);
+    expect(c.trialDay!.players).toHaveLength(3);
+    // Rated like a year in the Under 5s (plus one stand-out star at most), not a fresh Under 6s budget.
+    for (const p of c.trialDay!.players) expect(skillKeys(p.position).reduce((n, k) => n + p.skills[k], 0)).toBeLessThanOrEqual(STAR_BUDGET.U5 + 1);
+    expect(you.players).toHaveLength(5);
+    const pick = c.trialDay!.players[1];
+    expect(signTriallist(c, you, pick.id)).toBe(pick);
+    expect(you.players).toHaveLength(6);
+    expect(pick.starter).toBe(false);
+    expect(c.trialDay).toBeNull();
+    // Signing again does nothing.
+    expect(signTriallist(c, you, pick.id)).toBeNull();
+  });
+
+  it('the least-used player moves on (never the Star or the only keeper), and a triallist takes their spot', () => {
+    const src = team('src', 'Movers', 'U8');
+    src.players.push(makePlayer('ATT', 11, 'Benchy', false, 'U8'), makePlayer('DEF', 12, 'Spare', false, 'U8'));
+    const { career: c, team: you } = createCareer(src, 60);
+    const star = you.players.find((p) => p.name === 'Benchy')!;
+    pickStar(c, you, star.id);
+    finishYear(c, you);
+    // The two subs never played; the Star is one of them, so the other one leaves.
+    expect(c.trialDay!.left.map((l) => l.name)).toEqual(['Spare']);
+    expect(you.players.some((p) => p.id === star.id)).toBe(true);
+    expect(you.players).toHaveLength(6);
+    signTriallist(c, you, c.trialDay!.players[0].id);
+    expect(you.players).toHaveLength(7);
+  });
+
+  it('a starter who moves on leaves their spot open for the new signing', () => {
+    const src = team('src', 'Openers', 'U8');
+    src.players.push(makePlayer('ATT', 11, 'Sub', false, 'U8'));
+    const { career: c, team: you } = createCareer(src, 60);
+    pickStar(c, you, you.players[3].id);
+    // The sub has played more than the defender who starts.
+    const def = you.players.find((p) => p.position === 'DEF')!;
+    for (const p of you.players) c.careerStats[p.id] = { ...freshSeasonStats(), played: p === def ? 1 : 10 };
+    expect(chooseLeavers(c, you)).toEqual([def]);
+    c.year = 2;
+    const t = startTrialDay(c, you);
+    c.trialDay = t;
+    expect(t.openSpots).toEqual(['DEF']);
+    const signing = t.players.find((p) => p.position !== 'GK')!;
+    signTriallist(c, you, signing.id);
+    expect(signing.starter).toBe(true);
+    expect(signing.position).toBe('DEF');
+    expect(startingFive(you)).toContain(signing);
+  });
+
+  it('a full squad of eight loses two and signs one', () => {
+    const src = team('src', 'Eights', 'U8');
+    src.players.push(makePlayer('ATT', 11, 'Sub One', false, 'U8'), makePlayer('DEF', 12, 'Sub Two', false, 'U8'), makePlayer('MID', 14, 'Sub Three', false, 'U8'));
+    const { career: c, team: you } = createCareer(src, 60);
+    pickStar(c, you, you.players[3].id);
+    finishYear(c, you);
+    expect(c.trialDay!.left).toHaveLength(2);
+    expect(you.players).toHaveLength(6);
+    const names = new Set(you.players.map((p) => p.name));
+    expect(c.trialDay!.players.every((p) => !names.has(p.name))).toBe(true);
+  });
+});
+
