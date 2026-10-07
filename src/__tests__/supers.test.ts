@@ -106,7 +106,7 @@ describe('super skills', () => {
   it('give the keeper Giant Gloves that save more shots', () => {
     const saved = (gloves: boolean) => {
       let goals = 0;
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < 200; i++) {
         const s = sim('hard');
         const shooter = s.players.find((q) => q.side === 1 && !q.isKeeper)!;
         const keeper = s.players.find((q) => q.side === 0 && q.isKeeper)!;

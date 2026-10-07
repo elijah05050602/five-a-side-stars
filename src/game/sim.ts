@@ -1931,6 +1931,8 @@ export class MatchSim {
     // back out towards the pitch. (A keeper can move into its path after the save was judged.)
     for (const k of this.players) {
       if (this.mode === 'tutorial' || !k.isKeeper || !b.lastKick || b.lastKick.side === k.side || b.y > 1.7 * this.stats.scale) continue;
+      // Until the save is judged, a keeper who can take the ball gets the chance to catch it below.
+      if (b.keeperTried !== b.flightId && k.kickCooldown <= 0) continue;
       const rel = v(b.pos.x - k.pos.x, b.pos.z - k.pos.z);
       if (len(rel) >= k.radius + b.radius || len(b.vel) < 3.5 || rel.x * b.vel.x + rel.z * b.vel.z >= 0) continue;
       const n = norm(rel), along = b.vel.x * n.x + b.vel.z * n.z, away = k.side === 0 ? 1 : -1;

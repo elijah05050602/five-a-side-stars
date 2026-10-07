@@ -145,4 +145,32 @@ describe('keepers', () => {
     expect(rate('normal', 20)).toBeLessThan(0.15);
     expect(rate('easy', 20)).toBeGreaterThan(0.15);
   });
+
+  it('still catch a firm shot hit straight at them, instead of always knocking it back out', () => {
+    let caught = 0;
+    for (const side of [0, 1] as Side[]) for (let i = 0; i < 20; i++) {
+      const s = new MatchSim({ home, away, difficulty: 'normal', halfSeconds: 600, humanSide: 0, mode: 'match' });
+      s.phase = 'play';
+      const shooter = s.players.find((p) => p.side === side && !p.isKeeper)!;
+      const keeper = s.players.find((p) => p.side !== side && p.isKeeper)!;
+      const line = s.goalX(side), dir = side === 0 ? 1 : -1;
+      for (const p of s.players) if (!p.isKeeper && p !== shooter) p.pos = { x: -line * 0.85, z: 6 };
+      shooter.pos = { x: line - dir * 8, z: 0 };
+      keeper.pos = { x: line - dir * 0.7, z: 0 };
+      s.ball.pos = { ...shooter.pos };
+      s.ball.owner = null;
+      s.ball.vel = { x: dir * 8, z: 0 };
+      s.ball.flightId++;
+      s.ball.lastKick = s.ball.lastTouch = shooter;
+      shooter.kickCooldown = 1;
+      // Caught cleanly: in the keeper's hands without first bouncing back off them.
+      let bounced = false;
+      for (let k = 0; k < 120 && s.ball.owner !== keeper; k++) {
+        s.step(1 / 60, IDLE_INPUT);
+        if (!s.ball.owner && s.ball.vel.x * dir < 0) bounced = true;
+      }
+      if (s.ball.owner === keeper && !bounced) caught++;
+    }
+    expect(caught).toBeGreaterThan(25);
+  });
 });
