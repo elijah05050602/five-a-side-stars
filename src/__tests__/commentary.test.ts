@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Commentator, LINES, classifyShot, goalKey, goalLine, line, placement, type LineKey } from '../game/commentary';
 import { resolveConditions } from '../game/Weather';
-import { IDLE_INPUT, type TrickKind } from '../game/sim';
+import { IDLE_INPUT } from '../game/sim';
 import { cpuMatch, runUntil } from './helpers';
 
 const first = () => 0; // always the first line of a list, so tests are exact
@@ -134,8 +134,7 @@ describe('commentator over a match', () => {
     const heard: LineKey[] = [];
     c.onSay = (key) => heard.push(key);
     const p = sim.players.find((q) => q.side === 0 && !q.isKeeper)!.info;
-    // The moves after the step-over and nutmeg arrive with PR #62; until then the sim never sends them.
-    const [said] = c.onEvents(sim, [{ type: 'trick', side: 0, player: p, ok: true, kind: 'cruyff' as unknown as TrickKind }]);
+    const [said] = c.onEvents(sim, [{ type: 'trick', side: 0, player: p, ok: true, kind: 'cruyff' }]);
     expect(heard).toEqual(['trickCruyff']);
     expect(said).toContain(p.name);
     expect(c.onEvents(sim, [{ type: 'super', side: 0, player: p, superKind: 'rocket' }])).toEqual([null]);

@@ -1,4 +1,5 @@
-import type { MatchSim, SimEvent, SimPlayer, Side } from './sim';
+import type { MatchSim, SimEvent, SimPlayer, Side, TrickKind } from './sim';
+import type { SuperKind } from './supers';
 
 /**
  * A match commentator: turns simulation events into short, kid-friendly
@@ -127,12 +128,12 @@ export function placement(at: { y: number; z: number }, dims: { goalWidth: numbe
 }
 
 /** The line group for each skill move; any other move (the step-over) is trickSkill. */
-const TRICK_LINE: Partial<Record<string, LineKey>> = {
+const TRICK_LINE: Partial<Record<TrickKind, LineKey>> = {
   dragback: 'trickDragback', cruyff: 'trickCruyff', roulette: 'trickRoulette', elastico: 'trickElastico', rainbow: 'trickRainbow', feint: 'trickSwerve',
 };
 
 /** The spoken line for each super skill. */
-const SUPER_LINE: Partial<Record<string, LineKey>> = {
+const SUPER_LINE: Record<SuperKind, LineKey> = {
   rocket: 'superRocket', turbo: 'superTurbo', magic: 'superMagic', bulldozer: 'superBulldozer', slide: 'superSlide', gloves: 'superGloves',
 };
 
@@ -274,12 +275,11 @@ export class Commentator {
         const owner = ev.player?.name ?? 'the dribbler';
         if (ev.ok && ev.kind === 'nutmeg') return this.say('trickNutmeg', { owner });
         if (rng() >= (ev.ok ? 0.5 : 0.35) || !this.chatterDue(12)) return null;
-        return this.say(ev.ok ? TRICK_LINE[ev.kind ?? ''] ?? 'trickSkill' : 'trickFail', { owner });
+        return this.say(ev.ok ? TRICK_LINE[ev.kind as TrickKind] ?? 'trickSkill' : 'trickFail', { owner });
       }
       case 'super': {
         // Spoken only: the cutscene already puts the super's own line on the ticker.
-        const key = SUPER_LINE[ev.superKind ?? ''];
-        if (key) this.onSay?.(key);
+        if (ev.superKind) this.onSay?.(SUPER_LINE[ev.superKind]);
         return null;
       }
       case 'save': {
