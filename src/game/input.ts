@@ -11,7 +11,7 @@ export interface InputState {
   switchPlayer: boolean; // pressed this frame
   pause: boolean; // pressed this frame
   subs: boolean; // pressed this frame: open the subs card
-  trick: boolean; // pressed this frame: step-over or nutmeg
+  trick: boolean; // pressed this frame: a skill move (which one depends on the stick and the defenders)
 }
 
 import { getControls, type KeyMap, type PadMap } from '../data/controls';
