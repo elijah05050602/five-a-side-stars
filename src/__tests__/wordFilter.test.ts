@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isNameOk } from '../data/wordFilter';
-import { FIRST_NAMES, TEAM_WORDS_A, TEAM_WORDS_B, shortCode } from '../data/defaults';
+import { FIRST_NAMES, shortCode } from '../data/defaults';
+import { KIT_COLOUR_WORDS, TEAM_ADJECTIVES, TEAM_BOLD_WORDS, TEAM_CLUB_PREFIXES, TEAM_CLUB_WORDS, TEAM_MASCOTS, TEAM_THINGS, TEAM_THING_SUFFIXES, TEAM_TOWNS, allTeamNames } from '../data/teamNames';
 import { CLUB_NAME, davaoStrikersTeam } from '../data/club';
 
 /** The names in a list that the filter blocks. For innocent names this should be empty. */
@@ -70,10 +71,14 @@ describe('innocent names pass', () => {
   });
 
   it('passes every name and team the game makes up itself', () => {
-    const teams = TEAM_WORDS_A.flatMap((a) => TEAM_WORDS_B.map((b) => `${a} ${b}`));
-    const players = FIRST_NAMES.flatMap((f) => [f, ...TEAM_WORDS_B.map((b) => `${f} ${b}`)]);
-    expect(teams).toHaveLength(TEAM_WORDS_A.length * TEAM_WORDS_B.length);
-    expect(blocked([...FIRST_NAMES, ...TEAM_WORDS_A, ...TEAM_WORDS_B, ...teams, ...players])).toEqual([]);
+    const teams = allTeamNames();
+    const words = [
+      ...TEAM_ADJECTIVES, ...Object.values(KIT_COLOUR_WORDS), ...Object.keys(TEAM_MASCOTS), ...TEAM_TOWNS, ...TEAM_CLUB_WORDS,
+      ...TEAM_CLUB_PREFIXES, ...Object.keys(TEAM_BOLD_WORDS), ...Object.keys(TEAM_THINGS), ...TEAM_THING_SUFFIXES,
+    ];
+    const players = FIRST_NAMES.flatMap((f) => [f, ...Object.keys(TEAM_MASCOTS).map((m) => `${f} ${m}`)]);
+    expect(teams.length).toBeGreaterThan(1000);
+    expect(blocked([...FIRST_NAMES, ...words, ...teams, ...players])).toEqual([]);
   });
 
   it('passes the club squad', () => {
@@ -159,8 +164,12 @@ describe('short codes on the scoreboard', () => {
     expect(['Rocket Rovers', 'Davao Strikers', 'Red Owls Rule OK', 'Thunder', 'Jo', '⚽ Stars', 'Straße', ''].map(shortCode)).toEqual(['RRX', 'DSX', 'ROR', 'THU', 'JOX', 'STA', 'STR', 'TMX']);
   });
 
+  it('skips a leading The or FC', () => {
+    expect(['The Thunderbolts', 'FC Pebbleton', 'the comets', 'The', 'FC', 'Sporting Oakvale'].map(shortCode)).toEqual(['THU', 'PEB', 'COM', 'THE', 'FCX', 'SOX']);
+  });
+
   it('never spells a rude word, even when the name is fine', () => {
-    const teams = TEAM_WORDS_A.flatMap((a) => TEAM_WORDS_B.map((b) => `${a} ${b}`));
+    const teams = allTeamNames();
     expect(teams.map(shortCode).filter((c) => !isNameOk(c))).toEqual([]);
     const names = ['Super Eagles', 'Sunny Eagles', 'Fire And Glory', 'Gold And Yellow', 'Tigers In Training', 'Titans', 'Assassins', 'Fuchsia', 'Cumbria', 'Poole', 'Sexton'];
     expect(blocked(names)).toEqual([]);

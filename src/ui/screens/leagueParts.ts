@@ -35,7 +35,7 @@ export function nextMatchHtml(next: NextMatch, label: string, playId: string): s
 }
 
 /** Kick off the next match. The human always controls the home side of the sim, so your team goes there; the table flips the score when you were away. */
-export function playNextMatch(router: Router, next: NextMatch, o: Pick<StartOptions, 'halfSeconds' | 'cpuLevel' | 'league' | 'career'>): void {
+export function playNextMatch(router: Router, next: NextMatch, o: Pick<StartOptions, 'halfSeconds' | 'cpuLevel' | 'league' | 'career' | 'starId'>): void {
   const [h, a] = resolveKits(next.youAreHome ? next.home : next.away, next.youAreHome ? next.away : next.home);
   router.startMatch({ home: h, away: a, difficulty: 'normal', mode: 'match', ...o });
 }

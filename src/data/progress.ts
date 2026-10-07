@@ -54,6 +54,8 @@ export const STICKERS: Sticker[] = [
   { id: 'motm-3', emoji: '🎤', name: 'Star of the Show', how: 'One career player is Player of the Match three times.' },
   { id: 'five-star', emoji: '💫', name: 'Superstar', how: 'A career player reaches five stars in a skill.', unlocks: '💫' },
   { id: 'career-done', emoji: '🎓', name: 'All Grown Up', how: 'Finish the Under 10s year of a career.', unlocks: '🎓' },
+  { id: 'star-moment', emoji: '🌟', name: 'Star Moment', how: 'Your career Star reaches a milestone.' },
+  { id: 'star-legend', emoji: '🌠', name: 'Legend in the Making', how: 'Your career Star reaches eight milestones.', unlocks: '🌠' },
 ];
 
 export function getProgress(): Progress {
@@ -147,6 +149,8 @@ export interface CareerMilestones {
   champion?: boolean;
   movedUp?: boolean;
   finished?: boolean;
+  /** How many milestones the career's Star has reached, when one was just reached. */
+  starMilestones?: number;
 }
 
 export function recordCareer(m: CareerMilestones): Sticker[] {
@@ -160,6 +164,8 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.champion) award(p, 'mini-champ', out);
   if (m.movedUp) award(p, 'moved-up', out);
   if (m.finished) award(p, 'career-done', out);
+  if (m.starMilestones && m.starMilestones >= 1) award(p, 'star-moment', out);
+  if (m.starMilestones && m.starMilestones >= 8) award(p, 'star-legend', out);
   persist();
   return out;
 }

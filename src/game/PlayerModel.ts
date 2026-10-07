@@ -88,6 +88,30 @@ function shadowTexture(): THREE.CanvasTexture {
   shadowTex.colorSpace = THREE.SRGBColorSpace;
   return shadowTex;
 }
+/** A gold star with a dark rim, painted once and shared by every career Star's badge. */
+let starTex: THREE.CanvasTexture | null = null;
+function starTexture(): THREE.CanvasTexture {
+  if (starTex) return starTex;
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const ctx = c.getContext('2d')!;
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 ? 26 : 58, a = -Math.PI / 2 + (i * Math.PI) / 5;
+    ctx.lineTo(64 + r * Math.cos(a), 66 + r * Math.sin(a));
+  }
+  ctx.closePath();
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 9;
+  ctx.strokeStyle = '#7a4a00';
+  ctx.stroke();
+  ctx.fillStyle = '#ffd23f';
+  ctx.fill();
+  starTex = shared(new THREE.CanvasTexture(c));
+  starTex.colorSpace = THREE.SRGBColorSpace;
+  return starTex;
+}
+
 const shadowGeo = shared(new THREE.PlaneGeometry(1.25, 1.0));
 const plateGeo = shared(new THREE.PlaneGeometry(0.44, 0.44));
 
@@ -144,6 +168,8 @@ export class PlayerModel {
   private heads = new Map<Head, THREE.Object3D>();
   private hairAcc: THREE.Group | null = null;
   private plate: THREE.Mesh | null = null;
+  /** Gold star over a career Star's head (see setStar). */
+  private starBadge: THREE.Sprite | null = null;
   private fallback: ProceduralPlayerModel | null = null;
   private disposed = false;
 
@@ -437,6 +463,19 @@ export class PlayerModel {
   /** Colour of the always-on ring under the feet (the team's identifying colour). */
   setTeamColour(colour: THREE.ColorRepresentation): void {
     (this.teamRing.material as THREE.MeshBasicMaterial).color.set(colour);
+  }
+
+  /** Mark this player as the career's Star: a gold star floating above their head. */
+  setStar(on: boolean): void {
+    if (!on) { if (this.starBadge) this.starBadge.visible = false; return; }
+    if (!this.starBadge) {
+      this.starBadge = new THREE.Sprite(new THREE.SpriteMaterial({ map: starTexture(), depthWrite: false, transparent: true }));
+      this.starBadge.scale.setScalar(0.6 * this.baseScale);
+      this.starBadge.position.y = 2.5 * this.baseScale;
+      this.starBadge.renderOrder = 2;
+      this.group.add(this.starBadge);
+    }
+    this.starBadge.visible = true;
   }
 
   setSelected(on: boolean, colour?: number): void {

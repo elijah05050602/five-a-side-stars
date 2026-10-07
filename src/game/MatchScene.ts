@@ -32,6 +32,8 @@ export type SimMode = NonNullable<SimConfig['mode']>;
 export interface SceneOptions {
   /** Weather and time of day; 'random' picks for you. */
   weather?: WeatherChoice;
+  /** A career match: the id of the player's Star, who wears a gold star over their head. */
+  starId?: string;
 }
 
 /**
@@ -88,6 +90,7 @@ export class MatchScene {
   /** Models dressed in the keeper's kit. */
   private readonly gloved = new WeakSet<PlayerModel>();
   private readonly ringColours: ReturnType<typeof teamRingColours>;
+  private readonly starId: string | undefined;
   private readonly ball: BallModel;
   private readonly input: Input;
   private readonly input2: Input | null;
@@ -215,6 +218,7 @@ export class MatchScene {
     // Dev builds only: lets a test script poke the crowd (window.__crowd.onEvent({ type: 'goal', side: 0 })).
     if (import.meta.env.DEV) (window as unknown as { __crowd: Crowd }).__crowd = this.crowd;
 
+    this.starId = options.starId;
     this.ringColours = teamRingColours(this.sim.teams[0].kit, this.sim.teams[1].kit);
     for (const p of this.sim.players) this.models.set(p, this.makeModel(p.info, p.side, p.isKeeper));
     for (const side of [0, 1] as Side[]) for (const info of this.sim.bench[side]) this.benchModels.set(info.id, this.makeModel(info, side, info.position === 'GK'));
@@ -306,6 +310,7 @@ export class MatchScene {
     const team = this.sim.teams[side];
     const m = new PlayerModel(info, keeper ? team.keeperKit : team.kit, this.sim.stats.scale);
     m.setTeamColour(this.ringColours[side]);
+    if (side === 0 && this.starId && info.id === this.starId) m.setStar(true);
     if (keeper) this.gloved.add(m);
     this.scene.add(m.group);
     return m;

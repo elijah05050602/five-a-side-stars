@@ -50,7 +50,43 @@ export interface CareerState {
   done: boolean;
   /** Star changes waiting to be shown on the career screen (after a year change). */
   pendingGrowth: GrowthEvent[];
+  /** Your Star: the one player the career follows. Every match is still played with the whole team. */
+  starId: string;
+  /** False until the player has picked their Star (a new career, or a save from before Stars). */
+  starPicked: boolean;
+  /** Training points the Star has waiting to spend on any rating. */
+  trainingPoints: number;
+  /** Ids of the Star milestones reached (see STAR_MILESTONES). */
+  milestones: string[];
 }
+
+export interface StarMilestone {
+  id: string;
+  emoji: string;
+  name: string;
+  how: string;
+}
+
+/** Big moments in the Star's career. Each one gives a bonus training point. */
+export const STAR_MILESTONES: StarMilestone[] = [
+  { id: 'first-goal', emoji: '⚽', name: 'First Goal', how: 'Score your first goal.' },
+  { id: 'hat-trick', emoji: '🎩', name: 'Hat-trick', how: 'Score three goals in one match.' },
+  { id: 'goals-10', emoji: '🔟', name: 'Ten Goals', how: 'Score 10 goals in your career.' },
+  { id: 'goals-25', emoji: '🚀', name: 'Goal Machine', how: 'Score 25 goals in your career.' },
+  { id: 'assists-5', emoji: '🤝', name: 'Team Player', how: 'Set up 5 goals for your team-mates.' },
+  { id: 'clean-sheet', emoji: '🧤', name: 'Clean Sheet', how: 'Play a whole match without letting a goal in.' },
+  { id: 'saves-25', emoji: '🧱', name: 'Brick Wall', how: 'Make 25 saves in your career.' },
+  { id: 'tackles-25', emoji: '🛡️', name: 'Ball Winner', how: 'Win the ball 25 times in your career.' },
+  { id: 'motm-1', emoji: '🏆', name: 'Player of the Match', how: 'Be Player of the Match.' },
+  { id: 'motm-5', emoji: '🎤', name: 'Crowd Favourite', how: 'Be Player of the Match five times.' },
+  { id: 'games-20', emoji: '👟', name: 'Regular', how: 'Play 20 matches.' },
+  { id: 'games-60', emoji: '🏅', name: 'Club Legend', how: 'Play 60 matches.' },
+];
+
+/** Training points after a match: one for playing, one for a win, one for Player of the Match. */
+export const TRAINING = { played: 1, win: 1, motm: 1, milestone: 1 };
+/** Each training point is this much of a star, so about four points make a new star. */
+export const TRAINING_STEP = 0.25;
 
 export interface GrowthEvent {
   playerId: string;
@@ -85,6 +121,7 @@ export function createCareer(source: Team, halfSeconds: number): { career: Caree
   const career: CareerState = {
     teamId: team.id, year: 1, season: 1, league, halfSeconds,
     seasonStats: {}, careerStats: {}, history: [], titles: 0, done: false, pendingGrowth: [],
+    starId: defaultStar(team), starPicked: false, trainingPoints: 0, milestones: [],
   };
   return { career, team };
 }
@@ -175,6 +212,68 @@ export interface CareerMatchSummary {
   motm: Player | null;
   /** First time a player reached five stars this match. */
   fiveStar: boolean;
+  /** Training points the Star earned in this match, milestones included. */
+  points: number;
+  /** Star milestones reached in this match. */
+  milestones: StarMilestone[];
+}
+
+/**
+ * The player a career follows until someone picks: the best record so far
+ * (for a save from before Stars), else the first attacker in the line-up.
+ */
+export function defaultStar(team: Team, stats: Record<string, PlayerSeasonStats> = {}): string {
+  const score = (id: string) => { const s = stats[id]; return s ? s.goals * 3 + s.assists * 2 + s.saves + s.motm * 2 + s.played * 0.1 : 0; };
+  const line = startingFive(team);
+  const best = [...team.players].sort((a, b) => score(b.id) - score(a.id))[0];
+  if (best && score(best.id) > 0) return best.id;
+  return (line.find((p) => p.position === 'ATT') ?? line.find((p) => p.position !== 'GK') ?? team.players[0])?.id ?? '';
+}
+
+/** The career's Star, or undefined if they have left the squad. */
+export const careerStar = (c: CareerState, team: Team): Player | undefined => team.players.find((p) => p.id === c.starId);
+
+/** Make someone the Star. */
+export function pickStar(c: CareerState, team: Team, playerId: string): boolean {
+  if (!team.players.some((p) => p.id === playerId)) return false;
+  c.starId = playerId;
+  c.starPicked = true;
+  return true;
+}
+
+/** Can a training point go into this rating? Not once it is at the age group's cap. */
+export function canTrain(c: CareerState, star: Player, skill: SkillKey): boolean {
+  return c.trainingPoints >= 1 && skillKeys(star.position).includes(skill) && star.skills[skill] < STAR_CAP[careerAge(c)];
+}
+
+/** Spend one training point on one of the Star's ratings. Returns any star it earned. */
+export function trainStar(c: CareerState, team: Team, skill: SkillKey): GrowthEvent[] | null {
+  const star = careerStar(c, team);
+  if (!star || !canTrain(c, star, skill)) return null;
+  c.trainingPoints--;
+  star.xp = { ...zeroSkills(), ...(star.xp ?? {}) };
+  star.xp[skill] += TRAINING_STEP;
+  return levelUp(star, careerAge(c));
+}
+
+/** Milestones the Star has just reached, given their whole-career stats and this match. */
+function newMilestones(c: CareerState, star: Player, s: PlayerSeasonStats, m: PlayerMatchStats, cleanSheet: boolean): StarMilestone[] {
+  const keeper = star.position === 'GK';
+  const reached: Record<string, boolean> = {
+    'first-goal': s.goals >= 1,
+    'hat-trick': m.goals >= 3,
+    'goals-10': s.goals >= 10,
+    'goals-25': s.goals >= 25,
+    'assists-5': s.assists >= 5,
+    'clean-sheet': cleanSheet && (keeper || star.position === 'DEF'),
+    'saves-25': s.saves >= 25,
+    'tackles-25': s.tackles >= 25,
+    'motm-1': s.motm >= 1,
+    'motm-5': s.motm >= 5,
+    'games-20': s.played >= 20,
+    'games-60': s.played >= 60,
+  };
+  return STAR_MILESTONES.filter((ms) => reached[ms.id] && !c.milestones.includes(ms.id));
 }
 
 /**
@@ -203,7 +302,18 @@ export function applyCareerMatch(c: CareerState, team: Team, r: MatchResult, oth
     growth.push(...grow(p, m, won, drawn, cleanSheet, age, share));
     if (!had5 && skillKeys(p.position).some((k) => p.skills[k] >= 5)) fiveStar = true;
   }
-  return { growth, motm, fiveStar };
+  // The Star earns training points to spend by hand, on top of growing like everyone else.
+  let points = 0;
+  const milestones: StarMilestone[] = [];
+  const star = careerStar(c, team);
+  if (star && startingFive(team).includes(star)) {
+    points = TRAINING.played + (won ? TRAINING.win : 0) + (motm?.id === star.id ? TRAINING.motm : 0);
+    milestones.push(...newMilestones(c, star, c.careerStats[star.id], r.players?.[star.id] ?? freshMatchStats(), cleanSheet));
+    c.milestones.push(...milestones.map((ms) => ms.id));
+    points += milestones.length * TRAINING.milestone;
+    c.trainingPoints += points;
+  }
+  return { growth, motm, fiveStar, points, milestones };
 }
 
 export const careerSeasonOver = (c: CareerState): boolean => seasonOver(c.league);

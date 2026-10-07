@@ -2,6 +2,7 @@ import { BADGE_ICONS, type AgeGroup, type Badge, type Gender, type Kit, type Pla
 import { randomSkills } from './skills';
 import { FORMATIONS, applyFormation } from './formations';
 import { isNameOk } from './wordFilter';
+import { makeTeamName } from './teamNames';
 
 export const SKIN_TONES = ['#f6d7c3', '#eab98f', '#d49a6a', '#a86b3c', '#7a4a26', '#4a2d17'];
 export const HAIR_COLOURS = ['#2b1b0e', '#5a3a1a', '#a0522d', '#d9a441', '#f2e2a0', '#1b1b1b', '#c0392b'];
@@ -12,8 +13,6 @@ export const KIT_COLOURS = [
 ];
 
 export const FIRST_NAMES = ['Ava', 'Leo', 'Mia', 'Noah', 'Zoe', 'Kai', 'Isla', 'Max', 'Ruby', 'Finn', 'Nia', 'Theo', 'Elsie', 'Omar', 'Lily', 'Jude', 'Amara', 'Ezra', 'Freya', 'Sami', 'Priya', 'Luca', 'Hana', 'Rafa'];
-export const TEAM_WORDS_A = ['Rocket', 'Thunder', 'Sunny', 'Lightning', 'Mighty', 'Flying', 'Super', 'Wild', 'Golden', 'Blue', 'Red', 'Green', 'Comet', 'Jolly'];
-export const TEAM_WORDS_B = ['Lions', 'Foxes', 'Tigers', 'Stars', 'Rovers', 'Dragons', 'Owls', 'Sharks', 'Bees', 'Wolves', 'Eagles', 'Pandas', 'Otters', 'Penguins'];
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -23,8 +22,9 @@ export function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-export function randomTeamName(): string {
-  return `${pick(TEAM_WORDS_A)} ${pick(TEAM_WORDS_B)}`;
+/** A made-up team name; give the shirt colour and it may say it ("Red Foxes"). See `teamNames.ts`. */
+export function randomTeamName(shirt?: string): string {
+  return makeTeamName(shirt).name;
 }
 
 /** The made-up names that are girls' names; the rest of FIRST_NAMES are boys'. */
@@ -49,7 +49,9 @@ const STARTING_HAIR: Record<Gender | 'any', Player['hairStyle'][]> = {
 /** The three letters on the scoreboard: the initials, or the start of a one-word name, but never a rude word. */
 export function shortCode(name: string): string {
   // Letters and digits only, counted by character: an emoji in the name would be cut in half on the scoreboard.
-  const words = name.trim().split(/\s+/).map((w) => Array.from(w).filter((c) => /[\p{L}\p{N}]/u.test(c))).filter((w) => w.length > 0);
+  let words = name.trim().split(/\s+/).map((w) => Array.from(w).filter((c) => /[\p{L}\p{N}]/u.test(c))).filter((w) => w.length > 0);
+  // "The Thunderbolts" is THU and "FC Pebbleton" is PEB, not TTX and FPX.
+  if (words.length >= 2 && /^(the|fc)$/i.test(words[0].join(''))) words = words.slice(1);
   const first = words[0] ?? ['T', 'M'];
   const tries = [words.length >= 2 ? words.slice(0, 3).map((w) => w[0]) : first.slice(0, 3), first.slice(0, 3)];
   // Initials can spell what the name doesn't ("Fire And Glory", or "Super Eagles" padded out to SEX):
@@ -201,11 +203,12 @@ export function generateOpponent(ageGroup: AgeGroup, avoidKit: Kit): Team {
   const palette = KIT_COLOURS.filter((c) => c !== avoidKit.shirt && c !== avoidKit.shirt2 && c !== '#ffffff' && c !== '#111111');
   const shirt = pick(palette);
   const shirt2 = pick(['#ffffff', '#111111', '#ffd23f'].filter((c) => c !== shirt));
+  const { name, icon } = makeTeamName(shirt);
   const team = makeTeam({
-    name: randomTeamName(),
+    name,
     ageGroup,
     kit: makeKit(shirt, shirt2, pick(['#ffffff', '#111111', '#1b2a41']), shirt, pick(['plain', 'stripes', 'hoops', 'halves', 'sash', 'chevron'])),
-    badge: makeBadge(shirt, shirt2),
+    badge: makeBadge(shirt, shirt2, icon),
     keeperKit: makeKit(pick(['#2eb872', '#ffd23f', '#6a4c93', '#00c2cb']), '#111111', '#111111', '#111111', 'plain'),
   });
   // Computer teams line up in all sorts of ways.

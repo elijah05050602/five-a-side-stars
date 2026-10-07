@@ -1,5 +1,5 @@
 import { getCareer, getLeague, getTeam, saveTeam, setCareer, setLeague, setTournament } from '../../data/storage';
-import { applyCareerMatch, careerAge, playerOfTheMatch, seasonName, type GrowthEvent } from '../../game/career';
+import { applyCareerMatch, careerAge, careerStar, playerOfTheMatch, seasonName, type GrowthEvent, type StarMilestone } from '../../game/career';
 import type { MatchResult } from '../../game/MatchScene';
 import { getProgress, recordCareer, type Sticker } from '../../data/progress';
 import { applyLeagueResult, roundJobs, tierInfo, yourPosition } from '../../game/league';
@@ -21,6 +21,8 @@ export interface ResultSummary {
   tableNote?: string;
   /** Stars the career players earned in this match. */
   growth?: GrowthEvent[];
+  /** What the career's Star earned in this match. */
+  star?: { name: string; points: number; milestones: StarMilestone[] };
 }
 
 /** Computer matches played in the background during the player's own (see playAhead). */
@@ -64,9 +66,11 @@ export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[]
       setCareer(c);
       const motm3 = Object.values(c.careerStats).some((st) => st.motm >= 3);
       const boot = Object.values(c.seasonStats).some((st) => st.goals >= 8);
-      summary.stickers.push(...recordCareer({ starUp: s.growth.length > 0, fiveStar: s.fiveStar, motm3, goldenBoot: boot }));
+      summary.stickers.push(...recordCareer({ starUp: s.growth.length > 0, fiveStar: s.fiveStar, motm3, goldenBoot: boot, starMilestones: s.milestones.length ? c.milestones.length : 0 }));
       summary.tableNote = `${careerAge(c)} · ${seasonName(c)} season · match ${Math.min(c.league.round, c.league.rounds.length)} of ${c.league.rounds.length} · you are ${ordinal(yourPosition(c.league, you))}`;
       summary.growth = s.growth;
+      const star = careerStar(c, you);
+      if (star && s.points > 0) summary.star = { name: star.name, points: s.points, milestones: s.milestones };
     }
   }
   if (o.league) {
@@ -87,6 +91,8 @@ export function renderResults(root: HTMLElement, router: Router, r: MatchResult,
   const stickers = summary.stickers;
   const leagueNote = summary.tableNote ? `<p class="muted">${esc(summary.tableNote)}</p>` : '';
   const growthNote = growthList(summary.growth ?? []);
+  const sn = summary.star;
+  const starNote = sn ? `<div class="star-note"><h3>🌟 ${esc(sn.name)} earned ${sn.points} training point${sn.points === 1 ? '' : 's'}</h3>${sn.milestones.length ? `<ul class="plain-list">${sn.milestones.map((m) => `<li>${m.emoji} <strong>${esc(m.name)}</strong>: ${esc(m.how)} <span class="muted">(+1 point)</span></li>`).join('')}</ul>` : ''}<p class="muted small">Spend them on the career screen.</p></div>` : '';
   let headline = h === a ? "It's a draw!" : h > a ? `${r.home.name} win!` : `${r.away.name} win!`;
   if (r.mode === 'training') headline = r.trainingPoints >= 10 ? 'Sharp shooting!' : r.trainingPoints >= 5 ? 'Nice work!' : 'Keep practising!';
   if (r.mode === 'shootout') headline = h > a ? `${r.home.name} win the shoot-out!` : `${r.away.name} win the shoot-out!`;
@@ -114,6 +120,7 @@ export function renderResults(root: HTMLElement, router: Router, r: MatchResult,
         </ul>` : ''}
         ${motm ? `<div class="motm">🏆 Player of the match: <strong>${esc(motm.name)}</strong> #${motm.number}</div>` : ''}
         ${leagueNote}
+        ${starNote}
         ${growthNote}
         ${stickerBanner(stickers)}
         <div class="row">

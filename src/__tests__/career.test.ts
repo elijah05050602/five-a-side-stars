@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAREER_YEARS, SEASONS_PER_YEAR, advanceCareer, applyCareerMatch, careerAge, careerSeasonOver, createCareer } from '../game/career';
+import { CAREER_YEARS, SEASONS_PER_YEAR, TRAINING_STEP, advanceCareer, applyCareerMatch, careerAge, careerSeasonOver, careerStar, createCareer, pickStar, trainStar } from '../game/career';
 import { nextFixture } from '../game/league';
 import { STAR_CAP, skillKeys } from '../data/skills';
 import { startingFive } from '../data/defaults';
@@ -87,5 +87,57 @@ describe('career', () => {
     expect(c.history.length).toBe(CAREER_YEARS * SEASONS_PER_YEAR);
     expect(matches).toBe(CAREER_YEARS * SEASONS_PER_YEAR * 5);
     expect(you.ageGroup).toBe('U10');
+  });
+});
+
+describe('your Star', () => {
+  it('suggests an attacker and waits for the player to pick', () => {
+    const { career: c, team: you } = createCareer(team('src', 'Star Makers', 'U8'), 60);
+    expect(c.starPicked).toBe(false);
+    expect(careerStar(c, you)?.position).toBe('ATT');
+    const keeper = you.players.find((p) => p.position === 'GK')!;
+    expect(pickStar(c, you, 'nobody')).toBe(false);
+    expect(pickStar(c, you, keeper.id)).toBe(true);
+    expect(c.starId).toBe(keeper.id);
+    expect(c.starPicked).toBe(true);
+  });
+
+  it('earns training points and milestones only for the Star', () => {
+    const { career: c, team: you } = createCareer(team('src', 'Pointers', 'U8'), 60);
+    const star = you.players.find((p) => p.position === 'ATT')!;
+    pickStar(c, you, star.id);
+    // A 3-0 win where the Star scores their first goal: played + win + the First Goal milestone (and maybe Player of the Match).
+    const s = play(c, you, 3, 0);
+    expect(s.milestones.map((m) => m.id)).toContain('first-goal');
+    expect(s.points).toBeGreaterThanOrEqual(3);
+    expect(c.trainingPoints).toBe(s.points);
+    expect(c.milestones).toContain('first-goal');
+    // Each milestone is only reached once.
+    expect(play(c, you, 3, 0).milestones.map((m) => m.id)).not.toContain('first-goal');
+    // A loss still earns the point for playing.
+    const before = c.trainingPoints;
+    const loss = play(c, you, 0, 2);
+    expect(loss.points).toBeGreaterThanOrEqual(1);
+    expect(c.trainingPoints).toBe(before + loss.points);
+  });
+
+  it('turns four training points into a star, never past the age cap', () => {
+    const { career: c, team: you } = createCareer(team('src', 'Trainers', 'U8'), 60);
+    const star = careerStar(c, you)!;
+    pickStar(c, you, star.id);
+    star.skills.shooting = 1;
+    star.xp = { ...star.xp!, shooting: 0 };
+    c.trainingPoints = 10;
+    const steps = Math.round(1 / TRAINING_STEP);
+    for (let i = 0; i < steps - 1; i++) expect(trainStar(c, you, 'shooting')).toEqual([]);
+    const grew = trainStar(c, you, 'shooting')!;
+    expect(grew).toHaveLength(1);
+    expect(star.skills.shooting).toBe(2); // the U5 cap
+    expect(c.trainingPoints).toBe(10 - steps);
+    // At the cap the point is kept for later.
+    expect(trainStar(c, you, 'shooting')).toBeNull();
+    expect(c.trainingPoints).toBe(10 - steps);
+    c.trainingPoints = 0;
+    expect(trainStar(c, you, 'speed')).toBeNull();
   });
 });
