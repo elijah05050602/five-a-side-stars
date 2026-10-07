@@ -5,6 +5,7 @@ import { assignSlots, canPlay, formationById } from '../data/formations';
 import { averageStars, skillMul } from '../data/skills';
 import type { InputState } from './input';
 import { SUPER_FILL, SUPER_TIME, type SuperKind } from './supers';
+import { frameHit, netPresses, roofHeight, type GoalShape } from './goalFrame';
 
 /** Horizontal vector helpers (x along the pitch, z across it). */
 export interface V2 { x: number; z: number }
@@ -187,6 +188,8 @@ export interface SimBall {
   /** A Rocket Shot in flight (harder to save), or a Magic Pass (nobody can cut it out). */
   superShot: boolean;
   superPass: boolean;
+  /** The goal the ball went into through its mouth (1 at +x, -1 at -x), or 0 while it is out on the pitch or outside the netting. */
+  inGoal: -1 | 0 | 1;
 }
 
 export type Phase = 'kickoff' | 'play' | 'setpiece' | 'goal' | 'halftime' | 'fulltime' | 'paused';
@@ -264,6 +267,17 @@ export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootH
 /** Grass between the lines and the boards, so the ball can go out for throw-ins, corners and goal kicks. */
 export const RUNOFF_SIDE = 1.2;
 export const RUNOFF_END = 1.6;
+/**
+ * The net, per kilogram of ball: how stiff the netting is, how much it soaks up, how far it can stretch
+ * before it goes taut, and how quickly it grips the ball's sideways speed. A full-power U10 shot
+ * stretches the back of the net about 0.4 m and the ball drops out of it; a tap-in barely moves it.
+ */
+const NET_STIFF = 400;
+const NET_DAMP = 22;
+export const NET_GIVE = 0.55;
+const NET_GRIP = 3;
+/** How much speed the ball keeps off a post or the crossbar. */
+const POST_BOUNCE = 0.6;
 /** Seconds between dribbling touches. */
 export const DRIBBLE_STRIDE = 0.38;
 /** Seconds a kick-off taker may wait before the ball is played to a team-mate for them. */
@@ -409,7 +423,7 @@ export class MatchSim {
     this.goalWidth = this.stats.goalWidth;
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
-    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null, kickedFrom: v(), superShot: false, superPass: false };
+    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null, kickedFrom: v(), superShot: false, superPass: false, inGoal: 0 };
     // Beginner help (Starter) starts from an Easy computer team, whatever was picked before, and then it runs and
     // thinks slower, tackles and saves softer, and shoots worse from closer in. League play keeps its tier's strength.
     const base = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.assist ? 'easy' : config.difficulty];
@@ -743,6 +757,8 @@ export class MatchSim {
     if (this.phase === 'goal') {
       this.phaseTimer += dt;
       this.stepCelebration(dt);
+      // The ball carries on into the net, and the net catches it.
+      if (!this.ball.owner) this.integrateBall(dt);
       // A match goal holds a little longer so the camera can watch the players and then the fans celebrate (MatchScene).
       if (this.phaseTimer > (this.mode === 'training' ? 1.6 : this.mode === 'match' && !this.shootout ? GOAL_HOLD : 3.2)) {
         if (this.shootout) this.advanceShootout();
@@ -1934,6 +1950,12 @@ export class MatchSim {
   }
 
   private integrateBall(dt: number): void {
+    const x0 = this.ball.pos.x;
+    this.moveBall(dt, x0);
+    this.goalEntry(x0);
+  }
+
+  private moveBall(dt: number, x0: number): void {
     const b = this.ball;
     if (b.owner && this.phase === 'setpiece' && this.setPiece?.kind === 'throwin' && this.setPiece.taker === b.owner) {
       // Throw-in: the ball is held up over the taker's head.
@@ -1993,38 +2015,90 @@ export class MatchSim {
     }
     const speed = len(b.vel);
     const onGround = b.y < 0.01;
-    const friction = onGround ? 3.2 : 0.4;
+    const friction = onGround ? (b.inGoal ? 6 : 3.2) : 0.4; // the grass inside the goal is long, and the net holds it
     const drag = 0.06;
     const newSpeed = Math.max(0, speed - (friction + drag * speed) * dt);
     if (speed > 1e-4) b.vel = v((b.vel.x / speed) * newSpeed, (b.vel.z / speed) * newSpeed);
     b.pos.x += b.vel.x * dt;
     b.pos.z += b.vel.z * dt;
     b.spin += newSpeed * dt / b.radius;
+    this.goalEntry(x0);
     // Rebound boards all round, set back from the lines in a match so the ball can go out of play.
     const L = this.length / 2, W = this.width / 2, r = b.radius;
     const sideBoard = W + (this.mode === 'match' ? RUNOFF_SIDE : 0), endBoard = L + (this.mode === 'match' ? RUNOFF_END : 0);
     if (b.pos.z > sideBoard - r) { b.pos.z = sideBoard - r; b.vel.z = -Math.abs(b.vel.z) * 0.55; }
     if (b.pos.z < -sideBoard + r) { b.pos.z = -sideBoard + r; b.vel.z = Math.abs(b.vel.z) * 0.55; }
+    // The end boards, except across the goal mouth. A ball in the goal has the net to stop it.
     const inMouth = Math.abs(b.pos.z) < this.goalWidth / 2 - r && b.y < this.goalHeight - r;
-    if (!inMouth) {
+    if (!inMouth && !b.inGoal) {
       if (b.pos.x > endBoard - r) { b.pos.x = endBoard - r; b.vel.x = -Math.abs(b.vel.x) * 0.55; }
       if (b.pos.x < -endBoard + r) { b.pos.x = -endBoard + r; b.vel.x = Math.abs(b.vel.x) * 0.55; }
-    } else {
-      // Inside the goal: the net catches it.
-      const back = L + this.goalDepth - r;
-      if (b.pos.x > back) { b.pos.x = back; b.vel.x = -Math.abs(b.vel.x) * 0.2; b.vel.z *= 0.3; }
-      if (b.pos.x < -back) { b.pos.x = -back; b.vel.x = Math.abs(b.vel.x) * 0.2; b.vel.z *= 0.3; }
-      // Posts: clamp z inside the goal once past the line.
-      if (Math.abs(b.pos.x) > L) {
-        const gz = this.goalWidth / 2 - r;
-        if (b.pos.z > gz) { b.pos.z = gz; b.vel.z = -Math.abs(b.vel.z) * 0.4; }
-        if (b.pos.z < -gz) { b.pos.z = -gz; b.vel.z = Math.abs(b.vel.z) * 0.4; }
+    }
+    this.goalFrame(dt);
+  }
+
+  /** The size of the goals, for goalFrame.ts. */
+  get goalShape(): GoalShape {
+    return { halfLength: this.length / 2, width: this.goalWidth, height: this.goalHeight, depth: this.goalDepth };
+  }
+
+  /**
+   * Keep track of whether the ball is in a goal: it is once it crosses the line through the goal mouth
+   * (or is found wholly inside the netting), and stops being once it is back out on the pitch.
+   */
+  private goalEntry(x0: number): void {
+    const b = this.ball, g = this.goalShape, r = b.radius;
+    const sx = b.inGoal || (b.pos.x >= 0 ? 1 : -1);
+    const d = sx * b.pos.x - g.halfLength;
+    if (b.inGoal) { if (d < -r) b.inGoal = 0; return; }
+    if (d <= 0) return;
+    const crossed = sx * x0 - g.halfLength <= 0 && Math.abs(b.pos.z) < g.width / 2 && b.y < g.height;
+    const wholly = Math.abs(b.pos.z) < g.width / 2 - r && b.y < roofHeight(g, d) - r && d < g.depth - r;
+    if (crossed || wholly) b.inGoal = sx;
+  }
+
+  /**
+   * The posts, the crossbar and the net. The ball bounces off the frame, and sinks into the netting,
+   * which slows it, goes taut, and lets it drop. From outside, the netting stops it the same way.
+   */
+  private goalFrame(dt: number): void {
+    const b = this.ball, g = this.goalShape, r = b.radius;
+    const sx = b.inGoal || (b.pos.x >= 0 ? 1 : -1);
+    let d = sx * b.pos.x - g.halfLength;
+    if (d < -1) return;
+    let vd = sx * b.vel.x, vz = b.vel.z, vy = b.vy;
+    const hit = frameHit(g, d, b.y, b.pos.z, r);
+    if (hit) {
+      d += hit.nd * hit.depth; b.y += hit.ny * hit.depth; b.pos.z += hit.nz * hit.depth;
+      const vn = vd * hit.nd + vy * hit.ny + vz * hit.nz;
+      if (vn < 0) {
+        // Off the woodwork: the speed into the post bounces back, and a little of the rest is lost.
+        const tn = vn * (1 + POST_BOUNCE);
+        vd = (vd - tn * hit.nd) * 0.9; vy = (vy - tn * hit.ny) * 0.9; vz = (vz - tn * hit.nz) * 0.9;
       }
     }
-    // Crossbar: a ball above goal height at the line bounces back.
-    if (Math.abs(b.pos.x) > L - r && Math.abs(b.pos.x) < L + r && Math.abs(b.pos.z) < this.goalWidth / 2 && b.y >= this.goalHeight - r && b.y < this.goalHeight + r) {
-      b.vel.x *= -0.6; b.vy = -Math.abs(b.vy) * 0.5;
+    for (const p of netPresses(g, d, b.y, b.pos.z, r, b.inGoal === sx)) {
+      // The netting pushes back like a spring, and soaks up speed.
+      let vn = vd * p.nd + vy * p.ny + vz * p.nz;
+      const push = (NET_STIFF * p.depth + NET_DAMP * vn) * dt;
+      vd -= p.nd * push; vy -= p.ny * push; vz -= p.nz * push;
+      vn -= push;
+      // It grips the ball too, so it drops instead of sliding along.
+      const grip = Math.exp(-NET_GRIP * dt);
+      vd = p.nd * vn + (vd - p.nd * vn) * grip; vy = p.ny * vn + (vy - p.ny * vn) * grip; vz = p.nz * vn + (vz - p.nz * vn) * grip;
+      // Stretched as far as it goes: the net is taut.
+      if (p.depth > NET_GIVE) {
+        const over = p.depth - NET_GIVE;
+        d -= p.nd * over; b.y -= p.ny * over; b.pos.z -= p.nz * over;
+        if (vn > 0) { vd -= p.nd * vn; vy -= p.ny * vn; vz -= p.nz * vn; }
+      }
     }
+    // A goal is a goal: the ball stays in the net until the kick-off.
+    if (b.inGoal && this.phase === 'goal' && d < r) { d = r; vd = Math.max(0, vd); }
+    if (b.y < 0) { b.y = 0; vy = Math.max(0, vy); }
+    b.pos.x = sx * (d + g.halfLength);
+    b.vel = v(sx * vd, vz);
+    b.vy = vy;
   }
 
   private resolvePossession(dt: number): void {
@@ -2317,8 +2391,7 @@ export class MatchSim {
     const b = this.ball;
     const L = this.length / 2, W = this.width / 2, r = b.radius;
     if (Math.abs(b.pos.z) > W + r) return true;
-    const intoGoal = Math.abs(b.pos.z) < this.goalWidth / 2 && b.y < this.goalHeight;
-    return Math.abs(b.pos.x) > L + r && !intoGoal;
+    return Math.abs(b.pos.x) > L + r && !b.inGoal;
   }
 
   /** Ball out: training goes back to the centre, a match gets a throw-in, corner or goal kick. */
@@ -2753,7 +2826,7 @@ export class MatchSim {
     if (this.phase === 'setpiece') return; // a dead ball cannot go in
     const b = this.ball;
     const L = this.length / 2;
-    if (Math.abs(b.pos.x) > L + b.radius && Math.abs(b.pos.z) < this.goalWidth / 2 && b.y < this.goalHeight) {
+    if (b.inGoal && Math.abs(b.pos.x) > L + b.radius) {
       const scoringSide: Side = b.pos.x > 0 ? 0 : 1; // ball in +x goal means home scored
       // Deflections off a defender or keeper still count for the shooter.
       const touch = b.owner ?? b.lastKick ?? b.lastTouch ?? this.teamOf(scoringSide)[0];

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { addOutline, toonMaterial } from './toon';
+import { POST_R, netPresses, roofHeight, type GoalShape, type NetPanel } from './goalFrame';
 
 export interface PitchDims {
   length: number; width: number; goalWidth: number; goalHeight: number; goalDepth: number;
@@ -9,6 +10,10 @@ export interface PitchDims {
   sceneryShadows?: boolean;
   /** Graphics: shiny physically based grass and boards; false uses a cheaper matt material (default true). */
   pbr?: boolean;
+  /** Graphics: how the nets move (default a cloth), how many strands across (default 16), and calmer for Reduce motion. */
+  netDetail?: NetDetail;
+  netCols?: number;
+  calmNets?: boolean;
 }
 
 /** Where the four floodlight towers stand: [x, y, z] of each lamp head. */
@@ -182,7 +187,7 @@ export function buildPitch(d: PitchDims): THREE.Group {
       board(sx * (L / 2 + t / 2), -(d.goalWidth / 2 + sideLen / 2), t, sideLen);
       board(sx * (L / 2 + t / 2), d.goalWidth / 2 + sideLen / 2, t, sideLen);
     }
-    const net = new GoalNet(sx, d);
+    const net = new GoalNet(sx, d, d.netDetail, d.netCols, d.calmNets);
     nets.push(net);
     g.add(buildGoal(sx, d), net.group);
   }
@@ -323,7 +328,7 @@ function buildBench(x: number, z: number): THREE.Group {
 
 function buildGoal(sx: number, d: PitchDims): THREE.Group {
   const g = new THREE.Group();
-  const postR = 0.07;
+  const postR = POST_R;
   const postMat = toonMaterial({ color: 0xffffff });
   const gw = d.goalWidth, gh = d.goalHeight, gd = d.goalDepth;
   const x0 = sx * d.length / 2;
@@ -360,104 +365,194 @@ function buildGoal(sx: number, d: PitchDims): THREE.Group {
   return g;
 }
 
+/** What the net needs to know about the ball: where it is, its size, and which goal (if any) it went into. */
+export interface NetBall { x: number; y: number; z: number; r: number; inGoal: -1 | 0 | 1 }
+
+/** How the net moves: a springy cloth that wobbles (High and Medium), or just a dent that follows the ball (Low). */
+export type NetDetail = 'cloth' | 'dent';
+
 /**
- * A proper goal net: strands of rope hanging from the crossbar over a back
- * frame to the ground, with a little sag, and side panels. When the ball
- * hits it the net bulges out and wobbles back.
+ * A proper goal net: rope strands over a back, a sloping roof and two sides, with a little sag and a
+ * faint skin so it reads as a surface from a distance. The ball pushes into it and it wraps round the
+ * ball; as a cloth it springs back and the wobble runs across the netting.
+ *
+ * Every point of the netting only moves in and out of its panel, by h. The lines and the skin share one
+ * buffer of positions, so each net is two draw calls, and nothing is uploaded while the net is still.
  */
 export class GoalNet {
   readonly group = new THREE.Group();
-  private readonly lines: THREE.LineSegments;
+  private readonly shape: GoalShape;
   private readonly positions: Float32Array;
+  private readonly attr: THREE.BufferAttribute;
+  /** Per point: where it rests in the world, which way it bulges (world), and where it rests measured from the goal (d, y, z). */
   private readonly rest: Float32Array;
-  private readonly params: Float32Array; // t (0 crossbar .. 1 ground) and z for each vertex
-  private bulge = 0;
-  private hitZ = 0;
-  private wobble = 0;
+  private readonly normal: Float32Array;
+  private readonly local: Float32Array;
+  private readonly panelOf: Uint8Array;
+  private readonly fixed: Uint8Array;
+  /** Up to four neighbours a point is tied to (-1 for none). */
+  private readonly nbr: Int32Array;
+  private readonly h: Float32Array;
+  private readonly vel: Float32Array;
+  private readonly target: Float32Array;
+  private awake = false;
 
-  constructor(private readonly sx: 1 | -1, private readonly d: PitchDims) {
+  constructor(private readonly sx: 1 | -1, d: PitchDims, private readonly detail: NetDetail = 'cloth', cols = 16, private readonly calm = false) {
     const gw = d.goalWidth, gh = d.goalHeight, gd = d.goalDepth;
-    const x0 = sx * d.length / 2;
-    const cols = 16, rows = 12;
-    const segs: number[] = [];
-    const params: number[] = [];
-    const point = (t: number, z: number): [number, number, number] => {
-      // Path from the crossbar back and down to the ground, with sag in the middle.
-      const sag = Math.sin(Math.PI * t) * 0.12;
-      let dx: number, y: number;
-      if (t < 0.45) { const u = t / 0.45; dx = gd * u; y = gh - (gh * 0.5) * u - sag; }
-      else { const u = (t - 0.45) / 0.55; dx = gd + sag; y = gh * 0.5 * (1 - u); }
-      return [x0 + sx * dx, y, z];
-    };
-    const push = (a: [number, number, number], ta: number, za: number, b: [number, number, number], tb: number, zb: number) => { segs.push(...a, ...b); params.push(ta, za, tb, zb); };
-    for (let r = 0; r <= rows; r++) {
-      const t = r / rows;
-      for (let c = 0; c < cols; c++) {
-        const z1 = -gw / 2 + (gw * c) / cols, z2 = -gw / 2 + (gw * (c + 1)) / cols;
-        push(point(t, z1), t, z1, point(t, z2), t, z2);
+    this.shape = { halfLength: d.length / 2, width: gw, height: gh, depth: gd };
+    const g = this.shape;
+    const k = gh / (2 * gd), ks = Math.hypot(k, 1);
+    const rows = Math.max(4, Math.round(cols * 0.4)), deep = Math.max(4, Math.round(cols * 0.4));
+    // Each panel: its size in points, where a point (u, v from 0 to 1) rests, and its outward normal (d, y, z).
+    const panels: { id: number; nu: number; nv: number; at: (u: number, v: number) => [number, number, number]; n: [number, number, number] }[] = [
+      { id: PANELS.back, nu: cols, nv: rows, at: (u, v) => [gd + Math.sin(Math.PI * u) * Math.sin(Math.PI * v) * 0.05, gh * 0.5 * v, -gw / 2 + gw * u], n: [1, 0, 0] },
+      { id: PANELS.roof, nu: cols, nv: deep, at: (u, v) => [gd * v, gh - gh * 0.5 * v - Math.sin(Math.PI * u) * Math.sin(Math.PI * v) * 0.04, -gw / 2 + gw * u], n: [k / ks, 1 / ks, 0] },
+      { id: PANELS.left, nu: deep, nv: rows, at: (u, v) => [gd * u, v * roofHeight(g, gd * u), -gw / 2], n: [0, 0, -1] },
+      { id: PANELS.right, nu: deep, nv: rows, at: (u, v) => [gd * u, v * roofHeight(g, gd * u), gw / 2], n: [0, 0, 1] },
+    ];
+    const count = panels.reduce((t, p) => t + (p.nu + 1) * (p.nv + 1), 0);
+    this.positions = new Float32Array(count * 3);
+    this.rest = new Float32Array(count * 3);
+    this.normal = new Float32Array(count * 3);
+    this.local = new Float32Array(count * 3);
+    this.panelOf = new Uint8Array(count);
+    this.fixed = new Uint8Array(count);
+    this.nbr = new Int32Array(count * 4).fill(-1);
+    this.h = new Float32Array(count);
+    this.vel = new Float32Array(count);
+    this.target = new Float32Array(count);
+    const lines: number[] = [], tris: number[] = [];
+    let base = 0;
+    for (const p of panels) {
+      const at = (i: number, j: number): number => base + j * (p.nu + 1) + i;
+      for (let j = 0; j <= p.nv; j++) {
+        for (let i = 0; i <= p.nu; i++) {
+          const n = at(i, j);
+          const [ld, ly, lz] = p.at(i / p.nu, j / p.nv);
+          this.local.set([ld, ly, lz], n * 3);
+          this.rest.set([sx * (g.halfLength + ld), ly, lz], n * 3);
+          this.normal.set([sx * p.n[0], p.n[1], p.n[2]], n * 3);
+          this.panelOf[n] = p.id;
+          // The edges are tied to the frame and pegged to the ground.
+          this.fixed[n] = i === 0 || j === 0 || i === p.nu || j === p.nv ? 1 : 0;
+          const nb = [i > 0 ? at(i - 1, j) : -1, i < p.nu ? at(i + 1, j) : -1, j > 0 ? at(i, j - 1) : -1, j < p.nv ? at(i, j + 1) : -1];
+          this.nbr.set(nb, n * 4);
+          if (i < p.nu) lines.push(n, at(i + 1, j));
+          if (j < p.nv) lines.push(n, at(i, j + 1));
+          if (i < p.nu && j < p.nv) tris.push(n, at(i + 1, j), at(i + 1, j + 1), n, at(i + 1, j + 1), at(i, j + 1));
+        }
       }
+      base += (p.nu + 1) * (p.nv + 1);
     }
-    for (let c = 0; c <= cols; c++) {
-      const z = -gw / 2 + (gw * c) / cols;
-      for (let r = 0; r < rows; r++) push(point(r / rows, z), r / rows, z, point((r + 1) / rows, z), (r + 1) / rows, z);
-    }
-    // Side panels: strands running back from each post, and up from the ground to the top slope.
-    for (const z of [-gw / 2, gw / 2]) {
-      for (let r = 0; r <= 6; r++) {
-        const y = (gh * r) / 6;
-        const dx = y <= gh * 0.5 ? gd : gd * (gh - y) / (gh * 0.5);
-        push([x0, y, z], -1, z, [x0 + sx * dx, y, z], -1, z);
-      }
-      for (let c = 1; c <= 4; c++) {
-        const u = c / 5;
-        push([x0 + sx * gd * u, 0, z], -1, z, [x0 + sx * gd * u, gh - gh * 0.5 * u, z], -1, z);
-      }
-    }
-    this.positions = new Float32Array(segs);
-    this.rest = new Float32Array(segs);
-    this.params = new Float32Array(params);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }));
-    this.lines.frustumCulled = false;
-    this.group.add(this.lines);
+    this.positions.set(this.rest);
+    this.attr = new THREE.BufferAttribute(this.positions, 3);
+    this.attr.setUsage(THREE.DynamicDrawUsage);
+    const lineGeo = new THREE.BufferGeometry();
+    lineGeo.setAttribute('position', this.attr);
+    lineGeo.setIndex(lines);
+    const rope = new THREE.LineSegments(lineGeo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }));
+    rope.frustumCulled = false;
     // A faint translucent skin so the net reads as a surface from a distance.
-    const skin = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false });
-    const back = new THREE.Mesh(new THREE.PlaneGeometry(gw, gh * 0.5), skin);
-    back.position.set(x0 + sx * gd, gh * 0.25, 0);
-    back.rotation.y = Math.PI / 2;
-    const top = new THREE.Mesh(new THREE.PlaneGeometry(Math.hypot(gd, gh * 0.5), gw), skin);
-    top.position.set(x0 + sx * gd / 2, gh * 0.75, 0);
-    top.rotation.x = Math.PI / 2;
-    top.rotation.y = sx * -Math.atan2(gh * 0.5, gd);
-    this.group.add(back, top);
+    const skinGeo = new THREE.BufferGeometry();
+    skinGeo.setAttribute('position', this.attr);
+    skinGeo.setIndex(tris);
+    const skin = new THREE.Mesh(skinGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false }));
+    skin.frustumCulled = false;
+    this.group.add(rope, skin);
   }
 
-  /** The ball has hit the net at z with this speed. */
-  hit(z: number, speed: number): void {
-    this.hitZ = THREE.MathUtils.clamp(z, -this.d.goalWidth / 2, this.d.goalWidth / 2);
-    this.bulge = Math.min(0.6, 0.15 + speed * 0.035);
-    this.wobble = 0;
+  /** Back to rest, still (a replay starts from a still net). */
+  reset(): void {
+    this.h.fill(0);
+    this.vel.fill(0);
+    this.positions.set(this.rest);
+    this.attr.needsUpdate = true;
+    this.awake = false;
   }
 
-  update(dt: number): void {
-    if (this.bulge <= 0.001) return;
-    this.wobble += dt;
-    this.bulge *= Math.pow(0.08, dt);
-    const amount = this.bulge * Math.cos(this.wobble * 9);
-    const p = this.positions, r = this.rest, q = this.params;
-    for (let i = 0; i < q.length; i += 2) {
-      const t = q[i], z = q[i + 1];
-      const v = (i / 2) * 3;
-      if (t < 0) { p[v] = r[v]; p[v + 1] = r[v + 1]; continue; }
-      const shape = Math.sin(Math.PI * Math.min(1, t * 1.1)) * Math.exp(-Math.pow((z - this.hitZ) / 0.7, 2));
-      p[v] = r[v] + this.sx * amount * shape;
-      p[v + 1] = r[v + 1] - Math.abs(amount) * shape * 0.15;
+  /** Move the net on by dt, with the ball where it is now (null when there is no ball to draw). */
+  update(dt: number, ball: NetBall | null): void {
+    if (dt <= 0) return;
+    const touching = this.press(ball);
+    if (!touching && !this.awake) return;
+    const h = this.h, vel = this.vel, t = this.target, fixed = this.fixed;
+    if (this.detail === 'dent') {
+      // Low graphics: the dent follows the ball, then eases back.
+      const ease = 1 - Math.exp(-8 * dt);
+      for (let n = 0; n < h.length; n++) {
+        if (fixed[n]) continue;
+        h[n] = Math.abs(t[n]) > Math.abs(h[n]) ? t[n] : h[n] + (t[n] - h[n]) * ease;
+      }
+    } else {
+      // A cloth: each point is pulled back to rest and towards its neighbours, so the bulge spreads and wobbles.
+      const tie = 900, spring = 40, damp = this.calm ? 16 : 6;
+      const steps = Math.ceil(dt / (1 / 120));
+      const sdt = dt / steps;
+      const nbr = this.nbr;
+      for (let s = 0; s < steps; s++) {
+        for (let n = 0; n < h.length; n++) {
+          if (fixed[n]) continue;
+          let pull = 0;
+          for (let q = n * 4; q < n * 4 + 4; q++) { const m = nbr[q]; if (m >= 0) pull += h[m] - h[n]; }
+          vel[n] += (tie * pull - spring * h[n] - damp * vel[n]) * sdt;
+        }
+        for (let n = 0; n < h.length; n++) {
+          if (fixed[n]) continue;
+          h[n] += vel[n] * sdt;
+          // The ball is solid: the netting goes round it.
+          const tn = t[n];
+          if ((tn > 0 && h[n] < tn) || (tn < 0 && h[n] > tn)) { h[n] = tn; vel[n] = 0; }
+        }
+      }
     }
-    if (this.bulge <= 0.001) p.set(r);
-    (this.lines.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    let moving = touching;
+    const p = this.positions, r = this.rest, nm = this.normal;
+    for (let n = 0; n < h.length; n++) {
+      const v = n * 3;
+      p[v] = r[v] + nm[v] * h[n];
+      p[v + 1] = r[v + 1] + nm[v + 1] * h[n];
+      p[v + 2] = r[v + 2] + nm[v + 2] * h[n];
+      if (Math.abs(h[n]) > 1e-4 || Math.abs(vel[n]) > 1e-3) moving = true;
+    }
+    this.attr.needsUpdate = true;
+    if (!moving) this.reset();
+    this.awake = moving;
+  }
+
+  /** Where the ball pushes the netting: how far each point must be out of the way. True if it touches. */
+  private press(ball: NetBall | null): boolean {
+    if (this.awake) this.target.fill(0);
+    if (!ball) return false;
+    const g = this.shape;
+    const d = this.sx * ball.x - g.halfLength;
+    if (d < -ball.r - 0.2) return false;
+    const presses = netPresses(g, d, ball.y, ball.z, ball.r, ball.inGoal === this.sx);
+    if (!presses.length) return false;
+    const loc = this.local, nm = this.normal, t = this.target;
+    for (const pr of presses) {
+      const id = PANELS[pr.panel];
+      // Pushing out of the goal bulges the panel outwards; from outside it dents inwards.
+      const pushN: [number, number, number] = [this.sx * pr.nd, pr.ny, pr.nz];
+      const reach = ball.r * 1.3 + pr.depth * 0.35 + 0.12;
+      for (let n = 0; n < t.length; n++) {
+        if (this.panelOf[n] !== id) continue;
+        const v = n * 3;
+        const dir = nm[v] * pushN[0] + nm[v + 1] * pushN[1] + nm[v + 2] * pushN[2];
+        // How far the point is from the ball, across the panel.
+        const ed = loc[v] - d, ey = loc[v + 1] - ball.y, ez = loc[v + 2] - ball.z;
+        const along = ed * pr.nd + ey * pr.ny + ez * pr.nz;
+        const across2 = ed * ed + ey * ey + ez * ez - along * along;
+        if (across2 >= reach * reach) continue;
+        const f = 1 - across2 / (reach * reach);
+        const want = pr.depth * f * f * Math.sign(dir);
+        if (Math.abs(want) > Math.abs(t[n])) t[n] = want;
+      }
+    }
+    return true;
   }
 }
+
+const PANELS: Record<NetPanel, number> = { back: 0, roof: 1, left: 2, right: 3 };
 
 /** A big scoreboard on two legs behind one goal, drawn on a canvas so it can show the live score. */
 export class Scoreboard {
