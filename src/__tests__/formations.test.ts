@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FORMATIONS, applyFormation, assignSlots, formationById, formationFor } from '../data/formations';
+import { FORMATIONS, applyFormation, assignSlots, formationById, formationFor, setPosition } from '../data/formations';
 import { generateOpponent, makeKit, makePlayer } from '../data/defaults';
 import { MatchSim } from '../game/sim';
 import { cpuMatch, runUntil, team } from './helpers';
@@ -34,6 +34,34 @@ describe('formations', () => {
     // Diamond uses the same positions, so a team on a formation that no longer fits lands on the first match.
     t.formation = 'box';
     expect(formationFor(t)).toBe('diamond');
+  });
+
+  it('a sub made into a keeper leaves the starting keeper in goal', () => {
+    const t = team('h', 'Home');
+    const gk = t.players[0];
+    const spare = makePlayer('DEF', 12, 'Spare', false);
+    t.players.push(spare);
+    setPosition(t, spare, 'GK');
+    expect(spare.position).toBe('GK');
+    expect(gk.position).toBe('GK');
+    expect(gk.starter).toBe(true);
+    // Moving the spare keeper back out of goal leaves the starting keeper alone too.
+    setPosition(t, spare, 'DEF');
+    expect(gk.position).toBe('GK');
+    expect(t.players.slice(1, 5).every((p) => p.position !== 'GK')).toBe(true);
+  });
+
+  it('a starter made into a keeper swaps places with the starting keeper, and a keeper is always kept', () => {
+    const t = team('h', 'Home');
+    const [gk, d1] = t.players;
+    setPosition(t, d1, 'GK');
+    expect(d1.position).toBe('GK');
+    expect(gk.position).toBe('DEF');
+    // The only starting keeper moving out of goal puts another starter in goal, not a sub.
+    t.players.push(makePlayer('ATT', 12, 'Sub', false));
+    setPosition(t, d1, 'ATT');
+    expect(t.players.filter((p) => p.starter && p.position === 'GK')).toHaveLength(1);
+    expect(t.players[5].position).toBe('ATT');
   });
 
   it('lines each team up in its formation and every formation plays a full match', () => {
