@@ -78,7 +78,7 @@ test('full time works from the keyboard and the results follow', async ({ page }
   await page.locator('#m-play').click();
   await page.locator('#s-go').click();
   await expect.poll(() => page.evaluate(() => !!(window as DebugWindow).__match)).toBe(true);
-  await page.evaluate(() => { const s = (window as DebugWindow).__match!.sim; s.half = 2; s.clock = s.config.halfSeconds * 2 - 0.2; });
+  await page.evaluate(() => { const s = (window as DebugWindow).__match!.sim; s.phase = 'play'; s.half = 2; s.clock = s.config.halfSeconds * 2 - 0.2; });
   await expect(page.locator('#overlay:not([hidden]) h2')).toHaveText('Full time!');
   await expect(page.locator('#ov-finish')).toBeFocused();
   await page.keyboard.press('Enter');
