@@ -136,7 +136,7 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
   };
 
   const validate = (): boolean => {
-    team.name = team.name.trim() || randomTeamName();
+    team.name = team.name.trim() || randomTeamName(team.kit.shirt);
     if (!isNameOk(team.name)) { alert("Let's pick a different team name, that one is not allowed."); step = 0; render(); return false; }
     const rude = team.players.find((p) => !isNameOk(p.name));
     if (rude) { alert(`Let's pick a different name for player #${rude.number}, that one is not allowed.`); step = 2; render(); return false; }
@@ -189,7 +189,7 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
     form.querySelectorAll<HTMLElement>('[data-badge]').forEach((b) => b.addEventListener('click', () => { team.badge[b.dataset.badge as 'colour1' | 'colour2'] = b.dataset.colour!; refreshBadge(); }));
     const name = form.querySelector<HTMLInputElement>('#f-name')!;
     name.addEventListener('input', () => { team.name = name.value; updateCaption(); });
-    form.querySelector('#f-dice')!.addEventListener('click', () => { team.name = randomTeamName(); name.value = team.name; updateCaption(); });
+    form.querySelector('#f-dice')!.addEventListener('click', () => { team.name = randomTeamName(team.kit.shirt); name.value = team.name; updateCaption(); });
     form.querySelectorAll<HTMLElement>('[data-age]').forEach((b) => b.addEventListener('click', () => {
       if (ageLock) return;
       team.ageGroup = b.dataset.age as AgeGroup;
