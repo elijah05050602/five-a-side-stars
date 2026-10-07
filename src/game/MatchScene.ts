@@ -627,9 +627,13 @@ export class MatchScene {
       if (ev.type === 'sub') this.onSub(ev);
       this.crowd.onEvent(ev);
       if (!this.calm) this.puffFor(ev);
+      // Each shoot-out kick starts a fresh replay clip, so the winning kick's replay never shows the kick before it.
+      if (ev.type === 'whistle' && this.sim.shootout) this.history.length = 0;
       if (ev.type === 'goal') {
         this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, this.sim.score[0], this.sim.score[1]);
-        if (this.sim.mode !== 'training' && !getSettings().reduceMotion && this.history.length > 30) { this.replay = { frames: [], t: 0, wait: 1.1, slowFrom: 0, hold: 0, slow: false, goalSign: 1 }; this.afterGoal = 0; }
+        // In a shoot-out only the winning kick gets a replay (the sim only celebrates that one).
+        const replayIt = this.sim.mode !== 'training' && (!this.sim.shootout || this.sim.celebrator !== null);
+        if (replayIt && !getSettings().reduceMotion && this.history.length > 30) { this.replay = { frames: [], t: 0, wait: 1.1, slowFrom: 0, hold: 0, slow: false, goalSign: 1 }; this.afterGoal = 0; }
       }
     }
     if (this.coach) {
@@ -664,7 +668,8 @@ export class MatchScene {
     }
     const wobble = getSettings().reduceMotion ? 0 : Math.max(0, 0.75 - this.sim.stats.control) * 2;
     const lastGoal = this.sim.goals[this.sim.goals.length - 1];
-    const celebrating = this.sim.phase === 'goal' && lastGoal ? lastGoal.side : -1;
+    // In a shoot-out only the winners celebrate (a goal that does not decide it is not celebrated).
+    const celebrating = this.sim.phase !== 'goal' ? -1 : this.sim.shootout ? this.sim.celebrator?.side ?? -1 : lastGoal ? lastGoal.side : -1;
     const sprintSpeed = this.sim.stats.speed * 1.05;
     /** How fast the players' legs move: as slow as the sim while a super plays out in slow motion. */
     const animDt = this.slowmo > 0 ? dt * 0.4 : dt;
@@ -732,11 +737,12 @@ export class MatchScene {
     this.camTarget.lerp(focus, 1 - Math.pow(0.02, dt));
     // After a goal in a match the camera follows the scorer's celebration (after the replay, which
     // plays from 1.1s), then swings round to the scoring team's fans going wild, then back for kick-off.
-    const scorer = this.sim.goals[this.sim.goals.length - 1];
-    const crowdShot = this.sim.mode === 'match' && this.sim.phase === 'goal' && this.sim.phaseTimer > CROWD_SHOT_AT && scorer
-      ? this.crowd.celebrationShot(scorer.side, this.camera.aspect < 0.9) : null;
-    if (crowdShot && scorer) {
-      this.crowd.celebrate(scorer.side);
+    // Winning a shoot-out gets the same, for the winners.
+    const cheerSide = this.sim.shootout ? this.sim.celebrator?.side : this.sim.mode === 'match' ? this.sim.goals[this.sim.goals.length - 1]?.side : undefined;
+    const crowdShot = cheerSide !== undefined && this.sim.phase === 'goal' && this.sim.phaseTimer > CROWD_SHOT_AT
+      ? this.crowd.celebrationShot(cheerSide, this.camera.aspect < 0.9) : null;
+    if (crowdShot && cheerSide !== undefined) {
+      this.crowd.celebrate(cheerSide);
       if (!this.celebrated) { this.celebrated = true; this.sfx.play('celebrate'); }
     } else if (this.sim.phase !== 'goal') this.celebrated = false;
     const k = 1 - Math.pow(crowdShot ? 0.01 : 0.02, dt);

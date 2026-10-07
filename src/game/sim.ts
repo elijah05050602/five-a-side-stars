@@ -555,6 +555,13 @@ export class MatchSim {
     return ta === tb && a !== b;
   }
 
+  /** The side that has won the shoot-out, or null while it is still going. */
+  shootoutWinner(): Side | null {
+    if (!this.shootout || !this.shootoutDecided()) return null;
+    const [a, b] = this.shootoutScore();
+    return a > b ? 0 : 1;
+  }
+
   private resolveShootoutKick(scored: boolean): void {
     const so = this.shootout!;
     if (so.resolved) return;
@@ -798,7 +805,8 @@ export class MatchSim {
       // The ball carries on into the net, and the net catches it.
       if (!this.ball.owner) this.integrateBall(dt);
       // A match goal holds a little longer so the camera can watch the players and then the fans celebrate (MatchScene).
-      if (this.phaseTimer > (this.mode === 'training' ? 1.6 : this.mode === 'match' && !this.shootout ? GOAL_HOLD : 3.2)) {
+      // In a shoot-out only the winning moment gets the full celebration; other kicks move straight on.
+      if (this.phaseTimer > (this.mode === 'training' ? 1.6 : (this.mode === 'match' && !this.shootout) || (this.shootout && this.celebrator) ? GOAL_HOLD : 3.2)) {
         if (this.shootout) this.advanceShootout();
         else if (this.mode === 'tutorial') return; // the coach puts the ball back
         else if (this.mode === 'training') this.setupKickoff(this.config.humanSide ?? 0);
@@ -1115,7 +1123,14 @@ export class MatchSim {
       const b = this.ball;
       const dir = so.taking === 0 ? 1 : -1;
       const dead = (b.owner && b.owner.isKeeper) || (len(b.vel) < 0.8 && b.y < 0.05) || b.vel.x * dir < -1 || so.timer > 4.5 || this.isOut();
-      if (dead) { this.resolveShootoutKick(false); this.phase = 'goal'; this.phaseTimer = 1.6; }
+      if (dead) {
+        this.resolveShootoutKick(false);
+        this.phase = 'goal';
+        this.phaseTimer = 1.6;
+        // A miss can win it for the other side: they celebrate.
+        const winner = this.shootoutWinner();
+        if (winner !== null) { this.phaseTimer = 0; this.startCelebration(winner, null); }
+      }
     }
   }
 
@@ -1756,7 +1771,8 @@ export class MatchSim {
     const runFor = this.stats.speed * SLIDE_AT;
     this.celebrationSpot = v(clamp(hero.pos.x + away.x * runFor, -this.length * 0.42, this.length * 0.42), clamp(hero.pos.z + away.z * runFor, -this.width * 0.4, this.width * 0.4));
     for (const p of this.players) {
-      p.move = null; p.moveAnim = 0; p.handling = false; p.charge = 0;
+      // A keeper whose save won a shoot-out keeps the ball in their hands.
+      p.move = null; p.moveAnim = 0; p.handling = p.handling && this.ball.owner === p; p.charge = 0;
       if (p.side === side) p.celebrate = p === hero ? (this.goals.length % 2 ? 'slide' : 'plane') : 'huddle';
       else p.celebrate = p.isKeeper ? 'sit' : 'slump';
     }
@@ -3171,7 +3187,12 @@ export class MatchSim {
       this.phase = 'goal';
       this.phaseTimer = 0;
       b.owner = null;
-      if (this.mode === 'match' || this.shootout) this.startCelebration(scoringSide, ownGoal ? null : touch);
+      if (this.shootout) {
+        // Only the kick that wins the shoot-out is celebrated; the others just go in and the next kick follows.
+        const winner = this.shootoutWinner();
+        if (winner !== null) this.startCelebration(winner, touch.side === winner ? touch : null);
+        else this.phaseTimer = 1.2;
+      } else if (this.mode === 'match') this.startCelebration(scoringSide, ownGoal ? null : touch);
       this.events.push({ type: 'goal', side: scoringSide, player: scorer });
     }
   }
