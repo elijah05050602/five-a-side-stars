@@ -180,6 +180,8 @@ export interface SimBall {
   lofted: boolean;
   /** Team-mate whose completed pass set up the current possession; credited with an assist on a goal. */
   assist: SimPlayer | null;
+  /** Where the ball was last kicked from: a keeper has longer to read a shot from far out. */
+  kickedFrom: V2;
   /** A Rocket Shot in flight (harder to save), or a Magic Pass (nobody can cut it out). */
   superShot: boolean;
   superPass: boolean;
@@ -384,7 +386,7 @@ export class MatchSim {
     this.goalWidth = this.stats.goalWidth;
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
-    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null, superShot: false, superPass: false };
+    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null, kickedFrom: v(), superShot: false, superPass: false };
     // Beginner help (Starter) starts from an Easy computer team, whatever was picked before, and then it runs and
     // thinks slower, tackles and saves softer, and shoots worse from closer in. League play keeps its tier's strength.
     const base = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.assist ? 'easy' : config.difficulty];
@@ -1348,9 +1350,11 @@ export class MatchSim {
     p.diveSpeed = clamp(need / (DIVE_AIR * 0.6), this.stats.speed * 0.5, top);
     if (!late) return;
     // A last-moment lunge after a misread. Yours usually gets there (always on the easier levels, less often on Hard,
-    // so the computer still scores some). The computer's stretches out but stops just short of the ball's path, so
-    // young players see the keeper try and still score (the save odds give it a small chance of a fingertip).
-    if (!short && this.isHuman(p.side) && Math.random() < clamp(0.35 + 0.5 * this.diff.humanTackle, 0.5, 1)) p.diveSpeed *= rand(0.8, 1.05);
+    // so the computer still scores some). The computer's gets there now and then on Normal and about half the time on
+    // Hard; otherwise it stretches out but stops just short of the ball's path, so young players see the keeper try
+    // and still score (the save odds give it a small chance of a fingertip).
+    const reaches = this.isHuman(p.side) ? clamp(0.35 + 0.5 * this.diff.humanTackle, 0.5, 1) : clamp((this.diff.tackle - 0.6) * 0.9, 0, 0.6);
+    if (!short && Math.random() < reaches) p.diveSpeed *= rand(0.8, 1.05);
     else p.diveSpeed = (Math.max(0, need - (p.radius + this.ball.radius) - 0.1) * rand(0.5, 0.9)) / (DIVE_AIR * 0.6);
   }
 
@@ -1519,7 +1523,12 @@ export class MatchSim {
         // The computer's keeper is rarely spot on, more so on the easier levels, so young players' shots go in beside
         // them (not through them). Yours reads it anywhere from perfectly to a little off.
         const least = this.isHuman(p.side) ? 0 : clamp(0.4 - 0.3 * this.diff.tackle, 0, 0.3);
-        p.misread = (Math.random() < 0.5 ? -1 : 1) * rand(least, 1) * this.keeperMisread(p);
+        // A shot from far out gives the keeper time to read it: from beyond about a third of the pitch the guess gets
+        // much better, most of all on Hard, so long shots are a real test and only good close-range ones go in easily.
+        const out = Math.abs(b.kickedFrom.x - this.ownGoalX(p.side)) / this.length;
+        const sharpest = this.isHuman(p.side) ? 0.6 : clamp(1.15 - 0.65 * this.diff.tackle, 0.3, 0.8);
+        const far = clamp(1 - (out - 0.3) * 2.5, sharpest, 1);
+        p.misread = (Math.random() < 0.5 ? -1 : 1) * rand(least, 1) * this.keeperMisread(p) * far;
       }
       const predZ = b.pos.z + b.vel.z * t + p.misread;
       targetZ = clamp(predZ, -this.goalWidth / 2 - 0.4, this.goalWidth / 2 + 0.4);
@@ -2060,6 +2069,7 @@ export class MatchSim {
     b.vy = loft > 0 && b.y > 0.05 ? loft - b.y / ((2 * loft) / 9.81) : loft;
     b.lastTouch = p;
     b.lastKick = p;
+    b.kickedFrom = v(p.pos.x, p.pos.z);
     b.flightId++;
     b.penaltyShot = false;
     b.wasPass = false;

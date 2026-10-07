@@ -83,7 +83,7 @@ describe('keepers', () => {
   it('never stand still while a long shot they could reach goes past them', () => {
     // A goal that passed within diving reach of the keeper must have had them diving for it.
     let stood = 0, goals = 0;
-    for (const difficulty of ['easy', 'normal', 'hard'] as Difficulty[]) for (const side of [0, 1] as Side[]) for (let i = 0; i < 20; i++) {
+    for (const difficulty of ['easy', 'normal', 'hard'] as Difficulty[]) for (const side of [0, 1] as Side[]) for (let i = 0; i < 50; i++) {
       const s = new MatchSim({ home, away, difficulty, halfSeconds: 600, humanSide: 0, mode: 'match' });
       s.phase = 'play';
       const shooter = s.players.find((p) => p.side === side && !p.isKeeper)!;
@@ -115,4 +115,34 @@ describe('keepers', () => {
     expect(stood).toBe(0);
   });
 
+
+  it('make your long shots a real test on Hard, while Easy stays generous', () => {
+    // Shots the way a player takes them: hold Shoot to power up, stick pointing at a corner, then let go.
+    const rate = (difficulty: Difficulty, from: number, n = 40) => {
+      let goals = 0;
+      for (let i = 0; i < n; i++) {
+        const s = new MatchSim({ home, away, difficulty, halfSeconds: 600, humanSide: 0, mode: 'match' });
+        s.phase = 'play';
+        const me = s.players.find((p) => p.side === 0 && !p.isKeeper)!;
+        const line = s.goalX(0);
+        for (const p of s.players) if (!p.isKeeper && p !== me) p.pos = { x: -line * 0.8, z: 6 };
+        me.pos = { x: line - from, z: ((i % 5) - 2) * 1.2 };
+        s.players.find((p) => p.side === 1 && p.isKeeper)!.pos = { x: line - 0.7, z: 0 };
+        s.ball.pos = { ...me.pos };
+        s.ball.owner = me;
+        const corner = (i % 2 ? 1 : -1) * s.goalWidth * 0.4;
+        const l = Math.hypot(line - me.pos.x, corner - me.pos.z);
+        const stick = { moveX: (line - me.pos.x) / l, moveZ: (corner - me.pos.z) / l };
+        for (let k = 0; k < (i % 3 ? 45 : 20); k++) s.step(1 / 60, { ...IDLE_INPUT, ...stick, shootHeld: true, shoot: k === 0 });
+        s.step(1 / 60, { ...IDLE_INPUT, ...stick });
+        for (let k = 0; k < 300 && s.phase === 'play' && !s.ball.owner; k++) s.step(1 / 60, IDLE_INPUT);
+        if (s.score[0] > 0) goals++;
+      }
+      return goals / n;
+    };
+    expect(rate('hard', 20)).toBeLessThan(0.1);
+    expect(rate('hard', 20)).toBeLessThan(rate('hard', 8));
+    expect(rate('normal', 20)).toBeLessThan(0.15);
+    expect(rate('easy', 20)).toBeGreaterThan(0.15);
+  });
 });
