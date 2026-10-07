@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Commentator, LINES, classifyShot, goalKey, goalLine, line, placement, type LineKey } from '../game/commentary';
 import { resolveConditions } from '../game/Weather';
-import { IDLE_INPUT } from '../game/sim';
+import { IDLE_INPUT, type TrickKind } from '../game/sim';
 import { cpuMatch, runUntil } from './helpers';
 
 const first = () => 0; // always the first line of a list, so tests are exact
@@ -125,6 +125,21 @@ describe('commentator over a match', () => {
     expect(c.onFrame(sim, 1 / 60)).toBe(`${shooter.info.name} drags it wide!`);
     // Once called, it is not called again.
     expect(c.onFrame(sim, 1 / 60)).toBeNull();
+  });
+
+  it('names each skill move, and speaks a super skill without adding to the ticker', () => {
+    const sim = cpuMatch();
+    runUntil(sim, (s) => s.phase === 'play');
+    const c = new Commentator({ weather: 'clear', time: 'day' }, first);
+    const heard: LineKey[] = [];
+    c.onSay = (key) => heard.push(key);
+    const p = sim.players.find((q) => q.side === 0 && !q.isKeeper)!.info;
+    // The moves after the step-over and nutmeg arrive with PR #62; until then the sim never sends them.
+    const [said] = c.onEvents(sim, [{ type: 'trick', side: 0, player: p, ok: true, kind: 'cruyff' as unknown as TrickKind }]);
+    expect(heard).toEqual(['trickCruyff']);
+    expect(said).toContain(p.name);
+    expect(c.onEvents(sim, [{ type: 'super', side: 0, player: p, superKind: 'rocket' }])).toEqual([null]);
+    expect(heard).toEqual(['trickCruyff', 'superRocket']);
   });
 
   it('fills a quiet spell with something about the play', () => {

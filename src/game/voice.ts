@@ -22,7 +22,7 @@ interface Spoken { srcs: AudioBufferSourceNode[]; gain: GainNode; prio: number; 
 /** How much a line matters: a higher one interrupts a lower one already playing. */
 export function priority(key: LineKey): number {
   if (key.startsWith('goal') || key === 'penalty' || key === 'shootoutOver' || key.startsWith('fulltime')) return 3;
-  if (key.startsWith('save') || key.startsWith('miss') || key === 'shootoutMiss' || key === 'foul' || key.startsWith('halftime') || key.startsWith('kickoff') || key === 'trainingOver' || key === 'lastMinute') return 2;
+  if (key.startsWith('save') || key.startsWith('super') || key.startsWith('miss') || key === 'shootoutMiss' || key === 'foul' || key.startsWith('halftime') || key.startsWith('kickoff') || key === 'trainingOver' || key === 'lastMinute') return 2;
   return 1;
 }
 
@@ -43,16 +43,12 @@ export function pickClip(count: number, last: number | undefined, rng: () => num
  * A recorded line to fall back on for a newer situation that has no clips of
  * its own in the sprite yet. Lines with no fallback are just shown, not spoken.
  */
-export const FALLBACK: Partial<Record<LineKey, LineKey>> = {
-  goalHeader: 'goalLead', goalComeback: 'goalEqualiser', goalTurnaround: 'goalLead', goalTapIn: 'goalLead', missSitter: 'missWide',
-  // Not recorded yet (voice is on hold): a plain goal call, never one that names a corner.
-  goalRoof: 'goalLead', goalLowMiddle: 'goalLead',
-};
+export const FALLBACK: Partial<Record<LineKey, LineKey>> = {};
 
 /**
  * The sprite's own sample rate (SR in tools/audio/split_elevenlabs.py). Decoded
- * at this rate rather than the context's, its 705 s take about 68 MB instead
- * of 124 MB at 44.1 kHz or 135 MB at 48 kHz.
+ * at this rate rather than the context's, its 890 s take about 85 MB instead
+ * of 157 MB at 44.1 kHz or 171 MB at 48 kHz.
  */
 const SPRITE_RATE = 24000;
 /** After a failed download, how long (ms) before a line may try again, so an offline phone is not asked for every line. */

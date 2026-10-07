@@ -91,6 +91,20 @@ export const LINES = {
   goalLowMiddle: ['Straight down the middle from {scorer}! {score}.', 'Under the keeper and in! {scorer}! {score}.', '{scorer} slides it through the middle! {score}.'],
   goalPenaltyCorner: ['{scorer} runs up... GOAL! Right in the corner! {score}.', 'From the spot, {scorer} picks the corner! {score}.'],
   quietChasing: ['Time is running out for {team}. They need a goal!', 'Come on, {team}! Can they find a way back?'],
+  // One group per skill move (see TRICK_LINE); the step-over keeps trickSkill.
+  trickDragback: ['Drag-back from {owner}, and they turn away!', '{owner} rolls it back! Lovely!'],
+  trickCruyff: ['A Cruyff turn from {owner}! Sent them the wrong way!', 'Cruyff turn! Brilliant from {owner}!'],
+  trickRoulette: ['Round and round goes {owner}! A roulette!', '{owner} spins away! What a roulette!'],
+  trickElastico: ['Elastico from {owner}! Out and back in!', 'Ooh, the elastico! Fancy from {owner}!'],
+  trickRainbow: ['Rainbow flick from {owner}! Right over their head!', 'Up and over! A rainbow flick from {owner}!'],
+  trickSwerve: ['Body swerve from {owner}! Wobbled right past!', 'A little shimmy from {owner}, and away!'],
+  // Spoken over a super skill's cutscene. The ticker shows the super's own line (SUPERS in supers.ts), so these are never shown.
+  superRocket: ['ROCKET SHOT! Look at it fly!', 'Here it comes... a ROCKET!'],
+  superTurbo: ['Turbo Dash! Nobody can catch them!', 'Whoosh! Turbo time!'],
+  superMagic: ['A Magic Pass! Nobody can cut it out!', 'Ooh, that is a Magic Pass! Right on the money!'],
+  superBulldozer: ['BULLDOZER! Out of the way!', 'Full Bulldozer! Nobody is stopping that!'],
+  superSlide: ['Super Slide! What a tackle!', 'Whoa! A Super Slide wins it back!'],
+  superGloves: ['Giant Gloves! Good luck scoring now!', 'Look at the size of those gloves!'],
 } as const;
 
 export type LineKey = keyof typeof LINES;
@@ -111,6 +125,16 @@ export function placement(at: { y: number; z: number }, dims: { goalWidth: numbe
   if (low && Math.abs(at.z) < dims.goalWidth * 0.15) return 'lowMiddle';
   return 'plain';
 }
+
+/** The line group for each skill move; any other move (the step-over) is trickSkill. */
+const TRICK_LINE: Partial<Record<string, LineKey>> = {
+  dragback: 'trickDragback', cruyff: 'trickCruyff', roulette: 'trickRoulette', elastico: 'trickElastico', rainbow: 'trickRainbow', feint: 'trickSwerve',
+};
+
+/** The spoken line for each super skill. */
+const SUPER_LINE: Partial<Record<string, LineKey>> = {
+  rocket: 'superRocket', turbo: 'superTurbo', magic: 'superMagic', bulldozer: 'superBulldozer', slide: 'superSlide', gloves: 'superGloves',
+};
 
 const PLACEMENT_LINE: Record<Exclude<Placement, 'plain'>, LineKey> = { topCorner: 'goalTopCorner', bottomCorner: 'goalBottomCorner', roof: 'goalRoof', lowMiddle: 'goalLowMiddle' };
 
@@ -250,7 +274,13 @@ export class Commentator {
         const owner = ev.player?.name ?? 'the dribbler';
         if (ev.ok && ev.kind === 'nutmeg') return this.say('trickNutmeg', { owner });
         if (rng() >= (ev.ok ? 0.5 : 0.35) || !this.chatterDue(12)) return null;
-        return this.say(ev.ok ? 'trickSkill' : 'trickFail', { owner });
+        return this.say(ev.ok ? TRICK_LINE[ev.kind ?? ''] ?? 'trickSkill' : 'trickFail', { owner });
+      }
+      case 'super': {
+        // Spoken only: the cutscene already puts the super's own line on the ticker.
+        const key = SUPER_LINE[ev.superKind ?? ''];
+        if (key) this.onSay?.(key);
+        return null;
       }
       case 'save': {
         const shooter = this.watch && this.watch.side !== ev.side ? this.watch.shooterName : null;

@@ -67,3 +67,10 @@ Record those (`take_17.mp3` onwards), add their Scribe boundaries to
 situation is recorded, `FALLBACK` in `src/game/voice.ts` speaks a similar line
 for big moments, and chatter is shown on the ticker without a voice. Each take
 of ten lines costs about 600 credits on eleven_v3.
+
+Lines can also be recorded one per generation (generations_count 1), which is
+how the October 2026 lines were made: it costs about one credit per
+character, skips the `[long pause]` tags and needs no Scribe cut. Each such
+clip is a batch of one item in the batch list (`batches-2026-10-07.json` in the
+project's audio folder lists every take), with its file as the next
+`take_<n>.mp3`.
