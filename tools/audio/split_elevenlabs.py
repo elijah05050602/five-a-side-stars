@@ -151,7 +151,7 @@ def build(batches_path, takes_dir, hints_path=None):
             if rate < 0.025 or (rate > 0.2 and secs > 2.5):
                 raise ValueError(f'take {n}: "{text}" came out {secs:.2f}s, the cut is probably wrong (pauses {gaps})')
             clips.setdefault(key, []).append((i, seg))
-        print(f'take {n}: {len(pieces)} clips of {min(len(p) for p in pieces) / SR:.1f}-{max(len(p) for p in pieces) / SR:.1f}s, shortest cut pause {min(gaps):.2f}s')
+        print(f'take {n}: {len(pieces)} clips of {min(len(p) for p in pieces) / SR:.1f}-{max(len(p) for p in pieces) / SR:.1f}s, shortest cut pause {min(gaps, default=0):.2f}s')
     gap = np.zeros(int(GAP * SR), dtype=np.float32)
     parts, pos, index = [gap], len(gap), {}
     for key, segs in clips.items():

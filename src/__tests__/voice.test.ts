@@ -24,7 +24,7 @@ describe('recorded commentary', () => {
 
   it('stores the length of the recording it indexes, and every clip ends inside it', () => {
     // ffprobe's length of public/audio/commentary.mp3; the game refuses a recording that differs by more than half a second.
-    expect(sprite.duration).toBeCloseTo(705.24, 2);
+    expect(sprite.duration).toBeCloseTo(890.06, 2);
     for (const [key, clips] of Object.entries(sprite.clips)) for (const [start, d] of clips) expect(start + d, key).toBeLessThan(sprite.duration);
   });
 
