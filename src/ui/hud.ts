@@ -23,8 +23,13 @@ export interface HudRefs {
   update(sim: MatchSim, events: SimEvent[], lines?: (string | null)[]): void;
   /** Show a commentary line in the ticker. */
   say(line: string): void;
-  /** Show or hide the instant replay frame. */
-  setReplay(on: boolean): void;
+  /**
+   * Start or end the goal replay: the buttons, bars and scoreboard go, cinema bars and a film look come in,
+   * and a tap anywhere skips it. `info` names the scorer for the caption.
+   */
+  setReplay(on: boolean, info?: ReplayInfo): void;
+  /** The replay cuts to its slow-motion close-up: a flash, and the scorer's caption slides in. */
+  replayCut(): void;
   /** A super skill's cutscene overlay (or, with `quick`, just its banner for a moment). */
   superStart(kind: SuperKind, who: { number: number; name: string }, yours: boolean, team: string, quick: boolean): void;
   /** Where the hero is on screen, 0..1 across and down, so the glow and speed lines centre on them. */
@@ -34,6 +39,9 @@ export interface HudRefs {
   openSubs(side: Side): void;
   destroy(): void;
 }
+
+/** Who scored, for the replay's caption. `lite` (Low graphics) leaves out the film grain and colour grade. */
+export interface ReplayInfo { name: string; team: string; minute: number; ownGoal: boolean; lite: boolean }
 
 /** What the subs card tells the match. */
 export interface SubsCallbacks {
@@ -83,7 +91,7 @@ function celebrate(root: HTMLElement, kit: { shirt: string; shirt2: string }, si
   if (score) { score.classList.remove('is-pop'); void score.offsetWidth; score.classList.add('is-pop'); }
 }
 
-export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void; onCamera?(): void } & Partial<SubsCallbacks>, coach?: TutorialCoach): HudRefs {
+export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void; onCamera?(): void; onSkipReplay?(): void } & Partial<SubsCallbacks>, coach?: TutorialCoach): HudRefs {
   const [home, away] = sim.teams;
   const mode = sim.mode;
   root.innerHTML = `
@@ -123,7 +131,15 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       </div>
       <div class="hud-banner" id="hud-banner"></div>
       <div id="hud-live" aria-live="polite" style="position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap"></div>
-      <div class="replay-frame" id="replay-frame" hidden><span class="replay-label">▶ REPLAY</span></div>
+      <div class="replay-frame" id="replay-frame" hidden>
+        <div class="rf-grade"></div><div class="rf-grain"></div><div class="rf-vig"></div>
+        <div class="rf-bar rf-top"></div><div class="rf-bar rf-bottom"></div>
+        <span class="replay-label">REPLAY</span>
+        <div class="rf-cap" id="rf-cap"></div>
+        <div class="rf-skip"><span class="rf-skip-touch">Tap to skip</span><span class="rf-skip-keys">Press any button to skip</span></div>
+        <div class="rf-flash"></div>
+        <div class="rf-wipe" aria-hidden="true"></div>
+      </div>
       <div class="hud-comm" id="hud-comm"><span class="hud-comm-mic">🎙️</span><span id="hud-comm-text"></span></div>
       ${touchControlsHtml(getControls().touch)}
       <div class="overlay" id="overlay" hidden></div>
@@ -147,6 +163,17 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   const comm = q('hud-comm');
   const commText = q('hud-comm-text');
   const replayFrame = q('replay-frame');
+  const replayCap = q('rf-cap');
+  const hudEl = root.querySelector<HTMLElement>('.hud')!;
+  let replayTimer = 0;
+  // While the replay plays, a tap anywhere on it skips it.
+  replayFrame.addEventListener('pointerdown', (e) => {
+    if (replayFrame.classList.contains('is-out')) return;
+    e.preventDefault();
+    cb.onSkipReplay?.();
+  });
+  /** Play a one-off CSS animation again from the start. */
+  const replayAnim = (cls: string) => { replayFrame.classList.remove(cls); void replayFrame.offsetWidth; replayFrame.classList.add(cls); };
   const btnTrick = q('btn-trick');
   const superCut = q('super-cut');
   const superRows = [q('bar-super-row'), q('bar-super-row-2')];
@@ -463,7 +490,26 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     btnTrick: q('btn-trick'),
     btnLob: q('btn-lob'),
     say,
-    setReplay(on) { replayFrame.hidden = !on; },
+    setReplay(on, info) {
+      window.clearTimeout(replayTimer);
+      hudEl.classList.toggle('is-replay', on);
+      if (on) {
+        replayFrame.classList.remove('is-out', 'is-slow');
+        replayFrame.classList.toggle('is-lite', !!info?.lite);
+        replayCap.innerHTML = info && info.name
+          ? `<span class="rf-cap-ball" aria-hidden="true">⚽</span><b>${info.ownGoal ? 'Own goal' : esc(info.name)}</b><span class="rf-cap-sub">${esc(info.team)} · ${info.minute}'</span>`
+          : '';
+        replayFrame.hidden = false;
+        replayAnim('is-in');
+        announce('Replay. Tap to skip.');
+      } else if (!replayFrame.hidden) {
+        // The bars slide away behind a last star wipe, then the frame goes.
+        replayFrame.classList.remove('is-in');
+        replayAnim('is-out');
+        replayTimer = window.setTimeout(() => { replayFrame.hidden = true; replayFrame.classList.remove('is-out', 'is-slow'); }, 500);
+      }
+    },
+    replayCut() { replayAnim('is-slow'); },
     superStart(kind, who, yours, team, quick) {
       const info = SUPERS[kind];
       superCut.style.setProperty('--c', info.css);
