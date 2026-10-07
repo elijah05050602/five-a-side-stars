@@ -138,6 +138,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   const barPower = q('bar-power');
   const btnShoot = q('btn-shoot');
   const btnSprint = q('btn-sprint');
+  const btnPass = q('btn-pass');
   const playerBox2 = q('hud-player-box-2');
   const playerLabel2 = q('hud-player-2');
   const barStamina2 = q('bar-stamina-2');
@@ -457,7 +458,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     joystickBase: q('joy'),
     joystickKnob: q('joy-knob'),
     btnShoot,
-    btnPass: q('btn-pass'),
+    btnPass,
     btnSprint,
     btnSwitch: q('btn-switch'),
     btnTrick: q('btn-trick'),
@@ -515,16 +516,22 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         playerLabel.textContent = `#${s.controlled.info.number} ${s.controlled.info.name}`;
         playerBox.style.display = '';
         barStamina.style.width = `${Math.round(s.controlled.stamina * 100)}%`;
-        barPower.style.width = `${Math.round(s.controlled.charge * 100)}%`;
+        // One power bar: red while a shot is powered up, blue while a pass is.
+        const passing = s.controlled.passCharge > 0;
+        barPower.style.width = `${Math.round((passing ? s.controlled.passCharge : s.controlled.charge) * 100)}%`;
         barPower.parentElement!.parentElement!.classList.toggle('is-charging', s.controlled.charge > 0);
+        barPower.parentElement!.parentElement!.classList.toggle('is-passing', passing);
         btnShoot.style.setProperty('--charge', s.controlled.charge.toFixed(2));
+        btnPass.style.setProperty('--charge', s.controlled.passCharge.toFixed(2));
         btnSprint.style.setProperty('--stamina', s.controlled.stamina.toFixed(2));
       } else playerBox.style.display = 'none';
       if (s.controlled2) {
         playerLabel2.textContent = `P2 · #${s.controlled2.info.number} ${s.controlled2.info.name}`;
         playerBox2.style.display = '';
         barStamina2.style.width = `${Math.round(s.controlled2.stamina * 100)}%`;
-        barPower2.style.width = `${Math.round(s.controlled2.charge * 100)}%`;
+        const passing2 = s.controlled2.passCharge > 0;
+        barPower2.style.width = `${Math.round((passing2 ? s.controlled2.passCharge : s.controlled2.charge) * 100)}%`;
+        barPower2.parentElement!.parentElement!.classList.toggle('is-passing', passing2);
       } else playerBox2.style.display = 'none';
       showSupers(s);
       if (subsBtn && subsTxt) {
@@ -636,7 +643,7 @@ const kbd = (a: 'shoot' | 'pass' | 'trick') => `<kbd>${esc(firstKey('solo', a))}
 /** Built on demand so the cards show the player's own key bindings. */
 const TUTORIAL_TEXT = (): Record<Exclude<TutorialStep, 'done'>, { title: string; keys: string; touch: string }> => ({
   move: { title: '1. Run with the ball', keys: `Use <kbd>${esc(moveKeysLabel('solo'))}</kbd> or the stick to dribble to the yellow star.`, touch: 'Drag the joystick to dribble to the yellow star.' },
-  pass: { title: '2. Pass to your team-mate', keys: `Point towards your team-mate and press ${kbd('pass')} to pass.`, touch: 'Point the joystick towards your team-mate and tap <b>Pass</b>.' },
+  pass: { title: '2. Pass to your team-mate', keys: `Point towards your team-mate and press ${kbd('pass')} to pass. Hold it longer for a longer pass.`, touch: 'Point the joystick towards your team-mate and tap <b>Pass</b>. Hold it longer for a longer pass.' },
   shoot: { title: '3. Score a goal!', keys: `Run at goal, hold ${kbd('shoot')} to power up, then let go to shoot.`, touch: 'Run at goal, hold <b>Shoot</b> to power up, then let go.' },
   trick: { title: '4. Show off a trick', keys: `Press ${kbd('trick')} for a step-over. With a defender right in front, it's a nutmeg!`, touch: 'Tap <b>Trick</b> for a step-over. With a defender right in front, it\'s a nutmeg!' },
 });
