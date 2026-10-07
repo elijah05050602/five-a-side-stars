@@ -246,5 +246,5 @@ export function moveKeysLabel(profile: KeyProfile): string {
 /** One plain sentence of a profile's main keys, e.g. "↑ ← ↓ → to move, hold Space to shoot, D to pass...". */
 export function controlsSentence(profile: KeyProfile): string {
   const k = (a: Action) => firstKey(profile, a);
-  return `${moveKeysLabel(profile)} to move, hold ${k('shoot')} to shoot, ${k('pass')} to pass, ${k('lob')} to lob a cross, ${k('sprint')} to sprint, ${k('switch')} to switch, ${k('trick')} for a trick`;
+  return `${moveKeysLabel(profile)} to move, hold ${k('shoot')} to shoot, ${k('pass')} to pass (hold for longer), ${k('lob')} to lob a cross, ${k('sprint')} to sprint, ${k('switch')} to switch, ${k('trick')} for a trick`;
 }

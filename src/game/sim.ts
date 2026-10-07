@@ -119,6 +119,13 @@ export interface SimPlayer {
   misread: number;
   readFlight: number;
   charge: number;
+  /** Seconds Pass has been held for this pass, and the pass meter it has filled (0..1). */
+  passHeld: number;
+  passCharge: number;
+  /** The power of the pass being played (or queued): null for a tap. */
+  passPower: number | null;
+  /** A run in behind the defence: seconds left while positive, seconds of rest before the next while negative. */
+  runTime: number;
   kickKind: KickKind;
   /** Which way the keeper has committed to for a penalty (0 = not yet). */
   penaltyGuess: number;
@@ -223,7 +230,7 @@ export interface GoalEvent {
 }
 
 export interface SimEvent {
-  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'touch' | 'shot' | 'foul' | 'whistle' | 'miss' | 'restart' | 'trick' | 'super' | 'sub';
+  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'touch' | 'shot' | 'foul' | 'whistle' | 'miss' | 'restart' | 'trick' | 'super' | 'sub' | 'mispass';
   /** foul: the set piece awarded; restart: corner, throw-in or goal kick; trick: the skill move. */
   kind?: SetPieceKind | TrickKind;
   side?: Side;
@@ -271,7 +278,7 @@ export interface Shootout {
   kicked: boolean;
 }
 
-export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootHeld: false, pass: false, lob: false, sprint: false, switchPlayer: false, pause: false, trick: false, subs: false };
+export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootHeld: false, pass: false, passHeld: false, lob: false, sprint: false, switchPlayer: false, pause: false, trick: false, subs: false };
 
 /** Grass between the lines and the boards, so the ball can go out for throw-ins, corners and goal kicks. */
 export const RUNOFF_SIDE = 1.2;
@@ -293,6 +300,20 @@ const POST_BOUNCE = 0.6;
 export const DRIBBLE_STRIDE = 0.38;
 /** Seconds a kick-off taker may wait before the ball is played to a team-mate for them. */
 const KICKOFF_WAIT = 8;
+/** Pass held shorter than this is a tap; holding longer fills the pass meter in PASS_FILL seconds. */
+const PASS_TAP = 0.15;
+const PASS_FILL = 0.6;
+/**
+ * How much the game helps a human's pass, by difficulty: a team-mate within `cone` (radians) of the stick is found,
+ * `fix` of the weight is corrected to reach them (the rest is the power the player chose), and `slip` is the base
+ * chance of a misplaced pass (raised by pressure, a low Passing rating, sprinting, tiredness and passing across the body).
+ */
+const PASS_HELP = {
+  starter: { cone: Math.PI / 3, fix: 1, slip: 0 },
+  easy: { cone: Math.PI / 4, fix: 0.85, slip: 0.02 },
+  normal: { cone: Math.PI / 6, fix: 0.5, slip: 0.025 },
+  hard: { cone: Math.PI / 9, fix: 0.2, slip: 0.08 },
+} as const;
 /** Seconds a keeper may hold the ball in their hands before it is lobbed up to the halfway line for them. */
 export const KEEPER_HOLD_LIMIT = 3;
 /** Seconds a match goal stands before kick-off: the players celebrate, then the camera visits the fans. */
@@ -395,6 +416,8 @@ export class MatchSim {
    * gets back), so a turnover never leaves the new defender standing still waiting for input.
    */
   private assist: [boolean, boolean] = [false, false];
+  /** The team-mate a human's held pass would go to: they stop and wait for it. */
+  private passLook: [SimPlayer | null, SimPlayer | null] = [null, null];
   /** Which side had the ball last frame, to spot the moment the other team wins it. */
   private lastOwnerSide: Side | null = null;
   setPiece: SetPiece | null = null;
@@ -459,7 +482,7 @@ export class MatchSim {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), role: info.position, slot: v(info.position === 'GK' ? 0.03 : 0.33, 0), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, lateDive: false, distanceRun: 0, isKeeper: info.position === 'GK',
-          speedMul: this.speedMulFor(info, side, mul), tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, energy: 1, charge: 0, misread: 0, readFlight: -1, kickKind: 'pass', penaltyGuess: 0,
+          speedMul: this.speedMulFor(info, side, mul), tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, energy: 1, charge: 0, passHeld: 0, passCharge: 0, passPower: null, runTime: 0, misread: 0, readFlight: -1, kickKind: 'pass', penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
           celebrate: null, move: null, moveAnim: 0, handling: false, edgeHold: 0, superKind: null, superTime: 0,
           mul, match: freshMatchStats(),
@@ -696,7 +719,7 @@ export class MatchSim {
     this.offStats.delete(info.id);
     p.energy = this.benchEnergy.get(info.id) ?? 1;
     this.benchEnergy.delete(info.id);
-    p.stamina = 1; p.charge = 0; p.kickAnim = 0; p.diveAnim = 0; p.stunAnim = 0; p.recover = 0; p.trickAnim = 0; p.trickKind = null; p.trickBoost = 0;
+    p.stamina = 1; p.charge = 0; p.passHeld = 0; p.passCharge = 0; p.kickAnim = 0; p.diveAnim = 0; p.stunAnim = 0; p.recover = 0; p.trickAnim = 0; p.trickKind = null; p.trickBoost = 0;
     p.celebrate = null; p.move = null; p.moveAnim = 0; p.queued = null; p.superKind = null; p.superTime = 0; p.holdTime = 0;
     if (this.superPending?.p === p) { this.superPending = null; this.superMeter[side] = 1; }
     const b = this.ball;
@@ -1330,18 +1353,35 @@ export class MatchSim {
     if (this.ball.owner === p) {
       // The ball is a step or two ahead between touches: a kick waits until it is back in range.
       const inReach = this.canKick(p);
+      // Pass is tap or hold: holding fills the pass meter (look further away), letting go plays it.
+      let passNow = false;
+      if (input.passHeld && !input.shootHeld) {
+        p.passHeld += _dt;
+        p.passCharge = clamp((p.passHeld - PASS_TAP) / PASS_FILL, 0, 1);
+        // The team-mate it would go to sees it coming and waits for it.
+        const look = l > 0.05 ? norm(want) : v(Math.cos(p.facing), Math.sin(p.facing));
+        this.passLook[p.side] = this.passReceiver(p, look, this.length * (0.12 + 0.48 * p.passCharge), this.passHelp().cone);
+      } else if (p.passHeld > 0 || input.pass) {
+        passNow = true;
+        p.passPower = p.passHeld > PASS_TAP ? p.passCharge : null;
+        p.passHeld = 0;
+        p.passCharge = 0;
+      }
+      if (!input.passHeld || input.shootHeld) this.passLook[p.side] = null;
       if (input.shootHeld) {
         p.charge = Math.min(1, p.charge + _dt / 0.7);
+        p.passHeld = 0;
+        p.passCharge = 0;
       } else if (!inReach) {
-        if (input.pass) p.queued = 'pass';
+        if (passNow) p.queued = 'pass';
         else if (input.lob) p.queued = 'lob';
         else if (input.trick) p.queued = 'trick';
       } else if (p.charge > 0) {
         // Released: a tap is a quick medium shot, a full hold is a rocket.
         this.shoot(p, l > 0.05 ? want : null, 0.85 + 0.45 * p.charge);
         p.charge = 0;
-      } else if (input.pass || p.queued === 'pass') {
-        this.pass(p, l > 0.05 ? want : null);
+      } else if (passNow || p.queued === 'pass') {
+        this.humanPass(p, l > 0.05 ? want : null, p.passPower, sprinting);
       } else if (input.lob || p.queued === 'lob') {
         this.lob(p, l > 0.05 ? want : null);
       } else if (input.trick || p.queued === 'trick') {
@@ -1351,6 +1391,9 @@ export class MatchSim {
     } else {
       p.charge = 0;
       p.queued = null;
+      p.passHeld = 0;
+      p.passCharge = 0;
+      this.passLook[p.side] = null;
     }
   }
 
@@ -1371,7 +1414,9 @@ export class MatchSim {
       if (p !== sp.taker) {
         if (p.isKeeper) { this.driveKeeper(p, dt); return; }
         const t = sp.targets.get(p);
-        if (t) this.moveTowards(p, t, 0.9); else this.steer(p, v(), 30);
+        if (t) this.moveTowards(p, this.inPlay(t), 0.9);
+        else if (this.offPitch(p.pos)) this.moveTowards(p, this.inPlay(p.pos, 1), 0.9); // chased it out: come back on
+        else this.steer(p, v(), 30);
         return;
       }
       if (sp.timer < sp.wait) { this.moveTowards(p, sp.stand, 1.1); return; }
@@ -1472,16 +1517,26 @@ export class MatchSim {
       return;
     }
 
+    if (p.runTime > 0) { p.runTime -= dt; if (p.runTime <= 0) p.runTime = -4; } else p.runTime = Math.min(0, p.runTime + dt);
+    if (!isCpuTeam && teamHasBall && this.passLook[p.side] === p) {
+      // The human is lining up a pass to us: stop and wait for it.
+      this.steer(p, v(), 14);
+      return;
+    }
     if (p.think <= 0) {
       p.think = isCpuTeam ? diff.think : 0.25;
       // The thrower may not touch it again, so a team-mate goes for it instead.
       const chaser = this.nearestOutfield(b.thrower ? mates.filter((q) => q !== b.thrower) : mates, b.pos);
       const ballLoose = b.owner === null;
+      // Chasers may run right up to the line to save a ball, but no further: one that is going out is let go.
+      let margin = 0.6;
       if (ballLoose && b.wasPass && b.receiver === p) {
+        margin = 0.15;
         // The pass is meant for us: go and meet it.
         p.aiTarget = this.interceptPoint(p);
       } else if ((ballLoose || oppHasBall) && chaser === p && this.phase !== 'kickoff') {
         // Chase the ball: run to the point where we can meet it.
+        margin = 0.15;
         p.aiTarget = oppHasBall ? v(b.pos.x + b.vel.x * 0.6, b.pos.z + b.vel.z * 0.6) : this.interceptPoint(p);
       } else if (teamHasBall) {
         // Support: push up and offer a passing lane.
@@ -1495,6 +1550,8 @@ export class MatchSim {
           clamp(sideSign * this.width * lane + (carrier.pos.z * 0.2), -this.width / 2 + 1, this.width / 2 - 1),
         );
         if (p.role === 'DEF') p.aiTarget.x = clamp(p.home.x + (b.pos.x - p.home.x) * 0.5, -this.length / 2 + 2, this.length / 2 - 2);
+        // The human's team-mates read the game: show for the ball, run in behind, find space.
+        if (!isCpuTeam) p.aiTarget = this.supportRun(p, carrier, p.aiTarget, mates, opps);
       } else {
         // Defend: drop between the ball and our goal, near the formation spot.
         const toBall = v(b.pos.x - p.home.x, b.pos.z - p.home.z);
@@ -1526,9 +1583,107 @@ export class MatchSim {
         // Hold formation until the ball moves.
         p.aiTarget = v(p.home.x, p.home.z);
       }
+      // The human is closing the dribbler down: their team-mates pick up the other attackers, one each, goal-side.
+      const mark = !isCpuTeam && oppHasBall && chaser !== p ? this.markFor(p, b.owner!) : null;
+      if (mark) p.aiTarget = v(mark.pos.x + (own - mark.pos.x) * 0.18, mark.pos.z * 0.85);
+      p.aiTarget = this.inPlay(p.aiTarget, margin);
     }
     const chaser = oppHasBall && this.nearestOutfield(this.teamOf(p.side), b.pos) === p;
-    this.moveTowards(p, p.aiTarget, chaser ? 1.12 : 1);
+    this.moveTowards(p, p.aiTarget, chaser || (p.runTime > 0 && teamHasBall) ? 1.12 : 1);
+  }
+
+  /**
+   * Where one of the human's team-mates goes while their side has the ball. The closest one comes short when the
+   * carrier is under pressure, the front players now and then run in behind the last defender, and everyone else
+   * looks around their usual spot (`anchor`) for space with a clear lane from the ball, away from team-mates and out
+   * of the carrier's path.
+   */
+  private supportRun(p: SimPlayer, carrier: SimPlayer, anchor: V2, mates: SimPlayer[], opps: SimPlayer[]): V2 {
+    const s = Math.max(0.8, this.stats.scale);
+    const dir = p.side === 0 ? 1 : -1;
+    const field = opps.filter((o) => !o.isKeeper);
+    const presser = this.nearest(field, carrier.pos);
+    const pressed = presser !== null && dist(presser.pos, carrier.pos) < 2.2 * s;
+    const helpers = mates.filter((m) => m !== carrier && !m.isKeeper && m !== this.controlledBy[p.side]);
+    if (presser && pressed && this.nearest(helpers, carrier.pos) === p) {
+      // Come short at an angle, on our side of the carrier and away from the defender.
+      const away = norm(v(carrier.pos.x - presser.pos.x, carrier.pos.z - presser.pos.z));
+      const side = away.x * (p.pos.z - carrier.pos.z) - away.z * (p.pos.x - carrier.pos.x) >= 0 ? 1 : -1;
+      const r = 3 * s + 1;
+      return this.inPlay(v(carrier.pos.x + (away.x * 0.4 - away.z * side * 0.9) * r, carrier.pos.z + (away.z * 0.4 + away.x * side * 0.9) * r), 1);
+    }
+    const lookingUp = !pressed && Math.cos(carrier.facing) * dir > 0.3;
+    if ((p.role === 'ATT' || p.role === 'WING') && p.runTime === 0 && lookingUp && Math.random() < 0.15) p.runTime = 1.8;
+    if (p.runTime > 0 && lookingUp && field.length) {
+      // Run in behind: past the last defender, but not into the keeper's arms.
+      const last = field.reduce((a, o) => (o.pos.x * dir > a.pos.x * dir ? o : a));
+      const x = Math.max(p.pos.x * dir + 3, last.pos.x * dir + 2.5) * dir;
+      return this.inPlay(v(clamp(x, -this.length / 2 + 2.5, this.length / 2 - 2.5), p.pos.z * 0.6 + anchor.z * 0.4), 1);
+    }
+    if (p.runTime > 0) p.runTime = -4; // the run is off: the carrier is in trouble or looking elsewhere
+    const spacing = 2.5 * s + 0.5;
+    const others = mates.filter((m) => m !== p && !m.isKeeper);
+    // Lanes are judged from where the carrier and the defenders will be in a moment, as the pass would be played.
+    const from = v(carrier.pos.x + carrier.vel.x * 0.4, carrier.pos.z + carrier.vel.z * 0.4);
+    const soon = opps.map((o) => v(o.pos.x + o.vel.x * 0.4, o.pos.z + o.vel.z * 0.4));
+    const score = (c: V2): number => {
+      const near = this.nearest(field, c);
+      // Near their usual spot, but above all somewhere they can get to now.
+      let sc = Math.min(near ? dist(near.pos, c) : 6, 6) * 0.8 - dist(c, anchor) * 0.2 - dist(c, p.pos) * 0.35;
+      const to = v(c.x - from.x, c.z - from.z);
+      const d = len(to), n = norm(to);
+      if (d < 3) sc -= (3 - d) * 2;
+      for (const o of soon) {
+        const rx = o.x - from.x, rz = o.z - from.z;
+        const along = rx * n.x + rz * n.z;
+        if (along > 0.3 && along < d && Math.abs(rx * n.z - rz * n.x) < 1.3) sc -= 6;
+      }
+      // Team-mates count where they are heading; the carrier where they are.
+      for (const m of others) {
+        const md = dist(m === carrier || m === this.controlledBy[p.side] ? m.pos : m.aiTarget, c);
+        if (md < spacing) sc -= (spacing - md) * 1.5;
+      }
+      const ahead = (c.x - carrier.pos.x) * carrier.runDir.x + (c.z - carrier.pos.z) * carrier.runDir.z;
+      const off = Math.abs((c.x - carrier.pos.x) * carrier.runDir.z - (c.z - carrier.pos.z) * carrier.runDir.x);
+      if (ahead > 0 && ahead < 5 * s && off < 1.3) sc -= 4; // in the dribbler's way
+      return sc;
+    };
+    let best = this.inPlay(anchor, 1), bestScore = score(best);
+    // Stay put unless somewhere is clearly better, so nobody dithers.
+    const keep = this.inPlay(p.aiTarget, 1), keepScore = score(keep) + 1.2;
+    if (keepScore > bestScore) { best = keep; bestScore = keepScore; }
+    const r = 2 * s + 0.5;
+    for (const centre of [anchor, p.pos]) {
+      for (let i = 0; i < 8; i++) {
+        const a = (i * Math.PI) / 4;
+        const c = this.inPlay(v(centre.x + Math.cos(a) * r, centre.z + Math.sin(a) * r), 1);
+        const sc = score(c);
+        if (sc > bestScore) { best = c; bestScore = sc; }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * While the human closes down the dribbler, which other attacker this team-mate picks up: the human's other
+   * outfield players share out the attackers in our half, one each, nearest first. Null when nobody needs marking.
+   */
+  private markFor(p: SimPlayer, carrier: SimPlayer): SimPlayer | null {
+    const human = this.controlledBy[p.side];
+    if (!human || dist(human.pos, carrier.pos) > 3.5) return null;
+    const own = this.ownGoalX(p.side);
+    const free = this.teamOf(carrier.side).filter((o) => o !== carrier && !o.isKeeper && Math.abs(o.pos.x - own) < this.length * 0.55);
+    const markers = this.teamOf(p.side).filter((m) => m !== human && !m.isKeeper);
+    const pairs: [SimPlayer, SimPlayer, number][] = [];
+    for (const m of markers) for (const o of free) pairs.push([m, o, dist(m.pos, o.pos)]);
+    pairs.sort((a, c) => a[2] - c[2]);
+    const taken = new Set<SimPlayer>(), busy = new Set<SimPlayer>();
+    for (const [m, o] of pairs) {
+      if (busy.has(m) || taken.has(o)) continue;
+      if (m === p) return o;
+      busy.add(m); taken.add(o);
+    }
+    return null;
   }
 
   /** Keeper with the ball (or taking a goal kick): roll it to an open team-mate, or boot it upfield. */
@@ -1802,6 +1957,14 @@ export class MatchSim {
     return v(b.pos.x + dir.x * stopD, b.pos.z + dir.z * stopD);
   }
 
+  /** The same spot moved at least `margin` inside the lines, so the computer never sends anyone off the pitch. */
+  private inPlay(t: V2, margin = 0.6): V2 {
+    return v(clamp(t.x, -this.length / 2 + margin, this.length / 2 - margin), clamp(t.z, -this.width / 2 + margin, this.width / 2 - margin));
+  }
+
+  /** Over a touchline or goal line. */
+  private offPitch(pos: V2): boolean { return Math.abs(pos.x) > this.length / 2 || Math.abs(pos.z) > this.width / 2; }
+
   private nearest(list: SimPlayer[], pos: V2): SimPlayer | null {
     let best: SimPlayer | null = null, bd = Infinity;
     for (const p of list) { const d = dist(p.pos, pos); if (d < bd) { bd = d; best = p; } }
@@ -1920,6 +2083,12 @@ export class MatchSim {
       const extra = p.isKeeper ? this.goalDepth * 0.5 : 0;
       p.pos.x = clamp(p.pos.x, -L - extra, L + extra);
       p.pos.z = clamp(p.pos.z, -W, W);
+      // Only a set-piece taker, a keeper or the player the human steers may stand over a line; anyone else is eased back to it.
+      if (out > 0.2 && !p.isKeeper && p !== this.setPiece?.taker && this.controlledBy[p.side] !== p) {
+        const ease = 3 * dt, lx = this.length / 2 + 0.2, lz = this.width / 2 + 0.2;
+        if (Math.abs(p.pos.x) > lx) p.pos.x -= Math.sign(p.pos.x) * Math.min(Math.abs(p.pos.x) - lx, ease);
+        if (Math.abs(p.pos.z) > lz) p.pos.z -= Math.sign(p.pos.z) * Math.min(Math.abs(p.pos.z) - lz, ease);
+      }
     }
     if (this.phase === 'kickoff') {
       // The receiving team waits outside the centre circle until the ball is kicked.
@@ -2822,12 +2991,90 @@ export class MatchSim {
     const wobble = (1 - this.stats.control) * 0.35 * p.mul.passWobble;
     const a = Math.atan2(dir.z, dir.x) + rand(-wobble, wobble);
     dir = v(Math.cos(a), Math.sin(a));
-    // Friction slows a rolling ball by about 3.4 m/s each second: kick it hard enough to reach the receiver still moving briskly.
-    const arrive = this.stats.power * 0.45;
-    const speed = clamp(Math.sqrt(arrive * arrive + 2 * 3.4 * d), this.stats.power * 0.6, this.stats.power * 0.95) * speedMul;
-    this.kick(p, dir, speed, 0);
+    this.kick(p, dir, this.passSpeed(d) * speedMul, 0);
     this.ball.wasPass = true;
     this.ball.receiver = mate;
+  }
+
+  /** Friction slows a rolling ball by about 3.4 m/s each second: kick it hard enough to reach `d` metres still moving briskly. */
+  private passSpeed(d: number): number {
+    const arrive = this.stats.power * 0.45;
+    return clamp(Math.sqrt(arrive * arrive + 2 * 3.4 * d), this.stats.power * 0.6, this.stats.power * 0.95);
+  }
+
+  /** How much the game helps this match's human passes (see PASS_HELP). */
+  passHelp(): { cone: number; fix: number; slip: number } {
+    return PASS_HELP[this.config.assist ? 'starter' : this.config.difficulty];
+  }
+
+  /**
+   * A human's pass along the ground. `power` (0..1, from holding Pass) sets how far away to look for a team-mate where
+   * the stick points; a tap (null) looks for a short one. How exactly the ball gets there depends on the difficulty:
+   * Starter always finds them with the right weight, Hard plays the power you chose and can slip.
+   */
+  humanPass(p: SimPlayer, aim: V2 | null, power: number | null, sprinting = false): void {
+    const help = this.passHelp();
+    const look = aim ? norm(aim) : v(Math.cos(p.facing), Math.sin(p.facing));
+    const wantD = power === null ? this.length * 0.18 : this.length * (0.12 + 0.48 * power);
+    let mate = this.passReceiver(p, look, wantD, help.cone);
+    // A tap with nobody where the stick points (or no stick at all) is still a smart pass to the best option.
+    if (!mate && (power === null || !aim)) mate = this.bestPassTarget(p, aim, false, true);
+    let dir: V2;
+    let speed: number;
+    if (mate) {
+      const lead = v(mate.pos.x + mate.vel.x * 0.35, mate.pos.z + mate.vel.z * 0.35);
+      dir = v(lead.x - p.pos.x, lead.z - p.pos.z);
+      const right = this.passSpeed(len(dir));
+      // A tap is weighted for the receiver; a held pass mixes in the power the player chose.
+      speed = power === null ? right : right * help.fix + this.passSpeed(wantD) * (1 - help.fix);
+    } else {
+      dir = look;
+      speed = this.passSpeed(wantD);
+    }
+    const wobble = (1 - this.stats.control) * 0.35 * p.mul.passWobble * (help.slip === 0 ? 0.5 : 1);
+    let a = Math.atan2(dir.z, dir.x) + rand(-wobble, wobble);
+    if (help.slip > 0) {
+      const opp = this.nearest(this.teamOf((1 - p.side) as Side), p.pos);
+      const press = opp ? dist(opp.pos, p.pos) : 99;
+      const across = Math.abs(Math.atan2(Math.sin(a - p.facing), Math.cos(a - p.facing))) > Math.PI * 0.55;
+      // On Easy only a defender right on top of you can make it go astray.
+      const chance = this.config.difficulty === 'easy' && press >= 1.5 ? 0 : Math.min(0.35,
+        help.slip * p.mul.passWobble * (press < 1.5 ? 2 : press < 3 ? 1.4 : 1) * (sprinting ? 1.3 : 1) * (across ? 1.5 : 1) * (2 - p.energy));
+      if (Math.random() < chance) {
+        // A believable slip: either off line or the wrong weight, never both.
+        if (Math.random() < 0.5) a += (Math.random() < 0.5 ? -1 : 1) * rand(0.14, 0.26);
+        else speed *= Math.random() < 0.5 ? 0.72 : 1.25;
+        this.events.push({ type: 'mispass', side: p.side, player: p.info });
+      }
+    }
+    this.kick(p, v(Math.cos(a), Math.sin(a)), clamp(speed, this.stats.power * 0.4, this.stats.power * 1.1), 0);
+    this.ball.wasPass = true;
+    this.ball.receiver = mate;
+  }
+
+  /** The team-mate within `cone` of `look` who best fits a pass of about `wantD` metres: open, with a clear lane. */
+  private passReceiver(from: SimPlayer, look: V2, wantD: number, cone: number): SimPlayer | null {
+    const ownHalf = Math.abs(from.pos.x - this.ownGoalX(from.side)) < this.length * 0.5;
+    const opps = this.teamOf((1 - from.side) as Side);
+    let best: SimPlayer | null = null, bestScore = -Infinity;
+    for (const m of this.teamOf(from.side)) {
+      if (m === from || (m.isKeeper && (from.isKeeper || !ownHalf))) continue;
+      const d = dist(m.pos, from.pos);
+      if (d < 1.5 || d > this.length * 0.75) continue;
+      const lane = norm(v(m.pos.x - from.pos.x, m.pos.z - from.pos.z));
+      const off = Math.acos(clamp(lane.x * look.x + lane.z * look.z, -1, 1));
+      if (off > cone) continue;
+      let blocked = 0;
+      for (const o of opps) {
+        const rel = v(o.pos.x - from.pos.x, o.pos.z - from.pos.z);
+        const along = rel.x * lane.x + rel.z * lane.z;
+        if (along > 0 && along < d && Math.abs(rel.x * lane.z - rel.z * lane.x) < 1.2) blocked++;
+      }
+      const openness = opps.reduce((acc, o) => acc + Math.min(dist(o.pos, m.pos), 6), 0);
+      const score = openness * 0.4 - blocked * 6 - Math.abs(d - wantD) * 1.2 - off * 12 - (m.isKeeper ? 6 : 0);
+      if (score > bestScore) { bestScore = score; best = m; }
+    }
+    return best;
   }
 
   /**

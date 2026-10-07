@@ -5,6 +5,7 @@ export interface InputState {
   shoot: boolean; // pressed this frame
   shootHeld: boolean; // still held (hold to power up a shot)
   pass: boolean; // pressed this frame
+  passHeld: boolean; // still held (hold for a longer pass)
   lob: boolean; // pressed this frame: lofted pass or cross
   sprint: boolean;
   switchPlayer: boolean; // pressed this frame
@@ -227,6 +228,7 @@ export class Input {
       shoot: hit(m.shoot) || padPress('shoot') || this.touchPressed.has('shoot'),
       shootHeld: held(m.shoot) || padHeld('shoot') || this.touchHeld.has('shoot'),
       pass: hit(m.pass) || padPress('pass') || this.touchPressed.has('pass'),
+      passHeld: held(m.pass) || padHeld('pass') || this.touchHeld.has('pass'),
       lob: hit(m.lob) || padPress('lob') || this.touchPressed.has('lob'),
       sprint: held(m.sprint) || padHeld('sprint') || this.touchHeld.has('sprint'),
       switchPlayer: hit(m.switch) || padPress('switch') || this.touchPressed.has('switch'),

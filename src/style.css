@@ -271,6 +271,8 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 .bar-stamina { background: var(--green); }
 .bar-power { background: #e63946; }
 .bar.is-charging { border-color: #e63946; }
+.bar.is-passing { border-color: var(--blue); }
+.bar.is-passing .bar-power { background: var(--blue); }
 .hud-banner { position: absolute; top: 28%; left: 50%; transform: translate(-50%, -50%) scale(0.6); opacity: 0; transition: all 0.25s cubic-bezier(.2,1.6,.4,1); text-align: center; pointer-events: none; }
 .hud-banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 .goal-text { font-size: clamp(60px, 14vw, 140px); font-weight: 700; color: var(--yellow); -webkit-text-stroke: 4px var(--navy); text-shadow: 0 8px 0 var(--navy); line-height: 1; }
@@ -303,9 +305,9 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 .abtn-lob { --d: 64; --x: 104; --y: 96; background: #f4a261; }
 .abtn-switch { --d: 52; --x: 14; --y: 180; background: var(--white); }
 .abtn-trick { --d: 52; --x: 118; --y: 170; background: #8a4fd8; color: var(--white); }
-/* Rings that fill: Shoot's power while it is held, and Sprint's puff. */
-.abtn-shoot::before, .abtn-sprint::before { content: ''; position: absolute; inset: -9px; border-radius: 50%; pointer-events: none; -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px)); }
-.abtn-shoot::before { background: conic-gradient(var(--yellow) calc(var(--charge, 0) * 1turn), transparent 0); }
+/* Rings that fill: Shoot's and Pass's power while they are held, and Sprint's puff. */
+.abtn-shoot::before, .abtn-pass::before, .abtn-sprint::before { content: ''; position: absolute; inset: -9px; border-radius: 50%; pointer-events: none; -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px)); }
+.abtn-shoot::before, .abtn-pass::before { background: conic-gradient(var(--yellow) calc(var(--charge, 0) * 1turn), transparent 0); }
 .abtn-sprint::before { background: conic-gradient(var(--white) calc(var(--stamina, 1) * 1turn), rgba(27,42,65,0.35) 0); }
 /* Left-handed: joystick on the right, buttons mirrored on the left. */
 .touch-controls.is-lefty .joy-area { left: auto; right: 0; }
