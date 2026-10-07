@@ -191,6 +191,8 @@ export interface SimBall {
   /** A Rocket Shot in flight (harder to save), or a Magic Pass (nobody can cut it out). */
   superShot: boolean;
   superPass: boolean;
+  /** Who just took a throw-in: they may not play the ball again until another player has touched it. */
+  thrower: SimPlayer | null;
   /** The goal the ball went into through its mouth (1 at +x, -1 at -x), or 0 while it is out on the pitch or outside the netting. */
   inGoal: -1 | 0 | 1;
 }
@@ -377,6 +379,8 @@ export class MatchSim {
   phase: Phase = 'kickoff';
   /** Match clock in seconds, counts up through both halves. */
   clock = 0;
+  /** The kick-off that starts each half waits with the clock stopped until the ball is played (not one after a goal). */
+  clockHeld = false;
   half: 1 | 2 = 1;
   phaseTimer = 0;
   kickoffSide: Side = 0;
@@ -432,7 +436,7 @@ export class MatchSim {
     this.goalWidth = this.stats.goalWidth;
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
-    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null, kickedFrom: v(), superShot: false, superPass: false, inGoal: 0 };
+    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null, kickedFrom: v(), superShot: false, superPass: false, thrower: null, inGoal: 0 };
     // Beginner help (Starter) starts from an Easy computer team, whatever was picked before, and then it runs and
     // thinks slower, tackles and saves softer, and shoots worse from closer in. League play keeps its tier's strength.
     const base = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.assist ? 'easy' : config.difficulty];
@@ -552,6 +556,7 @@ export class MatchSim {
   /** Put everyone in formation. `side` takes the kickoff. */
   setupKickoff(side: Side): void {
     this.kickoffSide = side;
+    this.clockHeld = this.clock === 0 || this.phase === 'halftime';
     // Subs waiting for a stoppage come on now, straight into their spots (after a goal, or at half time).
     if (this.mode === 'match' && this.clock > 0) {
       if (this.phase === 'halftime') {
@@ -566,6 +571,7 @@ export class MatchSim {
     this.ball.y = 0;
     this.ball.vy = 0;
     this.ball.owner = null;
+    this.ball.thrower = null;
     const L = this.length, W = this.width;
     ([0, 1] as Side[]).forEach((s) => {
       const dir = s === 0 ? 1 : -1; // attacking direction
@@ -786,8 +792,12 @@ export class MatchSim {
       if (this.phaseTimer > 3.5) { this.half = 2; this.setupKickoff(1); }
       return;
     }
-    this.clock += dt;
-    this.tire(dt);
+    // The clock starts when the first kick-off of each half is taken; after a goal it keeps running.
+    if (this.phase !== 'kickoff') this.clockHeld = false;
+    if (!this.clockHeld) {
+      this.clock += dt;
+      this.tire(dt);
+    }
     this.pressureTimer -= dt;
     if (this.phase === 'kickoff') {
       // The taker has to pass or shoot to start play. If nobody does, the ball is played to a team-mate for them.
@@ -1129,6 +1139,13 @@ export class MatchSim {
       this.controlledBy[side] = b.owner; // always control the player on the ball (keeper included)
       return;
     }
+    if (current && current === b.thrower) {
+      // You may not touch your own throw-in again, so you take over the team-mate it was thrown to.
+      const others = outfield.filter((p) => p !== current);
+      this.select(side, b.receiver ?? this.nearest(others, v(b.pos.x + b.vel.x * 0.4, b.pos.z + b.vel.z * 0.4)) ?? current);
+      this.switchHolds[side] = 0;
+      return;
+    }
     const ownerSide = b.owner ? b.owner.side : null;
     const turnover = ownerSide !== null && ownerSide !== side && this.lastOwnerSide === side;
     if (turnover) {
@@ -1457,7 +1474,8 @@ export class MatchSim {
 
     if (p.think <= 0) {
       p.think = isCpuTeam ? diff.think : 0.25;
-      const chaser = this.nearestOutfield(mates, b.pos);
+      // The thrower may not touch it again, so a team-mate goes for it instead.
+      const chaser = this.nearestOutfield(b.thrower ? mates.filter((q) => q !== b.thrower) : mates, b.pos);
       const ballLoose = b.owner === null;
       if (ballLoose && b.wasPass && b.receiver === p) {
         // The pass is meant for us: go and meet it.
@@ -2197,8 +2215,9 @@ export class MatchSim {
     }
     // Loose ball: the closest eligible player within reach controls it.
     let best: SimPlayer | null = null, bd = Infinity;
+    if (b.thrower && b.lastTouch !== b.thrower) b.thrower = null; // someone else has touched it
     for (const p of this.players) {
-      if (p.kickCooldown > 0) continue;
+      if (p.kickCooldown > 0 || p === b.thrower) continue; // no second touch for the thrower
       if (b.superPass && b.lastKick && p.side !== b.lastKick.side) continue; // a Magic Pass cannot be cut out
       const d = dist(p.pos, b.pos);
       const kr = this.reachOf(p);
@@ -2291,6 +2310,7 @@ export class MatchSim {
       else if (!from || from.side !== best.side) b.assist = null;
       b.wasPass = false;
       b.receiver = null;
+      b.thrower = null;
       b.owner = best;
       b.lastTouch = best;
       if (best.isKeeper) {
@@ -2329,6 +2349,7 @@ export class MatchSim {
     b.lofted = false;
     b.superShot = false;
     b.superPass = false;
+    b.thrower = null;
     p.kickCooldown = 0.35;
     p.kickAnim = 1;
     p.kickKind = 'pass';
@@ -2462,6 +2483,7 @@ export class MatchSim {
       for (const q of outfield) targets.set(q, v(q.home.x, q.home.z));
     }
     for (const q of this.players) { q.think = 0.2; q.charge = 0; }
+    this.ball.thrower = null;
     this.setPiece = { kind, side, taker, spot, timer: 0, wait: 0.9, stand, face, placed: false, targets };
     this.phase = 'setpiece';
     if (this.isHuman(side)) this.controlledBy[side] = taker;
@@ -2532,30 +2554,38 @@ export class MatchSim {
     }
   }
 
-  /** Throw-in from over the head: to a team-mate, or (charge >= 0) a long throw where the stick points. */
+  /**
+   * Throw-in from over the head: to a team-mate, or (charge >= 0) a long throw where the stick points. It is thrown
+   * in the air, two-handed, so it carries to the team-mate rather than plopping down at the thrower's feet, and the
+   * thrower may not touch it again until someone else has (the real rule).
+   */
   private throwIn(p: SimPlayer, aim: V2 | null, charge: number): void {
     const long = charge >= 0;
-    const mate = long ? null : this.bestPassTarget(p, aim);
+    // Thrown over heads, so only the team-mate's space matters; a team-mate very close by is the fallback.
+    const mate = long ? null : this.bestPassTarget(p, aim, true) ?? this.bestPassTarget(p, aim);
     let dir: V2;
-    let d: number;
+    let carry: number;
     if (mate) {
-      const lead = v(mate.pos.x + mate.vel.x * 0.3, mate.pos.z + mate.vel.z * 0.3);
+      const lead = v(mate.pos.x + mate.vel.x * 0.5, mate.pos.z + mate.vel.z * 0.5);
       dir = v(lead.x - p.pos.x, lead.z - p.pos.z);
-      d = len(dir);
+      carry = len(dir);
     } else {
       dir = aim ?? v(Math.cos(p.facing), Math.sin(p.facing));
-      d = long ? (5 + 6 * charge) * p.mul.strength : 5; // Strength: a longer long throw
+      // Strength: a longer long throw. Bigger kids on bigger pitches throw further.
+      carry = (long ? 6 + 7 * charge : 6) * p.mul.strength * (0.75 + 0.25 * this.stats.scale);
     }
-    const wobble = (1 - this.stats.control) * 0.3;
+    carry = clamp(carry, 3, this.width * 0.8);
+    const wobble = (1 - this.stats.control) * 0.25;
     const a = Math.atan2(dir.z, dir.x) + rand(-wobble, wobble);
-    const speed = clamp(1.8 + d * 0.55, 3, this.stats.power * 0.55 * (long ? p.mul.strength : 1));
-    this.kick(p, v(Math.cos(a), Math.sin(a)), speed, 1.2);
-    this.ball.vy = 1.2; // released overhead and up, not flattened like a kick off the ground
+    const { speed, vy } = launchForCarry(carry, long ? 3.4 : 2.8, this.stats.power * 0.75 * p.mul.strength);
+    this.ball.y = this.throwHeight();
+    this.kick(p, v(Math.cos(a), Math.sin(a)), speed, vy);
     p.kickAnim = 0; // thrown, not kicked
     this.setMove(p, 'throwIn');
+    this.ball.lofted = true; // checks up as it lands, so the team-mate can bring it down
     this.ball.wasPass = mate !== null;
     this.ball.receiver = mate;
-    this.ball.y = Math.max(this.ball.y, this.throwHeight());
+    this.ball.thrower = p;
     // Released over the line, so the ball does not count as out again before it has moved.
     this.ball.pos.z = clamp(this.ball.pos.z, -this.width / 2, this.width / 2);
   }
