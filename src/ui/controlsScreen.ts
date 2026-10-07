@@ -14,7 +14,7 @@ type Capture = { kind: 'key'; profile: KeyProfile; action: Action; slot: number 
 const PROFILE_LABELS: Record<KeyProfile, string> = { solo: '1 player', p1: '2 players: Player 1', p2: '2 players: Player 2' };
 /** Short lower-case name for notes, e.g. "shoot". */
 const short = (a: Action) => ACTION_LABELS[a].replace(/ \(.*\)$/, '').toLowerCase();
-const ACTION_ICONS: Record<Action, string> = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️', shoot: '🥅', pass: '👟', lob: '🌈', sprint: '⚡', switch: '🔄', trick: '✨', pause: '⏸️' };
+const ACTION_ICONS: Record<Action, string> = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️', shoot: '🥅', pass: '👟', lob: '🌈', sprint: '⚡', switch: '🔄', trick: '✨', pause: '⏸️', subs: '🔁' };
 
 let tab: Tab = window.matchMedia('(pointer: coarse)').matches ? 'touch' : 'keyboard';
 let profile: KeyProfile = 'solo';

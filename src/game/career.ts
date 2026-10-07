@@ -102,10 +102,17 @@ const RATES = {
   save: 0.007, saveHandling: 0.004, cleanSheet: 0.05, keeperKick: 0.004,
 };
 
+/** Who played in a match for `team`, and for how much of it (0 to 1): the starting five in full when the result does not say. */
+export function whoPlayed(team: Team, r: MatchResult): { player: Player; share: number }[] {
+  if (!r.played) return startingFive(team).map((player) => ({ player, share: 1 }));
+  return team.players.filter((p) => (r.played![p.id] ?? 0) > 0).map((player) => ({ player, share: r.played![player.id] }));
+}
+
 /** Turn one match into star progress for one player. Returns the ratings that gained a star. */
-function grow(p: Player, m: PlayerMatchStats, won: boolean, drawn: boolean, cleanSheet: boolean, age: AgeGroup): GrowthEvent[] {
+function grow(p: Player, m: PlayerMatchStats, won: boolean, drawn: boolean, cleanSheet: boolean, age: AgeGroup, share = 1): GrowthEvent[] {
   const gain = zeroSkills();
-  const bonus = RATES.played + (won ? RATES.win : drawn ? RATES.draw : 0);
+  // Turning up and the result count for the share of the match they were on the pitch; what they did counts in full.
+  const bonus = (RATES.played + (won ? RATES.win : drawn ? RATES.draw : 0)) * share;
   for (const k of skillKeys(p.position)) gain[k] += bonus;
   gain.speed += m.goals * 0.005 + m.tackles * 0.005 + m.saves * 0.003;
   // A busy match (lots of involvement) builds Stamina and Strength.
@@ -152,7 +159,7 @@ export function playerOfTheMatch(r: MatchResult): Player | null {
   const score = (m: PlayerMatchStats) => m.goals * 3 + m.assists * 2 + m.saves * 1.2 + m.tackles * 0.6 + m.shots * 0.2 + m.passes * 0.1;
   let best: Player | null = null, bs = 0;
   for (const team of [r.home, r.away]) {
-    for (const p of startingFive(team)) {
+    for (const { player: p } of whoPlayed(team, r)) {
       const m = r.players?.[p.id];
       if (!m) continue;
       const s = score(m);
@@ -184,7 +191,7 @@ export function applyCareerMatch(c: CareerState, team: Team, r: MatchResult, oth
   const growth: GrowthEvent[] = [];
   let fiveStar = false;
   const age = careerAge(c);
-  for (const p of startingFive(team)) {
+  for (const { player: p, share } of whoPlayed(team, r)) {
     const m = r.players?.[p.id] ?? freshMatchStats();
     for (const bucket of [c.seasonStats, c.careerStats]) {
       const s = bucket[p.id] ?? (bucket[p.id] = freshSeasonStats());
@@ -193,7 +200,7 @@ export function applyCareerMatch(c: CareerState, team: Team, r: MatchResult, oth
       if (motm?.id === p.id) s.motm++;
     }
     const had5 = skillKeys(p.position).some((k) => p.skills[k] >= 5);
-    growth.push(...grow(p, m, won, drawn, cleanSheet, age));
+    growth.push(...grow(p, m, won, drawn, cleanSheet, age, share));
     if (!had5 && skillKeys(p.position).some((k) => p.skills[k] >= 5)) fiveStar = true;
   }
   return { growth, motm, fiveStar };

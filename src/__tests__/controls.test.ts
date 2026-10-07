@@ -27,6 +27,19 @@ describe('controls', () => {
     expect(c.pad.lob).toEqual([]);
   });
 
+  it('an older save gets the Subs key and button, unless the player already uses them', () => {
+    const old = defaultControls() as unknown as { keys: Record<string, Record<string, string[]>>; pad: Record<string, number[]> };
+    for (const p of ['solo', 'p1', 'p2']) delete old.keys[p].subs;
+    delete old.pad.subs;
+    old.keys.p1.trick = ['KeyB'];
+    saveControls(old as unknown as ControlsConfig);
+    const c = getControls();
+    expect(c.keys.solo.subs).toEqual(['KeyB']);
+    expect(c.keys.p1.subs).toEqual([]);
+    expect(c.keys.p2.subs).toEqual(['KeyM', 'Numpad3']);
+    expect(c.pad.subs).toEqual([8]);
+  });
+
   it('pass is D and lob is S for one player, and an untouched older save moves over to them', () => {
     const d = defaultControls();
     expect(d.keys.solo.pass[0]).toBe('KeyD');
@@ -36,7 +49,7 @@ describe('controls', () => {
       up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
       shoot: ['Space', 'KeyX', 'KeyK'], pass: ['KeyZ', 'Enter', 'KeyJ'], lob: ['KeyV', 'KeyI'], sprint: ['ShiftLeft', 'ShiftRight', 'KeyL'],
       switch: ['KeyQ', 'KeyE'], trick: ['KeyC', 'KeyU'], pause: ['Escape', 'KeyP'],
-    };
+    } as typeof d.keys.solo; // saved before Subs had a key
     old.camera = { height: 'high', portrait: 'upfield' };
     saveControls(old);
     expect(getControls().keys.solo).toEqual(d.keys.solo);

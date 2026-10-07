@@ -9,6 +9,7 @@ export interface InputState {
   sprint: boolean;
   switchPlayer: boolean; // pressed this frame
   pause: boolean; // pressed this frame
+  subs: boolean; // pressed this frame: open the subs card
   trick: boolean; // pressed this frame: step-over or nutmeg
 }
 
@@ -230,6 +231,7 @@ export class Input {
       sprint: held(m.sprint) || padHeld('sprint') || this.touchHeld.has('sprint'),
       switchPlayer: hit(m.switch) || padPress('switch') || this.touchPressed.has('switch'),
       pause: hit(m.pause) || padPress('pause'),
+      subs: hit(m.subs) || padPress('subs'),
       trick: hit(m.trick) || padPress('trick') || this.touchPressed.has('trick'),
     };
     this.pressed.clear();

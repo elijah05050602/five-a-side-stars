@@ -1,7 +1,7 @@
 import { AGE_STATS, type AgeStats } from '../data/ageGroups';
 import type { Difficulty, Player, Position, SkillKey, Team } from '../data/types';
-import { startingFive } from '../data/defaults';
-import { assignSlots, formationById } from '../data/formations';
+import { extraSubs, startingFive } from '../data/defaults';
+import { assignSlots, canPlay, formationById } from '../data/formations';
 import { averageStars, skillMul } from '../data/skills';
 import type { InputState } from './input';
 import { SUPER_FILL, SUPER_TIME, type SuperKind } from './supers';
@@ -108,6 +108,8 @@ export interface SimPlayer {
   runDir: V2;
   /** 0..1 sprint energy (human-controlled player only). */
   stamina: number;
+  /** 0..1 energy for the whole match: it drains with running (slower with good Stamina) and refills on the bench. */
+  energy: number;
   /** 0..1 shot power being charged while the shoot button is held. */
   /** How far off a keeper's read of the current shot is (metres), and which shot (ball flight) it is for. */
   misread: number;
@@ -209,7 +211,7 @@ export interface SetPiece {
 export interface GoalEvent { side: Side; scorer: Player; minute: number; ownGoal: boolean }
 
 export interface SimEvent {
-  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'touch' | 'shot' | 'foul' | 'whistle' | 'miss' | 'restart' | 'trick' | 'super';
+  type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'touch' | 'shot' | 'foul' | 'whistle' | 'miss' | 'restart' | 'trick' | 'super' | 'sub';
   /** foul: the set piece awarded; restart: corner, throw-in or goal kick; trick: the skill move. */
   kind?: SetPieceKind | TrickKind;
   side?: Side;
@@ -220,6 +222,8 @@ export interface SimEvent {
   header?: boolean;
   /** super: which one. */
   superKind?: SuperKind;
+  /** sub: the player who went off (`player` came on). */
+  off?: Player;
 }
 
 export interface SimConfig {
@@ -255,7 +259,7 @@ export interface Shootout {
   kicked: boolean;
 }
 
-export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootHeld: false, pass: false, lob: false, sprint: false, switchPlayer: false, pause: false, trick: false };
+export const IDLE_INPUT: InputState = { moveX: 0, moveZ: 0, shoot: false, shootHeld: false, pass: false, lob: false, sprint: false, switchPlayer: false, pause: false, trick: false, subs: false };
 
 /** Grass between the lines and the boards, so the ball can go out for throw-ins, corners and goal kicks. */
 export const RUNOFF_SIDE = 1.2;
@@ -285,6 +289,13 @@ const DIVE_AIR = 0.32;
 export const DIVE_AIR_SHARE = DIVE_AIR * DIVE_RATE;
 /** Seconds a keeper with average Reflexes takes to get back up after a dive. */
 export const DIVE_RECOVER = 0.35;
+/** Share of a whole match's energy an average player running at an average rate uses up. */
+const ENERGY_DRAIN = 0.9;
+/** Pace lost with no energy left (a full bar loses none). */
+export const TIRED_SLOWDOWN = 0.08;
+/** The computer brings a player off below this energy, and makes at most this many changes a half. */
+const CPU_SUB_ENERGY = 0.5;
+const CPU_SUBS_PER_HALF = 2;
 
 const DIFF = {
   easy: { speed: 0.85, think: 0.55, accuracy: 0.6, tackle: 0.6, humanTackle: 1.3, shootRange: 0.34 },
@@ -377,6 +388,18 @@ export class MatchSim {
   superMeter: [number, number] = [0, 0];
   /** A super that has been called. It plays out on the next step, so a cutscene can show it first. */
   superPending: { p: SimPlayer; kind: SuperKind; side: Side } | null = null;
+  /** Each side's players waiting on the bench (a live match only). */
+  readonly bench: [Player[], Player[]] = [[], []];
+  /** Energy of the players on the bench, by player id (missing means full). */
+  private readonly benchEnergy = new Map<string, number>();
+  /** Subs picked but waiting for the ball to go dead: the index of the spot in teamOf(side), and who comes on there. */
+  readonly pendingSubs: [Map<number, Player>, Map<number, Player>] = [new Map(), new Map()];
+  /** What players did before they went off, by player id (handed back if they come on again). */
+  private readonly offStats = new Map<string, PlayerMatchStats>();
+  /** Seconds each player has spent on the pitch, by player id. */
+  private readonly secondsOn = new Map<string, number>();
+  /** Changes the computer has made this half, per side. */
+  private cpuSubsMade: [number, number] = [0, 0];
 
   constructor(readonly config: SimConfig) {
     this.teams = [config.home, config.away];
@@ -391,11 +414,14 @@ export class MatchSim {
     // thinks slower, tackles and saves softer, and shoots worse from closer in. League play keeps its tier's strength.
     const base = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.assist ? 'easy' : config.difficulty];
     this.diff = config.assist ? { speed: base.speed * 0.85, think: base.think + 0.3, accuracy: base.accuracy * 0.7, tackle: base.tackle * 0.6, humanTackle: base.humanTackle * 1.3, shootRange: base.shootRange * 0.85 } : base;
-    const diff = this.diff;
     ([0, 1] as Side[]).forEach((side) => {
       const team = this.teams[side];
-      const isCpu = !this.isHuman(side);
       const five = startingFive(team);
+      // Everyone else waits on the bench. A computer team with only its five gets two subs made up for the match.
+      if (this.mode === 'match') {
+        const rest = team.players.filter((pl) => !five.includes(pl));
+        this.bench[side] = rest.length || this.isHuman(side) ? rest : extraSubs(team);
+      }
       // Tutorial: you and one team-mate against a lone keeper.
       const tutorialPair = five.filter((pl) => pl.position !== 'GK').sort((a, b) => (a.position === 'ATT' ? 0 : 1) - (b.position === 'ATT' ? 0 : 1)).slice(0, 2);
       five.forEach((info) => {
@@ -406,7 +432,7 @@ export class MatchSim {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), role: info.position, slot: v(info.position === 'GK' ? 0.03 : 0.33, 0), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, lateDive: false, distanceRun: 0, isKeeper: info.position === 'GK',
-          speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, misread: 0, readFlight: -1, kickKind: 'pass', penaltyGuess: 0,
+          speedMul: this.speedMulFor(info, side, mul), tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, energy: 1, charge: 0, misread: 0, readFlight: -1, kickKind: 'pass', penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
           celebrate: null, move: null, moveAnim: 0, handling: false, edgeHold: 0, superKind: null, superTime: 0,
           mul, match: freshMatchStats(),
@@ -503,6 +529,15 @@ export class MatchSim {
   /** Put everyone in formation. `side` takes the kickoff. */
   setupKickoff(side: Side): void {
     this.kickoffSide = side;
+    // Subs waiting for a stoppage come on now, straight into their spots (after a goal, or at half time).
+    if (this.mode === 'match' && this.clock > 0) {
+      if (this.phase === 'halftime') {
+        this.cpuSubsMade = [0, 0];
+        for (const p of this.players) p.energy = Math.min(1, p.energy + 0.15); // a rest and an orange slice
+      }
+      this.cpuSubs();
+      this.applySubs(false);
+    }
     this.ball.pos = v();
     this.ball.vel = v();
     this.ball.y = 0;
@@ -557,13 +592,154 @@ export class MatchSim {
 
   togglePause(): void {
     if (this.phase === 'paused') this.phase = this.lastPhase;
-    else if (this.phase === 'play' || this.phase === 'kickoff' || this.phase === 'setpiece') { this.lastPhase = this.phase; this.phase = 'paused'; }
+    else if (this.phase === 'play' || this.phase === 'kickoff' || this.phase === 'setpiece' || this.phase === 'goal' || this.phase === 'halftime') { this.lastPhase = this.phase; this.phase = 'paused'; }
+  }
+
+  /** Paused, or the phase that was paused. */
+  private get livePhase(): Phase { return this.phase === 'paused' ? this.lastPhase : this.phase; }
+
+  /** The ball is out of play, so a sub can come on now (or, after a goal or at half time, at the kick-off). */
+  ballDead(): boolean {
+    const ph = this.livePhase;
+    return ph === 'kickoff' || ph === 'goal' || ph === 'halftime' || (ph === 'setpiece' && this.setPiece?.kind !== 'penalty');
+  }
+
+  /** Whether this side can make subs at all: a live match with someone on the bench. */
+  canSub(side: Side): boolean { return this.mode === 'match' && !this.shootout && this.bench[side].length > 0; }
+
+  /** A player's energy, on the pitch or on the bench. */
+  energyOf(id: string): number {
+    return this.players.find((p) => p.id === id)?.energy ?? this.benchEnergy.get(id) ?? 1;
+  }
+
+  /**
+   * Pick a side's line-up: `lineup[i]` is who should be in teamOf(side)[i]'s spot. Players from the bench
+   * come on at the next stoppage (straight away if the ball is already dead). Picking the player who is
+   * there already cancels a sub that was waiting.
+   */
+  requestSubs(side: Side, lineup: string[]): void {
+    if (!this.canSub(side)) return;
+    const team = this.teamOf(side);
+    const pending = this.pendingSubs[side];
+    pending.clear();
+    const used = new Set<string>();
+    lineup.forEach((id, i) => {
+      const p = team[i];
+      if (!p || id === p.id || used.has(id)) return;
+      const info = this.bench[side].find((b) => b.id === id);
+      if (!info) return;
+      used.add(id);
+      pending.set(i, info);
+    });
+    if (!pending.size || !this.ballDead() || this.livePhase === 'goal' || this.livePhase === 'halftime') return; // those wait for the kick-off
+    if (this.livePhase === 'kickoff') this.phaseTimer = 0;
+    this.applySubs(this.livePhase === 'setpiece');
+  }
+
+  /** Bring on every sub that is waiting. `runOn`: they run on from the bench (a set piece) rather than appear in their spot (a kick-off). */
+  private applySubs(runOn: boolean): void {
+    for (const side of [0, 1] as Side[]) {
+      const pending = this.pendingSubs[side];
+      if (!pending.size) continue;
+      const team = this.teamOf(side);
+      for (const [i, info] of pending) if (team[i] && this.bench[side].includes(info)) this.swapIn(team[i], info, runOn);
+      pending.clear();
+    }
+  }
+
+  /** Where a sub steps on: the near touchline, just inside their own half by the team's bench. */
+  benchSpot(side: Side): V2 {
+    return v((side === 0 ? -1 : 1) * 1.2, this.width / 2 + 0.5);
+  }
+
+  /** `info` comes on in `p`'s place. The spot in the formation (and the keeper's gloves) stay; the person changes. */
+  private swapIn(p: SimPlayer, info: Player, runOn: boolean): void {
+    const off = p.info;
+    const side = p.side;
+    this.offStats.set(off.id, p.match);
+    this.benchEnergy.set(off.id, p.energy);
+    this.bench[side] = [...this.bench[side].filter((b) => b !== info), off];
+    p.info = info;
+    p.id = info.id;
+    p.mul = skillMuls(info, this.config.home.ageGroup);
+    p.speedMul = this.speedMulFor(info, side, p.mul);
+    p.match = this.offStats.get(info.id) ?? freshMatchStats();
+    this.offStats.delete(info.id);
+    p.energy = this.benchEnergy.get(info.id) ?? 1;
+    this.benchEnergy.delete(info.id);
+    p.stamina = 1; p.charge = 0; p.kickAnim = 0; p.diveAnim = 0; p.stunAnim = 0; p.recover = 0; p.trickAnim = 0; p.trickKind = null; p.trickBoost = 0;
+    p.celebrate = null; p.move = null; p.moveAnim = 0; p.queued = null; p.superKind = null; p.superTime = 0; p.holdTime = 0;
+    if (this.superPending?.p === p) { this.superPending = null; this.superMeter[side] = 1; }
+    const b = this.ball;
+    if (b.assist === p) b.assist = null;
+    if (b.receiver === p) b.receiver = null;
+    const sp = this.livePhase === 'setpiece' ? this.setPiece : null;
+    if (runOn && sp) {
+      // The referee waits while the new player runs on from the bench. If they are taking it, they walk over to the ball.
+      const from = this.benchSpot(side);
+      p.pos = v(from.x, from.z);
+      p.vel = v();
+      p.handling = false;
+      const run = clamp(dist(from, sp.taker === p ? sp.stand : p.home) / (this.stats.speed * 0.9) + 0.3, 1.5, 5);
+      if (sp.taker === p) {
+        if (b.owner === p) b.owner = null;
+        sp.placed = false;
+      }
+      sp.wait = Math.max(sp.wait, sp.timer + run);
+    }
+    this.events.push({ type: 'sub', side, player: info, off });
+  }
+
+  /** The computer brings off tired players for fresher ones, at half time and at stoppages in the second half. */
+  private cpuSubs(): void {
+    if (this.mode !== 'match' || this.half !== 2) return;
+    for (const side of [0, 1] as Side[]) {
+      if (this.isHuman(side) || !this.bench[side].length) continue;
+      const team = this.teamOf(side);
+      const pending = this.pendingSubs[side];
+      const tired = team.map((p, i) => ({ p, i })).filter(({ p, i }) => p.energy < CPU_SUB_ENERGY && !pending.has(i)).sort((a, c) => a.p.energy - c.p.energy);
+      for (const { p, i } of tired) {
+        if (this.cpuSubsMade[side] >= CPU_SUBS_PER_HALF) break;
+        const taken = new Set([...pending.values()]);
+        const fresh = this.bench[side].filter((b) => !taken.has(b) && (this.benchEnergy.get(b.id) ?? 1) > 0.7 && (p.isKeeper ? b.position === 'GK' : b.position !== 'GK'));
+        // Someone who plays that position if possible, then whoever has the most left in their legs.
+        const score = (b: Player) => (canPlay(b).includes(p.role) ? 1 : 0) + (this.benchEnergy.get(b.id) ?? 1) * 0.5;
+        const pickOne = fresh.sort((a, c) => score(c) - score(a))[0];
+        if (!pickOne) continue;
+        pending.set(i, pickOne);
+        this.cpuSubsMade[side]++;
+      }
+    }
+  }
+
+  /** Running pace from the Speed stars, the Speedy perk and the difficulty. */
+  private speedMulFor(info: Player, side: Side, mul: SkillMuls): number {
+    return (this.isHuman(side) ? 1 : this.diff.speed) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed;
+  }
+
+  /** Energy drains with running and refills on the bench; the clock on each player's time on the pitch ticks. */
+  private tire(dt: number): void {
+    if (this.mode !== 'match') return;
+    const match = this.config.halfSeconds * 2;
+    for (const p of this.players) {
+      this.secondsOn.set(p.id, (this.secondsOn.get(p.id) ?? 0) + dt);
+      const effort = 0.25 + 0.75 * Math.min(1, len(p.vel) / this.stats.speed);
+      p.energy = Math.max(0, p.energy - (dt * effort * ENERGY_DRAIN) / match / p.mul.stamina);
+    }
+    for (const side of [0, 1] as Side[]) for (const b of this.bench[side]) {
+      const e = this.benchEnergy.get(b.id);
+      if (e !== undefined && e < 1) this.benchEnergy.set(b.id, Math.min(1, e + (dt * 3) / match));
+    }
   }
 
   /** Advance the simulation. dt is seconds (call with a fixed step). */
   step(dt: number, input: InputState, input2?: InputState): void {
     this.stepDt = dt;
     if (this.phase === 'paused' || this.phase === 'fulltime') return;
+    if ((this.pendingSubs[0].size || this.pendingSubs[1].size) && (this.phase === 'kickoff' || (this.phase === 'setpiece' && this.setPiece?.kind !== 'penalty'))) {
+      if (this.phase === 'kickoff') this.phaseTimer = 0; // time for the new player to settle before the kick-off is taken for them
+      this.applySubs(this.phase === 'setpiece');
+    }
     if (this.phase === 'goal') {
       this.phaseTimer += dt;
       this.stepCelebration(dt);
@@ -586,6 +762,7 @@ export class MatchSim {
       return;
     }
     this.clock += dt;
+    this.tire(dt);
     this.pressureTimer -= dt;
     if (this.phase === 'kickoff') {
       // The taker has to pass or shoot to start play. If nobody does, the ball is played to a team-mate for them.
@@ -1658,12 +1835,11 @@ export class MatchSim {
 
   /**
    * Running pace multiplier: Speed stars, the Speedy perk and difficulty, less
-   * a little tiredness as the match wears on. Good Stamina keeps more of it.
+   * a little for tiredness (see `energy`).
    */
   pace(p: SimPlayer): number {
-    const late = this.mode === 'match' ? clamp(this.clock / (this.config.halfSeconds * 2), 0, 1) : 0;
     const boost = p.superKind === 'turbo' ? 1.5 : p.superKind === 'bulldozer' ? 1.25 : 1;
-    return p.speedMul * boost * (1 - (0.05 * late) / p.mul.stamina);
+    return p.speedMul * boost * (1 - TIRED_SLOWDOWN * (1 - p.energy));
   }
 
   /** How far a foot reaches from the body to play the ball. */
@@ -2217,6 +2393,7 @@ export class MatchSim {
     this.phase = 'setpiece';
     if (this.isHuman(side)) this.controlledBy[side] = taker;
     this.events.push({ type: 'restart', kind, side });
+    this.cpuSubs();
   }
 
   /** The dead ball stops rolling and stays near the line while the taker walks over. */
@@ -2400,10 +2577,19 @@ export class MatchSim {
     this.events.push({ type: 'trick', kind: 'stepover', side: p.side, player: p.info, ok: ok && near.length > 0 });
   }
 
-  /** Each starter's match stats by player id (for player of the match and career growth). */
+  /** Match stats by player id for everyone who played, subs included (for player of the match and career growth). */
   playerStats(): Record<string, PlayerMatchStats> {
     const out: Record<string, PlayerMatchStats> = {};
+    for (const [id, m] of this.offStats) out[id] = { ...m };
     for (const p of this.players) out[p.id] = { ...p.match };
+    return out;
+  }
+
+  /** How much of the match each player was on the pitch for, 0 to 1, by player id. */
+  playedShare(): Record<string, number> {
+    const out: Record<string, number> = {};
+    const match = this.config.halfSeconds * 2;
+    for (const [id, s] of this.secondsOn) out[id] = clamp(s / match, 0, 1);
     return out;
   }
 

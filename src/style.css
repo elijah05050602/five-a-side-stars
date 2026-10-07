@@ -226,6 +226,33 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 .sb-clock > span:first-child { min-width: 4.4ch; text-align: center; }
 .sb-clock { grid-column: 1 / -1; display: flex; justify-content: center; gap: 10px; font-size: 15px; font-weight: 600; color: #3a4a63; }
 .hud-pause { position: absolute; top: 12px; right: 12px; width: 52px; height: 52px; border-radius: 50%; border: 3px solid var(--navy); background: var(--card); font-size: 20px; font-weight: 700; color: var(--navy); cursor: pointer; box-shadow: 0 4px 0 var(--navy); }
+.hud-subs { position: absolute; top: 74px; right: 12px; width: 52px; height: 52px; padding: 0; border-radius: 50%; border: 3px solid var(--navy); background: var(--card); color: var(--navy); font: 700 18px var(--font); line-height: 1; cursor: pointer; box-shadow: 0 4px 0 var(--navy); display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.hud-subs[hidden] { display: none; }
+.hud-subs-txt { font-size: 10px; margin-top: 2px; }
+/* The ball has gone dead: the button pops a few times so children notice they can make a change. A sub waiting turns it green. */
+.hud-subs.is-ready { background: var(--yellow); animation: subs-pop 0.8s ease-in-out 3; }
+.hud-subs.is-waiting { background: var(--green); color: #fff; }
+@keyframes subs-pop { 50% { transform: scale(1.12); } }
+.subs-card { width: min(640px, 94vw); }
+.subs-card h2 { font-size: 34px; }
+.subs-status { min-height: 2.6em; margin: 0; }
+.subs-label { align-self: flex-start; font-weight: 700; }
+.subs-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; width: 100%; padding: 10px; border: 3px solid var(--navy); border-radius: 16px; box-sizing: border-box; }
+.subs-pitch { background: #3fbf6a; }
+.subs-bench { background: #dfe7f1; border-style: dashed; min-height: 60px; }
+.subs-player { position: relative; width: 100px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 6px 9px; background: var(--card); color: var(--navy); border: 3px solid var(--navy); border-radius: 14px; box-shadow: 0 3px 0 var(--navy); font: 700 14px var(--font); cursor: grab; }
+.subs-num { width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--navy); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 15px; text-shadow: -1px -1px 0 var(--navy), 1px -1px 0 var(--navy), -1px 1px 0 var(--navy), 1px 1px 0 var(--navy); }
+.subs-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subs-pos { font-size: 11px; font-weight: 600; opacity: 0.75; }
+.subs-energy { width: 80%; height: 7px; border-radius: 4px; background: #dfe7f1; overflow: hidden; }
+.subs-energy i { display: block; height: 100%; background: var(--green); border-radius: 4px; }
+.subs-energy i.is-low { background: var(--orange); }
+.subs-chip { font-size: 10px; padding: 1px 6px; }
+.subs-player.is-on { background: #fff7cf; }
+.subs-player.is-off { opacity: 0.8; }
+.subs-player.is-picked, .subs-player.is-drop-target { outline: 4px solid var(--orange); outline-offset: 2px; }
+.subs-player.is-lifted { transform: scale(1.05); box-shadow: 0 8px 0 var(--navy); }
+.subs-player.is-dragging { opacity: 0.5; }
 .hud-player-box { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 6px; }
 .hud-player { background: var(--yellow); border: 3px solid var(--navy); border-radius: 999px; padding: 5px 14px; font-weight: 700; font-size: 16px; align-self: flex-start; box-shadow: 0 3px 0 var(--navy); }
 .bar { display: flex; align-items: center; gap: 8px; background: var(--card); border: 2px solid var(--navy); border-radius: 999px; padding: 3px 10px; width: 170px; }
@@ -715,6 +742,7 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .touch-controls.is-lefty .joystick { right: calc(24px + env(safe-area-inset-right)); }
 .touch-controls.is-lefty .action-buttons { left: calc(20px + env(safe-area-inset-left)); }
 .hud-pause { top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); }
+.hud-subs { top: calc(74px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); }
 .hud-player-box { top: calc(12px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); }
 .scoreboard { top: env(safe-area-inset-top); }
 
@@ -727,6 +755,10 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
   .sb-score { font-size: 22px; gap: 5px; }
   .sb-clock { font-size: 12px; }
   .hud-pause { width: 44px; height: 44px; font-size: 16px; }
+  .hud-subs { width: 44px; height: 44px; font-size: 15px; top: calc(64px + env(safe-area-inset-top)); }
+  .subs-player { width: 88px; padding: 5px 4px 6px; font-size: 13px; }
+  .subs-num { width: 26px; height: 26px; font-size: 13px; }
+  .subs-card h2 { font-size: 24px; }
   .hud-player { display: none; }
   .hud-player-box { gap: 4px; }
   .bar { width: 120px; padding: 2px 8px; }
@@ -751,6 +783,8 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
   .sb-score { font-size: 22px; gap: 4px; }
   .sb-clock { font-size: 12px; }
   .hud-pause { width: 44px; height: 44px; font-size: 16px; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); }
+  .hud-subs { width: 44px; height: 44px; font-size: 15px; top: calc(60px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); }
+  .subs-player { width: 86px; }
   /* Sprint and power sit under the scoreboard instead of beside it. */
   .hud-player { display: none; }
   .hud-player-box { top: calc(66px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); flex-direction: row; gap: 6px; }
