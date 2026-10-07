@@ -15,6 +15,8 @@ const len = (a: V2) => Math.hypot(a.x, a.z);
 const dist = (a: V2, b: V2) => Math.hypot(a.x - b.x, a.z - b.z);
 const norm = (a: V2): V2 => { const l = len(a); return l > 1e-6 ? v(a.x / l, a.z / l) : v(); };
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+/** Eased 0 to 1 over 0..1. */
+const smooth = (n: number) => { const t = clamp(n, 0, 1); return t * t * (3 - 2 * t); };
 const rand = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
 /** Roughly a bell curve, mean 0 and spread 1, never beyond 3. */
 const randn = () => (Math.random() + Math.random() + Math.random() - 1.5) * 2;
@@ -132,8 +134,10 @@ export interface SimPlayer {
   /** 1 when a skill move starts, fading to 0 (drives the animation). */
   trickAnim: number;
   trickKind: TrickKind | null;
-  /** Which way a step-over feints: -1 or 1 across the kid's body. */
+  /** Which way the move goes across the kid's body: -1 or 1 (the feint of a step-over, the flick of an elastico, the spin of a roulette). */
   trickDir: number;
+  /** The way the kid was heading when the move started, so a turn (drag-back, Cruyff, roulette) can be drawn turning round. */
+  trickFrom: number;
   /** Seconds before another skill move is allowed. */
   trickCooldown: number;
   /** Seconds of burst left after a skill move that worked. */
@@ -157,7 +161,14 @@ export interface SimPlayer {
   match: PlayerMatchStats;
 }
 
-export type TrickKind = 'stepover' | 'nutmeg';
+/**
+ * The skill moves the trick button can do. Which one depends on the stick and on where the defenders are:
+ * pull back for a drag-back or a Cruyff turn, push sideways for an elastico or (with someone in the way) a roulette,
+ * and with a defender right in front a nutmeg or a rainbow flick. Otherwise a step-over or a body swerve.
+ */
+export type TrickKind = 'stepover' | 'nutmeg' | 'feint' | 'dragback' | 'cruyff' | 'roulette' | 'elastico' | 'rainbow';
+/** How fast each move's animation runs (trickAnim falls by this much a second): the spins and flicks take longer. */
+export const TRICK_RATE: Record<TrickKind, number> = { stepover: 2.2, nutmeg: 2.2, feint: 2.6, dragback: 2.1, cruyff: 1.8, roulette: 1.6, elastico: 2.0, rainbow: 1.7 };
 /** Goal celebrations: a knee slide or aeroplane run for the scorer, a huddle for the team, and gloom for the other side. */
 export type Celebration = 'slide' | 'plane' | 'huddle' | 'slump' | 'sit';
 /** One-off moves the models act out: keeper handling, headers and first touches off a high ball. */
@@ -483,7 +494,7 @@ export class MatchSim {
           radius: 0.28 * this.stats.scale + 0.08, home: v(), role: info.position, slot: v(info.position === 'GK' ? 0.03 : 0.33, 0), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, lateDive: false, distanceRun: 0, isKeeper: info.position === 'GK',
           speedMul: this.speedMulFor(info, side, mul), tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, energy: 1, charge: 0, passHeld: 0, passCharge: 0, passPower: null, runTime: 0, misread: 0, readFlight: -1, kickKind: 'pass', penaltyGuess: 0,
-          trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
+          trickAnim: 0, trickKind: null, trickDir: 1, trickFrom: 0, trickCooldown: 0, trickBoost: 0,
           celebrate: null, move: null, moveAnim: 0, handling: false, edgeHold: 0, superKind: null, superTime: 0,
           mul, match: freshMatchStats(),
         };
@@ -881,7 +892,7 @@ export class MatchSim {
       p.kickAnim = Math.max(0, p.kickAnim - dt * 4);
       this.tickMove(p, dt);
       this.tickDive(p, dt);
-      p.trickAnim = Math.max(0, p.trickAnim - dt * 2.2);
+      p.trickAnim = Math.max(0, p.trickAnim - dt * TRICK_RATE[p.trickKind ?? 'stepover']);
       p.trickBoost = Math.max(0, p.trickBoost - dt);
       p.trickCooldown = Math.max(0, p.trickCooldown - dt);
       if (p.trickAnim <= 0) p.trickKind = null;
@@ -1501,11 +1512,20 @@ export class MatchSim {
             return;
           }
         }
-        // Now and then a cornered dribbler tries a step-over or a nutmeg instead of passing.
+        // Now and then a cornered dribbler tries a skill move instead of passing: straight on,
+        // sideways away from the defender, or turning back away from them.
         if (tight && p.trickCooldown <= 0 && Math.random() < (isCpuTeam ? 0.02 + 0.025 * diff.accuracy : 0.03)) {
-          this.trick(p, null);
           const g = norm(v(goal.x - p.pos.x, goal.z - p.pos.z));
-          p.aiTarget = v(p.pos.x + g.x * 3, p.pos.z + g.z * 3);
+          const r = Math.random();
+          let aim: V2 | null = null;
+          if (nearestOpp && r > 0.45) {
+            const away = norm(v(p.pos.x - nearestOpp.pos.x, p.pos.z - nearestOpp.pos.z));
+            const across = v(-g.z, g.x), sd = away.x * across.x + away.z * across.z >= 0 ? 1 : -1;
+            aim = r > 0.8 ? away : v(across.x * sd, across.z * sd);
+          }
+          this.trick(p, aim);
+          const go = aim && p.trickKind !== 'nutmeg' && p.trickKind !== 'rainbow' ? norm(v(g.x + aim.x * 1.5, g.z + aim.z * 1.5)) : g;
+          p.aiTarget = v(p.pos.x + go.x * 3, p.pos.z + go.z * 3);
           return;
         }
         if (tight || p.holdTime > 0.7) {
@@ -2177,7 +2197,9 @@ export class MatchSim {
       const speed = len(o.vel);
       // A keeper holding it has it tucked in at the chest; anyone else has it just ahead of their feet.
       const ahead = o.isKeeper && o.handling ? 0.42 * this.stats.scale + 0.05 : 0.3 * this.stats.scale + 0.15;
-      const feet = v(o.pos.x + Math.cos(o.facing) * ahead, o.pos.z + Math.sin(o.facing) * ahead);
+      const fc = Math.cos(o.facing), fs = Math.sin(o.facing);
+      const tb = this.trickBallOffset(o);
+      const feet = v(o.pos.x + fc * (ahead + tb.along) - fs * tb.across, o.pos.z + fs * (ahead + tb.along) + fc * tb.across);
       const toFeet = dist(b.pos, feet);
       // Keepers hold it, set-piece takers and kick-off takers stand on it, and a kid
       // who stops with the ball nearby traps it under their foot.
@@ -2814,15 +2836,26 @@ export class MatchSim {
   /** Running pace while a trick plays: slower during the feint, a burst once it has worked. */
   private trickPace(p: SimPlayer): number {
     if (p.trickBoost > 0) return 1.22;
-    if (p.trickKind === 'stepover' && p.trickAnim > 0.45) return 0.7;
-    return 1;
+    if (p.trickAnim <= 0) return 1;
+    switch (p.trickKind) {
+      case 'stepover': return p.trickAnim > 0.45 ? 0.7 : 1;
+      case 'feint': return p.trickAnim > 0.5 ? 0.8 : 1;
+      case 'elastico': return p.trickAnim > 0.4 ? 0.65 : 1;
+      // Turns stop the kid nearly dead while the ball is pulled round.
+      case 'dragback': return p.trickAnim > 0.4 ? 0.3 : 1;
+      case 'cruyff': return p.trickAnim > 0.35 ? 0.3 : 1;
+      case 'roulette': return p.trickAnim > 0.2 ? 0.5 : 1;
+      default: return 1;
+    }
   }
 
   /**
-   * The trick button. With a defender right in front it is a nutmeg: the ball goes
-   * through their legs and the dribbler runs round to collect it. Otherwise it is a
-   * step-over that sends nearby defenders the wrong way. Both can fail, more often
-   * for the little age groups.
+   * The trick button: a skill move, chosen by the stick and by where the defenders are.
+   * - Stick pulled back against the run: a drag-back or a Cruyff turn, leaving the defender running the wrong way.
+   * - A defender right in front: a nutmeg through their legs, or (for the bigger kids) a rainbow flick over their head.
+   * - Stick sideways with someone in the way: a roulette spin round them, or an elastico.
+   * - Stick sideways in space: an elastico. Straight on: a step-over or a body swerve.
+   * Any of them can fail, more often for the little age groups. A few pick at random, so it is not always the same trick.
    */
   trick(p: SimPlayer, aim: V2 | null): void {
     const b = this.ball;
@@ -2831,19 +2864,40 @@ export class MatchSim {
     p.trickAnim = 1;
     const fwd = aim ? norm(aim) : v(Math.cos(p.facing), Math.sin(p.facing));
     const across = v(-fwd.z, fwd.x);
+    // The way the kid was running (the facing has already turned to the stick).
+    const runSpeed = len(p.vel);
+    const run = runSpeed > 0.8 ? v(p.vel.x / runSpeed, p.vel.z / runSpeed) : fwd;
+    const turn = fwd.x * run.x + fwd.z * run.z;
+    const side = fwd.x * -run.z + fwd.z * run.x; // + when the stick points to the run's right
+    p.trickFrom = Math.atan2(run.z, run.x);
     const skill = clamp(this.stats.control + p.mul.touch, 0.05, 0.98);
     const opps = this.teamOf((1 - p.side) as Side).filter((o) => !o.isKeeper);
     const reach = 1.1 * this.stats.scale + 0.7;
-    let victim: SimPlayer | null = null;
-    let bestAlong = Infinity;
-    for (const o of opps) {
-      const rel = v(o.pos.x - p.pos.x, o.pos.z - p.pos.z);
-      const along = rel.x * fwd.x + rel.z * fwd.z;
-      const perp = Math.abs(rel.x * across.x + rel.z * across.z);
-      if (along > 0.1 && along < reach && perp < 0.75 && along < bestAlong) { bestAlong = along; victim = o; }
-    }
-    if (victim) {
-      p.trickKind = 'nutmeg';
+    const inFront = (dir: V2, far: number): SimPlayer | null => {
+      const ax = v(-dir.z, dir.x);
+      let best: SimPlayer | null = null, bestAlong = Infinity;
+      for (const o of opps) {
+        const rel = v(o.pos.x - p.pos.x, o.pos.z - p.pos.z);
+        const along = rel.x * dir.x + rel.z * dir.z;
+        const perp = Math.abs(rel.x * ax.x + rel.z * ax.z);
+        if (along > 0.1 && along < far && perp < 0.75 && along < bestAlong) { bestAlong = along; best = o; }
+      }
+      return best;
+    };
+    const near = opps.filter((o) => dist(o.pos, p.pos) < 2.4 * this.stats.scale + 0.8);
+    const victim = inFront(fwd, reach);
+    const blocker = inFront(run, reach * 1.4);
+    let kind: TrickKind;
+    if (turn < -0.35) kind = Math.random() < 0.5 ? 'dragback' : 'cruyff';
+    else if (Math.abs(side) > 0.55 && turn < 0.6) kind = blocker && Math.random() < 0.65 ? 'roulette' : 'elastico';
+    // The rainbow flick is for the bigger kids: the little ones cannot get it over a head.
+    else if (victim) kind = this.stats.scale >= 0.8 && Math.random() < 0.3 ? 'rainbow' : 'nutmeg';
+    else kind = Math.random() < 0.55 ? 'stepover' : 'feint';
+    p.trickKind = kind;
+    p.trickDir = kind === 'elastico' || kind === 'roulette' ? (side >= 0 ? 1 : -1) * (Math.abs(side) > 0.3 ? 1 : Math.random() < 0.5 ? -1 : 1) : Math.random() < 0.5 ? -1 : 1;
+    const say = (ok: boolean) => this.events.push({ type: 'trick', kind, side: p.side, player: p.info, ok });
+
+    if (kind === 'nutmeg' && victim) {
       p.kickAnim = 0.7; // a little poke
       p.facing = Math.atan2(fwd.z, fwd.x);
       const ok = Math.random() < 0.35 + 0.5 * skill;
@@ -2864,23 +2918,105 @@ export class MatchSim {
         // Off the shins: the ball pops loose.
         b.vel = v(-fwd.x * 1.5 + rand(-1.5, 1.5), -fwd.z * 1.5 + rand(-1.5, 1.5));
       }
-      this.events.push({ type: 'trick', kind: 'nutmeg', side: p.side, player: p.info, ok });
+      say(ok);
       return;
     }
-    p.trickKind = 'stepover';
-    p.trickDir = Math.random() < 0.5 ? -1 : 1;
-    const ok = Math.random() < 0.45 + 0.45 * skill;
-    const near = opps.filter((o) => dist(o.pos, p.pos) < 2.4 * this.stats.scale + 0.8);
+    if (kind === 'rainbow' && victim) {
+      // Rolled up the back of one leg and flicked off the other heel, up over the defender's head.
+      p.facing = Math.atan2(fwd.z, fwd.x);
+      const ok = Math.random() < 0.25 + 0.5 * skill;
+      b.owner = null;
+      b.lastTouch = p;
+      b.y = Math.max(b.y, b.radius);
+      b.lofted = true;
+      p.kickCooldown = 0.35;
+      if (ok) {
+        const pace = 2.6 + 1.2 * this.stats.scale;
+        b.vel = v(fwd.x * pace, fwd.z * pace);
+        b.vy = 3.6 + 0.8 * this.stats.scale;
+        // The defender looks up for it, turning in a muddle, and the dribbler skips round them.
+        const step = Math.random() < 0.5 ? -1 : 1;
+        victim.vel = v(across.x * step * 1.8, across.z * step * 1.8);
+        victim.kickCooldown = 1.4;
+        victim.tackleTimer = Math.max(victim.tackleTimer, 1.4);
+        victim.stunAnim = Math.max(victim.stunAnim, 0.6);
+        victim.think = 0.9;
+        p.trickBoost = 1.1;
+        p.think = 0;
+      } else {
+        // Not enough on it: it plops down in front of the defender.
+        b.vel = v(fwd.x * 1.2, fwd.z * 1.2);
+        b.vy = 2.4;
+      }
+      say(ok);
+      return;
+    }
+    if (kind === 'dragback' || kind === 'cruyff') {
+      // The ball is pulled back (with the sole, or hooked behind the standing leg after a pretend kick),
+      // and the defender coming in keeps going the way the kid was running.
+      const ok = Math.random() < (kind === 'dragback' ? 0.5 : 0.45) + 0.45 * skill;
+      const fooled = near.filter((o) => {
+        const rel = v(o.pos.x - p.pos.x, o.pos.z - p.pos.z);
+        return rel.x * run.x + rel.z * run.z > -0.3; // ahead of the turn, or alongside it
+      });
+      if (ok) {
+        const lunge = kind === 'cruyff' ? 3 : 2.4;
+        for (const o of fooled) {
+          o.vel = v(run.x * lunge, run.z * lunge);
+          o.tackleTimer = Math.max(o.tackleTimer, 0.8);
+          o.think = 0.6;
+        }
+        p.trickBoost = 0.6;
+      }
+      say(ok && fooled.length > 0);
+      return;
+    }
+    if (kind === 'roulette') {
+      // A spin round the defender, the ball dragged round with one sole and then the other.
+      const ok = Math.random() < 0.4 + 0.5 * skill;
+      if (ok) {
+        for (const o of near) {
+          o.tackleTimer = Math.max(o.tackleTimer, 0.9);
+          o.think = 0.6;
+        }
+        if (blocker) { blocker.stunAnim = Math.max(blocker.stunAnim, 0.5); blocker.vel = v(run.x * 1.5, run.z * 1.5); }
+        p.trickBoost = 0.7;
+      }
+      say(ok && near.length > 0);
+      return;
+    }
+    // Step-over, body swerve and elastico: the defenders lean the wrong way and cannot tackle for a moment.
+    // A step-over and a swerve sell the trickDir side; an elastico shows the ball one way and takes it the other.
+    const ok = Math.random() < (kind === 'elastico' ? 0.4 + 0.5 * skill : kind === 'feint' ? 0.5 + 0.42 * skill : 0.45 + 0.45 * skill);
     if (ok) {
-      // Defenders lean the way of the feint and cannot tackle for a moment.
+      const lean = kind === 'elastico' ? -2.8 : kind === 'feint' ? 2.2 : 2.6;
       for (const o of near) {
-        o.vel = v(across.x * p.trickDir * 2.6, across.z * p.trickDir * 2.6);
-        o.tackleTimer = Math.max(o.tackleTimer, 0.8);
+        o.vel = v(across.x * p.trickDir * lean, across.z * p.trickDir * lean);
+        o.tackleTimer = Math.max(o.tackleTimer, kind === 'feint' ? 0.65 : 0.8);
         o.think = 0.6;
       }
       p.trickBoost = 0.6;
     }
-    this.events.push({ type: 'trick', kind: 'stepover', side: p.side, player: p.info, ok: ok && near.length > 0 });
+    say(ok && near.length > 0);
+  }
+
+  /**
+   * Where a skill move carries the ball from the dribbler's feet, in metres across their body (+ = their right)
+   * and along it (+ = forward): an elastico pushes it out one way and snaps it back the other, a step-over
+   * keeps it still under the feet, and a drag-back rolls it in under the body as they turn.
+   */
+  trickBallOffset(p: SimPlayer): { across: number; along: number } {
+    if (!p.trickKind || p.trickAnim <= 0) return { across: 0, along: 0 };
+    const u = 1 - p.trickAnim, s = this.stats.scale;
+    switch (p.trickKind) {
+      case 'elastico': {
+        const shape = u < 0.4 ? Math.sin((u / 0.4) * Math.PI * 0.5) : u < 0.6 ? 1 - 2 * smooth((u - 0.4) / 0.2) : -1 + smooth((u - 0.6) / 0.4);
+        return { across: -p.trickDir * shape * (0.2 + 0.15 * s), along: 0 };
+      }
+      case 'stepover': case 'feint': return { across: 0, along: -0.12 * s * Math.sin(u * Math.PI) };
+      case 'dragback': case 'cruyff': return { across: 0, along: -0.2 * s * Math.sin(Math.min(1, u / 0.6) * Math.PI) };
+      default: return { across: 0, along: 0 };
+    }
   }
 
   /** Match stats by player id for everyone who played, subs included (for player of the match and career growth). */

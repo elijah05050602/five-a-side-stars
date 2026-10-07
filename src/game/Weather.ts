@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { GraphicsProfile } from './graphics';
 import { floodlightPositions, grassTexture } from './Pitch';
+import { buildSkyline } from './skyline';
+import type { Ground } from './grounds';
 import { disposeObject } from './renderer';
 import { softDot } from './effects';
 
@@ -82,7 +84,7 @@ export class Weather {
   private time = 0;
   private readonly fogDistance: [number, number];
 
-  constructor(private readonly scene: THREE.Scene, private readonly dims: { length: number; width: number }, readonly conditions: Conditions, gfx: Pick<GraphicsProfile, 'liteWeather' | 'spotlights'>, private readonly lights: WeatherLights) {
+  constructor(private readonly scene: THREE.Scene, private readonly dims: { length: number; width: number }, readonly conditions: Conditions, gfx: Pick<GraphicsProfile, 'liteWeather' | 'spotlights'>, private readonly lights: WeatherLights, ground?: Ground) {
     const lowDetail = gfx.liteWeather;
     const look = lookFor(conditions);
     scene.background = new THREE.Color(look.sky);
@@ -97,6 +99,8 @@ export class Weather {
     sky.groundColor.set(look.hemiGround);
     sky.intensity = look.hemiIntensity;
     scene.add(this.group);
+    // The far-off view round the ground (hills, sea, city...), hazed to match the sky and dark at night.
+    if (ground) this.group.add(buildSkyline(ground.skyline, { haze: look.fog, night: conditions.time === 'night', snow: conditions.weather === 'snow', lite: lowDetail }));
 
     if (conditions.time === 'night') this.buildNight(lowDetail, gfx.spotlights);
     if (conditions.time === 'sunset') this.buildSun('#ffd27a', 1.9, new THREE.Vector3(-90, 16, 20));
@@ -222,7 +226,7 @@ export class Weather {
     const snowTex = grassTexture(12, '#f1f5f8', '#e6edf2');
     const apronTex = grassTexture(1, '#e9eef2', '#e9eef2');
     apronTex.wrapS = apronTex.wrapT = THREE.RepeatWrapping;
-    apronTex.repeat.set(6, 6);
+    apronTex.repeat.set(36, 36);
     // Leaf materials are shared between trees, so whiten each one only once.
     const leaves = new Set<THREE.MeshToonMaterial>();
     this.scene.traverse((o) => {

@@ -6,7 +6,7 @@ import { cloneRig, loadPlayerAsset, playerAssetNow, type PlayerAsset } from './p
 import { contrastColour, numberTexture, playerAtlas } from './playerAtlas';
 import { faceTexture, type Expression } from './playerFace';
 import { ProceduralPlayerModel } from './ProceduralPlayerModel';
-import { DIVE_AIR_SHARE, DRIBBLE_STRIDE, SLIDE_AT, type Celebration, type KickKind, type MoveKind } from './sim';
+import { DIVE_AIR_SHARE, DRIBBLE_STRIDE, SLIDE_AT, type Celebration, type KickKind, type MoveKind, type TrickKind } from './sim';
 import { graphicsProfile } from './graphics';
 import { disposeObject, releaseTexture, shared } from './renderer';
 import { addOutline, addSkinnedOutline, smoothOutlineNormals, toonMaterial } from './toon';
@@ -45,9 +45,11 @@ export interface AnimState {
   strafe?: number;
   /** On the ball and running with it (eyes down, a little hunched over it). */
   dribble?: boolean;
-  /** Step-over skill move: 1 as it starts, fading to 0; stepoverDir is which way the feint goes (-1 or 1). */
-  stepover?: number;
-  stepoverDir?: number;
+  /** A skill move: which one, 1 as it starts fading to 0, which way it goes across the body (-1 or 1), and the way the kid was heading when it began. */
+  trick?: TrickKind | null;
+  trickT?: number;
+  trickDir?: number;
+  trickFrom?: number;
   /** While a goal stands: this kid's celebration (or gloom), and seconds since the goal. */
   celebrate?: Celebration | null;
   celebrateT?: number;
@@ -69,6 +71,15 @@ export interface AnimState {
 }
 
 export const IDLE_STATE: AnimState = { speed: 0, kick: 0, dive: 0, diveDir: 1, stun: 0, tackle: 0, scale: 1, wobble: 0, mood: 'neutral', gazeX: 0, gazeY: 0, cheer: false };
+
+/**
+ * Where an elastico has the ball across the body over the move (0..1): out to one side, snapped across to the
+ * other, then back under the feet. Matches MatchSim.trickBallOffset, so the foot is on the ball.
+ */
+function elasticoShape(u: number): number {
+  const s = THREE.MathUtils.smoothstep;
+  return u < 0.4 ? Math.sin((u / 0.4) * Math.PI * 0.5) : u < 0.6 ? 1 - 2 * s(u, 0.4, 0.6) : -1 + s(u, 0.6, 1);
+}
 
 let shadowTex: THREE.CanvasTexture | null = null;
 /** A soft contact shadow: dark in the middle, fading out, so kids sit on the grass. */
@@ -237,6 +248,8 @@ export class PlayerModel {
   private plantSide = 1;
   private readonly seed = Math.random() * 10;
   private facing = 0;
+  /** Extra yaw on top of the facing while a turn or a spin is drawn (the sim has already turned). */
+  private yawOff = 0;
   private turn = 0;
   private lean = 0;
   private faceKey = '';
@@ -528,9 +541,12 @@ export class PlayerModel {
     if (kickStart && !realKick) this.startTap();
     this.lastKick = st.kick;
     const kicking = st.kick > 0.3, diving = st.dive > 0, stunned = st.stun > 0, tackling = st.tackle > 0;
-    const stepping = (st.stepover ?? 0) > 0;
+    const trick = (st.trickT ?? 0) > 0 ? st.trick ?? null : null;
+    const tu = trick ? 1 - (st.trickT ?? 0) : 0; // 0 → 1 through the skill move
+    const tdir = st.trickDir ?? 1;
+    const stepping = trick === 'stepover';
     // Step-over: a quick dodge one way over the ball (the clip is played fast so it reads as a feint).
-    if (stepping && !this.wasStepping && !kicking && !diving) this.startOneShot((st.stepoverDir ?? 1) > 0 ? 'Dodge_Right' : 'Dodge_Left', 2.6, false);
+    if (stepping && !this.wasStepping && !kicking && !diving) this.startOneShot(tdir > 0 ? 'Dodge_Right' : 'Dodge_Left', 2.6, false);
     this.wasStepping = stepping;
     // Keeper handling and headers: a scoop off the grass, an overarm throw; a header is a jump, not a kick.
     const move = (st.moveAnim ?? 0) > 0 ? st.move ?? null : null;
@@ -600,7 +616,30 @@ export class PlayerModel {
       roll += 0.22 * st.stun * Math.sin(st.stun * Math.PI * 3);
       pitch -= 0.35 * Math.sin(st.stun * Math.PI);
     }
-    if (stepping) roll += (st.stepoverDir ?? 1) * 0.3 * Math.sin((1 - st.stepover!) * Math.PI * 2);
+    if (stepping) roll += tdir * 0.3 * Math.sin(tu * Math.PI * 2);
+    const tk = Math.sin(tu * Math.PI);
+    if (trick === 'feint') {
+      // Body swerve: a big drop of the shoulder one way, then the other.
+      roll += tdir * 0.42 * Math.sin(tu * Math.PI * 2) * (1 - 0.4 * tu);
+      lift -= 0.04 * scale * tk;
+    } else if (trick === 'elastico') roll += tdir * 0.18 * elasticoShape(tu);
+    else if (trick === 'dragback' || trick === 'cruyff') pitch += 0.12 * tk; // sitting back as the ball comes back
+    else if (trick === 'roulette') lift += 0.03 * scale * tk;
+    else if (trick === 'rainbow') {
+      // A little hop off the flick, leaning forward over it.
+      const f = Math.sin(THREE.MathUtils.clamp((tu - 0.25) / 0.5, 0, 1) * Math.PI);
+      lift += 0.1 * scale * f;
+      pitch -= 0.15 * f;
+    }
+    // Turns are drawn turning: from the way the kid was heading round to the way the sim already faces.
+    // A roulette goes the long way round, a full spin with the back to the defender.
+    this.yawOff = 0;
+    if (trick === 'dragback' || trick === 'cruyff' || trick === 'roulette') {
+      const d = wrapAngle((st.trickFrom ?? this.facing) - this.facing);
+      const from = trick === 'roulette' ? (Math.abs(d) < 0.3 ? tdir * Math.PI * 2 : d - Math.sign(d) * Math.PI * 2) : d;
+      const [a, b] = trick === 'roulette' ? [0.05, 0.85] : trick === 'cruyff' ? [0.35, 0.75] : [0.1, 0.6];
+      this.yawOff = from * (1 - THREE.MathUtils.smoothstep(tu, a, b));
+    }
     let slideK = 0;
     if (this.slide > 0) {
       // Slide tackle: sit back and drop onto the grass, then spring up. A standing tackle just leans in.
@@ -696,6 +735,7 @@ export class PlayerModel {
     if (cel === 'plane') roll += 0.28 * Math.sin(ct * 3.2); // banking like an aeroplane
     if (cel === 'slump') pitch -= 0.08;
     this.body.rotation.x = roll;
+    this.body.rotation.y = -(this.facing + this.yawOff);
     this.body.rotation.z = pitch;
     this.body.position.y = lift;
 
@@ -727,11 +767,11 @@ export class PlayerModel {
       this.swingSideways(this.legR, -open);
     }
     this.poseExtras(st, move, mu, k, kneel, ct);
-    if (!cel && !committed) this.footballMoves(move, mu, k, slideK, kickU, charge, plantK);
+    if (!cel && !committed) this.footballMoves(move, mu, k, slideK, kickU, charge, plantK, trick, tu, tdir);
   }
 
   /** Legs and arms for kicks, tackles, hops, throw-ins, catching breath, calling for the ball and turning. */
-  private footballMoves(move: MoveKind | null, mu: number, k: number, slideK: number, kickU: number, charge: number, plantK: number): void {
+  private footballMoves(move: MoveKind | null, mu: number, k: number, slideK: number, kickU: number, charge: number, plantK: number, trick: TrickKind | null, tu: number, tdir: number): void {
     const { legL, legR, shinL, shinR } = this;
     if (!legL || !legR || !shinL || !shinR) return;
     if (slideK > 0 && this.slideFast) {
@@ -773,6 +813,7 @@ export class PlayerModel {
       this.aimArms(0.6, -0.1, 0.8, -0.4, -0.3, 0.8, 0.8 * charge);
       return;
     }
+    if (trick && trick !== 'nutmeg' && this.trickLegs(trick, tu, tdir)) return;
     if (move === 'hop') {
       // Both feet tucked up to skip over the outstretched leg, arms out.
       this.aimBone(legL, 0.45, -0.9, -0.1, k, true);
@@ -829,6 +870,94 @@ export class PlayerModel {
       this.swingAbout(shinL, 0, 0, 1, -0.7 * sL * this.stepW);
       this.swingAbout(legR, 0, 0, 1, 0.45 * sR * this.stepW);
       this.swingAbout(shinR, 0, 0, 1, -0.7 * sR * this.stepW);
+    }
+  }
+
+  /** Legs and arms for the skill moves (the nutmeg is a poke, drawn as a kick). Body frame: x forward, y up, z the kid's right. */
+  private trickLegs(trick: TrickKind, u: number, dir: number): boolean {
+    const { legL, legR, shinL, shinR } = this;
+    if (!legL || !legR || !shinL || !shinR) return false;
+    const k = Math.sin(u * Math.PI);
+    const fade = 1 - THREE.MathUtils.smoothstep(u, 0.75, 1);
+    switch (trick) {
+      case 'stepover': {
+        // The foot circles over the ball from the inside to the outside, then plants.
+        const w = Math.sin(Math.min(1, u / 0.6) * Math.PI);
+        const a = Math.min(1, u / 0.6) * Math.PI * 2;
+        const [leg, shin] = dir > 0 ? [legR, shinR] : [legL, shinL];
+        const out = dir * (0.1 + 0.8 * (1 - Math.cos(a)) / 2);
+        this.aimBone(leg, 0.6 + 0.3 * Math.sin(a), -0.7 + 0.45 * Math.max(0, Math.sin(a)), out, w, true);
+        this.aimBone(shin, 0.3, -1, out, w, true);
+        this.aimArms(0, -0.5, 0.8, 0, -0.5, 0.8, 0.5 * k);
+        return true;
+      }
+      case 'feint': {
+        // The foot goes out wide the way of the swerve, the arms out for balance.
+        const [leg, shin] = dir > 0 ? [legR, shinR] : [legL, shinL];
+        const w = Math.sin(Math.min(1, u / 0.55) * Math.PI);
+        this.aimBone(leg, 0.15, -0.8, dir * 0.8, w, true);
+        this.aimBone(shin, 0.05, -1, dir * 0.7, w, true);
+        this.aimArms(0, -0.5, 0.9, 0, -0.5, 0.9, 0.6 * k);
+        return true;
+      }
+      case 'elastico': {
+        // The outside of the foot pushes the ball out, then the inside snaps it back across, as the ball does in the sim.
+        const m = dir < 0 ? 1 : -1;
+        const [leg, shin] = m > 0 ? [legR, shinR] : [legL, shinL];
+        const sh = -dir * elasticoShape(u) * m; // +1 out to that foot's side, -1 across
+        this.aimBone(leg, 0.5, -0.75, m * (0.15 + 0.75 * sh), fade, true);
+        this.aimBone(shin, 0.45, -1, m * (0.15 + 0.8 * sh), fade, true);
+        this.aimArms(0.1, -0.5, 0.8, 0.1, -0.5, 0.8, 0.6 * k);
+        return true;
+      }
+      case 'dragback': {
+        // Sole on top of the ball, then rolled back under the body.
+        const r = THREE.MathUtils.smoothstep(u, 0.05, 0.6);
+        const x = 0.9 - 1.3 * r;
+        this.aimBone(legR, x, -0.6 + 0.1 * Math.sin(r * Math.PI), 0.12, fade, true);
+        this.aimBone(shinR, x * 0.6, -1, 0.12, fade, true);
+        this.aimBone(legL, -0.1, -1, -0.12, 0.6 * fade, true);
+        this.aimArms(0.2, -0.6, 0.6, 0.2, -0.6, 0.6, 0.6 * k);
+        return true;
+      }
+      case 'cruyff': {
+        if (u < 0.35) {
+          // Pretend to kick it: the leg draws back as if for a big shot...
+          const c = Math.sin((u / 0.35) * Math.PI * 0.5);
+          const a = -1.0 * c;
+          this.aimBone(legR, Math.sin(a), -Math.cos(a), 0.05, 1, true);
+          this.aimBone(shinR, Math.sin(a - 1.3 * c), -Math.cos(a - 1.3 * c), 0.05, 1, true);
+          this.aimArms(0.6, -0.1, 0.8, -0.4, -0.3, 0.8, 0.8 * c);
+        } else {
+          // ...then hooks it back behind the standing leg with the inside of the foot.
+          const h = THREE.MathUtils.smoothstep(u, 0.35, 0.55);
+          this.aimBone(legR, 0.6 - 0.8 * h, -0.75, -0.8 * h, fade, true);
+          this.aimBone(shinR, 0.3 - 0.8 * h, -0.9, -0.75 * h, fade, true);
+          this.aimArms(0.5, -0.2, 0.8, -0.3, -0.3, 0.8, 0.7 * fade);
+        }
+        return true;
+      }
+      case 'roulette': {
+        // One sole drags the ball back, then the other rolls it on as the kid spins: arms out wide like a spinning top.
+        const first = u < 0.45;
+        const w = Math.sin(((first ? u : u - 0.45) / 0.45) * Math.PI) * (u < 0.9 ? 1 : 0);
+        const [leg, shin, side] = first ? [legR, shinR, 1] : [legL, shinL, -1];
+        this.aimBone(leg, 0.75, -0.6, side * 0.25, w, true);
+        this.aimBone(shin, 0.4, -1, side * 0.25, w, true);
+        this.aimArms(0, -0.2, 1, 0, -0.2, 1, 0.8 * k);
+        return true;
+      }
+      case 'rainbow': {
+        // The ball rolls up the back of the right leg and the heel flicks it up over the head.
+        const w = Math.sin(THREE.MathUtils.clamp((u - 0.1) / 0.65, 0, 1) * Math.PI);
+        const up = THREE.MathUtils.smoothstep(u, 0.2, 0.45);
+        this.aimBone(legR, -0.3 - 0.7 * up, -0.95 + 0.5 * up, 0.08, w, true);
+        this.aimBone(shinR, -0.4 - 0.6 * up, -0.9 + 1.8 * up, 0.08, w, true);
+        this.aimBone(legL, 0.15, -1, -0.1, 0.6 * w, true);
+        this.aimArms(0.2, 0.1, 0.9, 0.2, 0.1, 0.9, 0.8 * w);
+        return true;
+      }
+      default: return false;
     }
   }
 
@@ -904,7 +1033,7 @@ export class PlayerModel {
     const parent = bone?.parent;
     if (!bone || !child || !parent || w <= 0) return;
     const from = child.getWorldPosition(this.tmpV).sub(bone.getWorldPosition(this.tmpV2)).normalize();
-    const frame = level ? this.group.getWorldQuaternion(this.tmpQ).multiply(this.tmpQ2.setFromAxisAngle(UP, -this.facing)) : this.body.getWorldQuaternion(this.tmpQ);
+    const frame = level ? this.group.getWorldQuaternion(this.tmpQ).multiply(this.tmpQ2.setFromAxisAngle(UP, -(this.facing + this.yawOff))) : this.body.getWorldQuaternion(this.tmpQ);
     const to = this.tmpAxis.set(x, y, z).normalize().applyQuaternion(frame);
     const d = this.tmpQ.setFromUnitVectors(from, to);
     if (w < 1) d.slerp(this.tmpQ2.identity(), 1 - w);

@@ -31,13 +31,17 @@ export interface GraphicsProfile {
   /** The goal nets: a springy cloth that wobbles, or a cheap dent that follows the ball; and how many strands across. */
   netDetail: 'cloth' | 'dent';
   netCols: number;
+  /** The end stand with its fans, photographers and ball kids by the pitch, and flags that wave. */
+  stadiumExtras: boolean;
+  /** Fine grass blades over the mown stripes, for the low replay cameras. */
+  grassDetail: boolean;
 }
 
 const PROFILES: Record<GraphicsProfile['tier'], Omit<GraphicsProfile, 'adaptive'>> = {
-  high: { tier: 'high', maxPixelRatio: 2, minPixelRatio: 1, shadowMap: true, shadowSize: 2048, sceneryShadows: true, playerOutlines: true, liteCrowd: false, liteWeather: false, spotlights: true, pbrGround: true, batchScenery: false, netDetail: 'cloth', netCols: 16 },
+  high: { tier: 'high', maxPixelRatio: 2, minPixelRatio: 1, shadowMap: true, shadowSize: 2048, sceneryShadows: true, playerOutlines: true, liteCrowd: false, liteWeather: false, spotlights: true, pbrGround: true, batchScenery: false, netDetail: 'cloth', netCols: 16, stadiumExtras: true, grassDetail: true },
   // The old phone and tablet settings, before the Low setting existed.
-  medium: { tier: 'medium', maxPixelRatio: 1.5, minPixelRatio: 1, shadowMap: true, shadowSize: 1024, sceneryShadows: true, playerOutlines: true, liteCrowd: true, liteWeather: true, spotlights: true, pbrGround: true, batchScenery: true, netDetail: 'cloth', netCols: 12 },
-  low: { tier: 'low', maxPixelRatio: 1, minPixelRatio: 0.7, shadowMap: false, shadowSize: 512, sceneryShadows: false, playerOutlines: false, liteCrowd: true, liteWeather: true, spotlights: false, pbrGround: false, batchScenery: true, netDetail: 'dent', netCols: 12 },
+  medium: { tier: 'medium', maxPixelRatio: 1.5, minPixelRatio: 1, shadowMap: true, shadowSize: 1024, sceneryShadows: true, playerOutlines: true, liteCrowd: true, liteWeather: true, spotlights: true, pbrGround: true, batchScenery: true, netDetail: 'cloth', netCols: 12, stadiumExtras: true, grassDetail: true },
+  low: { tier: 'low', maxPixelRatio: 1, minPixelRatio: 0.7, shadowMap: false, shadowSize: 512, sceneryShadows: false, playerOutlines: false, liteCrowd: true, liteWeather: true, spotlights: false, pbrGround: false, batchScenery: true, netDetail: 'dent', netCols: 12, stadiumExtras: false, grassDetail: false },
 };
 
 /** Phones get Low, tablets Medium, computers High. */

@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { BallModel } from './BallModel';
 import { Input, PressLatch, type InputState } from './input';
 import { CAMERA_HEIGHT_SCALE, getControls } from '../data/controls';
-import { buildPitch, pitchExtras } from './Pitch';
+import { buildPitch, pitchExtras, stadiumParts } from './Pitch';
+import type { BoardTeam } from './adBoards';
 import { Crowd } from './Crowd';
 import { Commentator } from './commentary';
 import { Weather, resolveConditions, type Conditions, type WeatherChoice } from './Weather';
@@ -10,7 +11,7 @@ import { toonMaterial } from './toon';
 import { PlayerModel, type AnimState } from './PlayerModel';
 import { clearPlayerAtlasCache } from './playerAtlas';
 import { clearFaceCache, type Expression } from './playerFace';
-import { CROWD_SHOT_AT, DIVE_RECOVER, MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side, type SimEvent } from './sim';
+import { CROWD_SHOT_AT, DIVE_RECOVER, MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side, type SimEvent, type TrickKind } from './sim';
 import { renderHud, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
 import { Commentary } from './voice';
@@ -23,6 +24,7 @@ import { EXPOSURE, TONE_MAPPING, disposeObject } from './renderer';
 import { BallTrail, Puffs, SuperAura } from './effects';
 import { SUPERS, type SuperKind } from './supers';
 import { P1_RING, P2_RING, teamRingColours } from './ringColours';
+import { GROUNDS, crowdFill, groundFor, type Ground, type GroundId, type Occasion } from './grounds';
 import { goalCamShot } from './replayCamera';
 
 /** Whether the touch buttons are showing (the same test the CSS uses). */
@@ -35,6 +37,8 @@ export interface SceneOptions {
   weather?: WeatherChoice;
   /** A career match: the id of the player's Star, who wears a gold star over their head. */
   starId?: string;
+  /** What kind of match it is, for where it is played and how full the stands are (default a friendly). */
+  occasion?: Occasion;
 }
 
 /**
@@ -48,7 +52,7 @@ const REPLAY_SLOW = 90;
 
 /** One recorded frame of the match, used for the instant replay. */
 interface ReplayFrame {
-  players: { x: number; z: number; facing: number; speed: number; kick: number; dive: number; diveDir: number; stun: number; recover: number }[];
+  players: { x: number; z: number; facing: number; speed: number; kick: number; dive: number; diveDir: number; stun: number; recover: number; trick: TrickKind | null; trickT: number; trickDir: number; trickFrom: number }[];
   ball: { x: number; y: number; z: number; vx: number; vz: number };
 }
 
@@ -101,6 +105,8 @@ export class MatchScene {
   private readonly commentator: Commentator;
   private readonly voice = new Commentary();
   readonly conditions: Conditions;
+  /** Where the match is played. */
+  readonly ground: Ground;
   private readonly weather: Weather;
   private readonly pitch: THREE.Group;
   private readonly sun: THREE.DirectionalLight;
@@ -208,16 +214,27 @@ export class MatchScene {
     this.scene.add(sun, rim, sky);
 
     const runoff = this.sim.mode === 'match';
-    const pitch = buildPitch({ sceneryShadows: gfx.sceneryShadows, pbr: gfx.pbrGround, length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth, runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0, netDetail: gfx.netDetail, netCols: gfx.netCols, calmNets: this.calm });
+    const occasion = options.occasion ?? 'friendly';
+    // `?ground=seaside` (or any ground's id) picks the ground, for testing and screenshots.
+    const asked = new URLSearchParams(location.search).get('ground');
+    this.ground = asked && asked in GROUNDS ? GROUNDS[asked as GroundId] : groundFor({ occasion, homeId: this.sim.teams[0].id, weather: this.conditions.weather, time: this.conditions.time });
+    const boardTeams = this.sim.teams.map((t) => ({ name: t.name, short: t.short, shirt: t.kit.shirt, shirt2: t.kit.shirt2 })) as [BoardTeam, BoardTeam];
+    const pitch = buildPitch({
+      sceneryShadows: gfx.sceneryShadows, pbr: gfx.pbrGround, length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth,
+      runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0, netDetail: gfx.netDetail, netCols: gfx.netCols, calmNets: this.calm,
+      ground: this.ground, teams: boardTeams, lite: gfx.tier === 'low', extras: gfx.stadiumExtras, grassDetail: gfx.grassDetail, calm: this.calm,
+    });
     this.scene.add(pitch);
     this.pitch = pitch;
     this.extras = pitchExtras(pitch);
     // The weather restyles the sun and the sky light; the rim light keeps its own colour and angle.
-    this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, gfx, { sun, sky });
-    if (gfx.batchScenery) batchStatic(pitch, [...this.extras.nets.map((n) => n.group), this.extras.scoreboard.group]);
+    this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, gfx, { sun, sky }, this.ground);
+    const keep = [...this.extras.nets.map((n) => n.group), this.extras.scoreboard.group];
+    if (gfx.batchScenery) batchStatic(pitch, keep);
+    else for (const part of stadiumParts(pitch)) batchStatic(part, keep);
     this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, 0, 0);
 
-    this.crowd = new Crowd(this.sim, { lite: gfx.liteCrowd });
+    this.crowd = new Crowd(this.sim, { lite: gfx.liteCrowd, fill: crowdFill(occasion), endStand: gfx.stadiumExtras ? { runoffEnd: runoff ? RUNOFF_END : 0 } : null, flagsForAll: occasion === 'final' });
     this.crowd.setConditions({ night: this.conditions.time === 'night', weather: this.conditions.weather });
     this.scene.add(this.crowd.group);
     // Dev builds only: lets a test script poke the crowd (window.__crowd.onEvent({ type: 'goal', side: 0 })).
@@ -257,6 +274,8 @@ export class MatchScene {
       onSubs: (side, lineup) => this.sim.requestSubs(side, lineup),
       onSkipReplay: () => { this.skipTapped = true; },
     }, this.coach ?? undefined);
+    // Name the ground in the commentary ticker as the players come out.
+    if (this.sim.mode !== 'tutorial') this.hud.say(`Today's match is at ${this.ground.name}!`);
     this.input.attachJoystick(this.hud.joystickZone, this.hud.joystickBase, this.hud.joystickKnob);
     this.input.attachButton(this.hud.btnShoot, 'shoot');
     this.input.attachButton(this.hud.btnPass, 'pass');
@@ -393,7 +412,7 @@ export class MatchScene {
   private record(): void {
     const b = this.sim.ball;
     this.history.push({
-      players: this.sim.players.map((p) => ({ x: p.pos.x, z: p.pos.z, facing: p.facing, speed: Math.hypot(p.vel.x, p.vel.z), kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, recover: Math.min(1, p.recover / DIVE_RECOVER) })),
+      players: this.sim.players.map((p) => ({ x: p.pos.x, z: p.pos.z, facing: p.facing, speed: Math.hypot(p.vel.x, p.vel.z), kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, recover: Math.min(1, p.recover / DIVE_RECOVER), trick: p.trickKind, trickT: p.trickAnim, trickDir: p.trickDir, trickFrom: p.trickFrom })),
       ball: { x: b.pos.x, y: b.y, z: b.pos.z, vx: b.vel.x, vz: b.vel.z },
     });
     if (this.history.length > 300) this.history.shift();
@@ -433,7 +452,7 @@ export class MatchScene {
         const m = this.models.get(p)!, fp = f.players[i];
         m.group.position.set(fp.x, 0, fp.z);
         m.setFacing(fp.facing);
-        m.animate(dt * speed, { speed: fp.speed, kick: fp.kick, dive: fp.dive, diveDir: fp.diveDir, stun: fp.stun, recover: fp.recover, tackle: 0, scale, wobble: 0, mood: 'focus', gazeX: 0, gazeY: 0, cheer: false });
+        m.animate(dt * speed, { speed: fp.speed, kick: fp.kick, dive: fp.dive, diveDir: fp.diveDir, stun: fp.stun, recover: fp.recover, trick: fp.trick, trickT: fp.trickT, trickDir: fp.trickDir, trickFrom: fp.trickFrom, tackle: 0, scale, wobble: 0, mood: 'focus', gazeX: 0, gazeY: 0, cheer: false });
         m.setSelected(false, 0xffffff);
       });
       this.ball.update(f.ball.x, f.ball.y, f.ball.z, this.sim.ball.radius, f.ball.vx, f.ball.vz, dt * speed);
@@ -573,6 +592,22 @@ export class MatchScene {
     return new THREE.Vector3(target.x, height, target.z + height * 0.9);
   }
 
+  /** The LED boards join in: GOAL! in the scorer's colours until the restart, a super skill's name, PENALTY! */
+  private boardsFor(ev: SimEvent): void {
+    try {
+      const boards = this.extras.boards;
+      if (ev.type === 'goal' && (ev.side === 0 || ev.side === 1)) {
+        boards.show('GOAL!', this.sim.teams[ev.side].kit.shirt, this.sim.shootout ? 3 : Infinity);
+        this.extras.life.goal();
+      } else if (ev.type === 'kickoff' || ev.type === 'fulltime') boards.clear();
+      else if (ev.type === 'super' && ev.superKind && !boards.showing) boards.show(SUPERS[ev.superKind].name.toUpperCase(), SUPERS[ev.superKind].css, 3);
+      else if (ev.type === 'foul' && ev.kind === 'penalty' && !boards.showing) boards.show('PENALTY!', '#e63946', 3);
+    } catch (e) {
+      // The boards are only decoration: never let them stop the match.
+      console.warn('ad boards', e);
+    }
+  }
+
   private frame = (now: number): void => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.frame);
@@ -627,6 +662,7 @@ export class MatchScene {
       if (ev.type === 'sub') this.onSub(ev);
       this.crowd.onEvent(ev);
       if (!this.calm) this.puffFor(ev);
+      this.boardsFor(ev);
       // Each shoot-out kick starts a fresh replay clip, so the winning kick's replay never shows the kick before it.
       if (ev.type === 'whistle' && this.sim.shootout) this.history.length = 0;
       if (ev.type === 'goal') {
@@ -654,6 +690,8 @@ export class MatchScene {
     if (quip) this.hud.say(quip);
     this.sfx.update(dt, this.sim);
     this.weather.update(dt);
+    this.extras.boards.update(dt);
+    this.extras.life.update(dt);
     this.effects(dt);
     this.crowd.update(dt);
     // The nets follow the ball in live play only; a replay leaves them to settle.
@@ -690,7 +728,7 @@ export class MatchScene {
       const ahead = Math.cos(ang) > -0.2;
       const gazeX = ahead ? Math.round(Math.sin(ang) * 2) / 2 : 0;
       const gazeY = ahead && Math.hypot(b.pos.x - p.pos.x, b.pos.z - p.pos.z) < 2.5 * scale ? 0.5 : 0;
-      const st: AnimState = { speed, kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, tackle: p.tackleTimer, scale, wobble, mood, gazeX, gazeY, cheer: celebrating === p.side, stepover: p.trickKind === 'stepover' ? p.trickAnim : 0, stepoverDir: p.trickDir,
+      const st: AnimState = { speed, kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, tackle: p.tackleTimer, scale, wobble, mood, gazeX, gazeY, cheer: celebrating === p.side, trick: p.trickKind, trickT: p.trickAnim, trickDir: p.trickDir, trickFrom: p.trickFrom,
         dribble: b.owner === p && !p.isKeeper && this.sim.phase === 'play', recover: Math.min(1, p.recover / DIVE_RECOVER), strafe: -p.vel.x * Math.sin(p.facing) + p.vel.z * Math.cos(p.facing),
         celebrate: celebrating >= 0 ? p.celebrate : null, celebrateT: this.sim.phaseTimer, move: p.move, moveAnim: p.moveAnim, hold: b.owner === p && p.handling,
         kickKind: p.kickKind, charge: p.charge, ready: this.sim.phase === 'kickoff' && b.owner !== p, call: p === this.caller,
@@ -874,6 +912,7 @@ export class MatchScene {
     this.sfx.dispose();
     this.voice.dispose();
     this.weather.dispose();
+    this.extras.boards.dispose();
     this.hud.destroy();
     this.models.forEach((m) => m.dispose());
     this.benchModels.forEach((m) => m.dispose());
