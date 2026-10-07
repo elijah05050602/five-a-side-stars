@@ -90,6 +90,8 @@ export interface SimPlayer {
   diveSpeed: number;
   /** Seconds left getting back up after a dive (a keeper cannot move until it reaches 0). */
   recover: number;
+  /** The dive is a last-moment lunge after misreading the shot, a little less likely to save it. */
+  lateDive: boolean;
   distanceRun: number;
   isKeeper: boolean;
   speedMul: number;
@@ -178,6 +180,8 @@ export interface SimBall {
   lofted: boolean;
   /** Team-mate whose completed pass set up the current possession; credited with an assist on a goal. */
   assist: SimPlayer | null;
+  /** Where the ball was last kicked from: a keeper has longer to read a shot from far out. */
+  kickedFrom: V2;
   /** A Rocket Shot in flight (harder to save), or a Magic Pass (nobody can cut it out). */
   superShot: boolean;
   superPass: boolean;
@@ -382,7 +386,7 @@ export class MatchSim {
     this.goalWidth = this.stats.goalWidth;
     this.goalHeight = 1.0 + 0.6 * this.stats.scale;
     this.goalDepth = 1.2;
-    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null, superShot: false, superPass: false };
+    this.ball = { pos: v(), y: 0, vel: v(), vy: 0, radius: 0.12 + 0.05 * this.stats.scale, spin: 0, owner: null, lastTouch: null, lastKick: null, flightId: 0, keeperTried: -1, penaltyShot: false, wasPass: false, receiver: null, lofted: false, assist: null, kickedFrom: v(), superShot: false, superPass: false };
     // Beginner help (Starter) starts from an Easy computer team, whatever was picked before, and then it runs and
     // thinks slower, tackles and saves softer, and shoots worse from closer in. League play keeps its tier's strength.
     const base = config.cpuLevel !== undefined ? diffForLevel(config.cpuLevel) : DIFF[config.assist ? 'easy' : config.difficulty];
@@ -401,7 +405,7 @@ export class MatchSim {
         const p: SimPlayer = {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), role: info.position, slot: v(info.position === 'GK' ? 0.03 : 0.33, 0), kickCooldown: 0, think: Math.random() * 0.3,
-          aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, distanceRun: 0, isKeeper: info.position === 'GK',
+          aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, lateDive: false, distanceRun: 0, isKeeper: info.position === 'GK',
           speedMul: (isCpu ? diff.speed : 1) * (info.special === 'speedy' ? 1.12 : 1) * mul.speed, tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, charge: 0, misread: 0, readFlight: -1, kickKind: 'pass', penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
           celebrate: null, move: null, moveAnim: 0, handling: false, edgeHold: 0, superKind: null, superTime: 0,
@@ -1337,12 +1341,21 @@ export class MatchSim {
    * distance they need, fly for a moment, land, and then have to get up before
    * they can move again. Nothing changes direction once they leave the ground.
    */
-  private startDive(p: SimPlayer, dir: number, need: number): void {
+  private startDive(p: SimPlayer, dir: number, need: number, late = false, short = false): void {
     if (p.diveAnim > 0 || p.recover > 0) return;
     p.diveAnim = 1;
+    p.lateDive = late;
     p.diveDir = dir;
     const top = this.stats.speed * 1.9 * p.speedMul;
     p.diveSpeed = clamp(need / (DIVE_AIR * 0.6), this.stats.speed * 0.5, top);
+    if (!late) return;
+    // A last-moment lunge after a misread. Yours usually gets there (always on the easier levels, less often on Hard,
+    // so the computer still scores some). The computer's gets there now and then on Normal and about half the time on
+    // Hard; otherwise it stretches out but stops just short of the ball's path, so young players see the keeper try
+    // and still score (the save odds give it a small chance of a fingertip).
+    const reaches = this.isHuman(p.side) ? clamp(0.35 + 0.5 * this.diff.humanTackle, 0.5, 1) : clamp((this.diff.tackle - 0.6) * 0.9, 0, 0.6);
+    if (!short && Math.random() < reaches) p.diveSpeed *= rand(0.8, 1.05);
+    else p.diveSpeed = (Math.max(0, need - (p.radius + this.ball.radius) - 0.1) * rand(0.5, 0.9)) / (DIVE_AIR * 0.6);
   }
 
   /** Starts a one-off move for the model to act out. */
@@ -1504,11 +1517,33 @@ export class MatchSim {
       if (t < 0.5) this.startDive(p, p.penaltyGuess, Math.abs(predZ - p.pos.z));
     } else if (toGoal && t < 1.4 && towardsUs) {
       // Predict where the ball crosses the keeper's line and go there. Keepers read a shot imperfectly: the guess is
-      // off by up to keeperMisread(), the same for the whole shot, so a misread shot goes past them, never through.
-      if (p.readFlight !== b.flightId) { p.readFlight = b.flightId; p.misread = rand(-1, 1) * this.keeperMisread(p); }
+      // off by up to keeperMisread(), so a misread shot goes past them, never through.
+      if (p.readFlight !== b.flightId) {
+        p.readFlight = b.flightId;
+        // The computer's keeper is rarely spot on, more so on the easier levels, so young players' shots go in beside
+        // them (not through them). Yours reads it anywhere from perfectly to a little off.
+        const least = this.isHuman(p.side) ? 0 : clamp(0.4 - 0.3 * this.diff.tackle, 0, 0.3);
+        // A shot from far out gives the keeper time to read it: from beyond about a third of the pitch the guess gets
+        // much better, most of all on Hard, so long shots are a real test and only good close-range ones go in easily.
+        const out = Math.abs(b.kickedFrom.x - this.ownGoalX(p.side)) / this.length;
+        const sharpest = this.isHuman(p.side) ? 0.6 : clamp(1.15 - 0.65 * this.diff.tackle, 0.3, 0.8);
+        const far = clamp(1 - (out - 0.3) * 2.5, sharpest, 1);
+        p.misread = (Math.random() < 0.5 ? -1 : 1) * rand(least, 1) * this.keeperMisread(p) * far;
+      }
       const predZ = b.pos.z + b.vel.z * t + p.misread;
       targetZ = clamp(predZ, -this.goalWidth / 2 - 0.4, this.goalWidth / 2 + 0.4);
-      if (Math.abs(predZ - p.pos.z) > reach * 0.45 && t < 0.45) this.startDive(p, Math.sign(predZ - p.pos.z) || 1, Math.abs(predZ - p.pos.z));
+      // A long shot gives a keeper time to walk to the wrong spot. They see their mistake at the last moment and
+      // throw themselves at it, rather than standing still as it goes by (whether the dive gets there is down to the
+      // save odds). A Rocket Shot is too quick for that.
+      const trueZ = b.pos.z + b.vel.z * t;
+      if (b.superShot) {
+        // A Rocket Shot is too quick: the keeper is caught flat-footed, then throws a dive that falls short.
+        targetZ = p.pos.z;
+        if (t < 0.3) this.startDive(p, Math.sign(trueZ - p.pos.z) || 1, Math.abs(trueZ - p.pos.z), true, true);
+      }
+      const late = !b.superShot && t < 0.35 && Math.abs(trueZ - p.pos.z) > p.radius + b.radius && Math.abs(trueZ) < this.goalWidth / 2 + 0.3;
+      if (late) this.startDive(p, Math.sign(trueZ - p.pos.z) || 1, Math.abs(trueZ - p.pos.z), true);
+      else if (!b.superShot && Math.abs(predZ - p.pos.z) > reach * 0.45 && t < 0.45) this.startDive(p, Math.sign(predZ - p.pos.z) || 1, Math.abs(predZ - p.pos.z));
     } else if (this.phase !== 'setpiece' && b.owner && b.owner.side !== p.side && Math.abs(b.owner.pos.x - own) < 6 && Math.abs(b.owner.pos.z) < this.goalWidth) {
       // A dribbler is bearing down on goal: come out to narrow the angle if no defender is on them.
       const defender = this.nearest(this.teamOf(p.side).filter((m) => !m.isKeeper), b.owner.pos);
@@ -1892,6 +1927,24 @@ export class MatchSim {
       }
       return;
     }
+    // Whatever the save roll said, a shot never passes through a keeper's body: one that runs into it bounces off,
+    // back out towards the pitch. (A keeper can move into its path after the save was judged.)
+    for (const k of this.players) {
+      if (this.mode === 'tutorial' || !k.isKeeper || !b.lastKick || b.lastKick.side === k.side || b.y > 1.7 * this.stats.scale) continue;
+      // Until the save is judged, a keeper who can take the ball gets the chance to catch it below.
+      if (b.keeperTried !== b.flightId && k.kickCooldown <= 0) continue;
+      const rel = v(b.pos.x - k.pos.x, b.pos.z - k.pos.z);
+      if (len(rel) >= k.radius + b.radius || len(b.vel) < 3.5 || rel.x * b.vel.x + rel.z * b.vel.z >= 0) continue;
+      const n = norm(rel), along = b.vel.x * n.x + b.vel.z * n.z, away = k.side === 0 ? 1 : -1;
+      b.vel = v(Math.abs(b.vel.x - 2 * along * n.x) * 0.45 * away, (b.vel.z - 2 * along * n.z) * 0.45);
+      b.vy = Math.max(b.vy, rand(0.5, 2));
+      b.lastTouch = k;
+      b.keeperTried = b.flightId;
+      k.kickCooldown = 0.3;
+      k.match.saves++;
+      this.events.push({ type: 'save', side: k.side, player: k.info });
+      return;
+    }
     // Loose ball: the closest eligible player within reach controls it.
     let best: SimPlayer | null = null, bd = Infinity;
     for (const p of this.players) {
@@ -1925,6 +1978,8 @@ export class MatchSim {
         let pSave = bd < easy ? 0.97 * Math.max(speedFactor, 0.75) : clamp(1 - (bd - easy) / (reach - easy), 0, 1) * speedFactor;
         if (b.penaltyShot) pSave *= bd < easy ? 0.6 : 0.45; // even a keeper who guessed right can be beaten
         pSave *= best.mul.save;
+        // A last-moment lunge after a misread is a little less likely to get there than a set keeper.
+        if (best.lateDive && best.diveAnim > 0) pSave *= this.isHuman(best.side) ? 0.85 : 0.8;
         if (best.superKind === 'gloves') pSave = Math.min(1, pSave * 1.4 + 0.2);
         if (b.superShot) pSave *= best.superKind === 'gloves' ? 0.75 : 0.35;
         // A shot from close in leaves the keeper little time, so it is much harder to stop than one from distance.
@@ -1939,8 +1994,8 @@ export class MatchSim {
         // (Judged on the path, since the save is judged a moment before the ball arrives.)
         const along = (rel.x * b.vel.x + rel.z * b.vel.z) / Math.max(ballSpeed, 1e-6);
         const passBy = Math.sqrt(Math.max(0, bd * bd - along * along));
-        // A Rocket Shot is too quick to get the body behind, unless it is struck straight at them.
-        const blocked = this.mode !== 'tutorial' && passBy < (0.26 * this.stats.scale + b.radius) * (b.superShot ? 0.4 : 1);
+        // The body is as wide as the keeper drawn on screen, and as tall: a ball over their head is not blocked.
+        const blocked = this.mode !== 'tutorial' && passBy < best.radius + b.radius && b.y < 1.7 * this.stats.scale;
         const fluffed = Math.random() > pSave;
         if (fluffed && !blocked) return; // beaten
         best.match.saves++;
@@ -2016,6 +2071,7 @@ export class MatchSim {
     b.vy = loft > 0 && b.y > 0.05 ? loft - b.y / ((2 * loft) / 9.81) : loft;
     b.lastTouch = p;
     b.lastKick = p;
+    b.kickedFrom = v(p.pos.x, p.pos.z);
     b.flightId++;
     b.penaltyShot = false;
     b.wasPass = false;
