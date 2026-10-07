@@ -124,6 +124,8 @@ export interface SimPlayer {
   passCharge: number;
   /** The power of the pass being played (or queued): null for a tap. */
   passPower: number | null;
+  /** A run in behind the defence: seconds left while positive, seconds of rest before the next while negative. */
+  runTime: number;
   kickKind: KickKind;
   /** Which way the keeper has committed to for a penalty (0 = not yet). */
   penaltyGuess: number;
@@ -414,6 +416,8 @@ export class MatchSim {
    * gets back), so a turnover never leaves the new defender standing still waiting for input.
    */
   private assist: [boolean, boolean] = [false, false];
+  /** The team-mate a human's held pass would go to: they stop and wait for it. */
+  private passLook: [SimPlayer | null, SimPlayer | null] = [null, null];
   /** Which side had the ball last frame, to spot the moment the other team wins it. */
   private lastOwnerSide: Side | null = null;
   setPiece: SetPiece | null = null;
@@ -478,7 +482,7 @@ export class MatchSim {
           id: info.id, side, info, pos: v(), vel: v(), facing: side === 0 ? 0 : Math.PI,
           radius: 0.28 * this.stats.scale + 0.08, home: v(), role: info.position, slot: v(info.position === 'GK' ? 0.03 : 0.33, 0), kickCooldown: 0, think: Math.random() * 0.3,
           aiTarget: v(), kickAnim: 0, diveAnim: 0, stunAnim: 0, diveDir: 1, diveSpeed: 0, recover: 0, lateDive: false, distanceRun: 0, isKeeper: info.position === 'GK',
-          speedMul: this.speedMulFor(info, side, mul), tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, energy: 1, charge: 0, passHeld: 0, passCharge: 0, passPower: null, misread: 0, readFlight: -1, kickKind: 'pass', penaltyGuess: 0,
+          speedMul: this.speedMulFor(info, side, mul), tackleTimer: 0, holdTime: 0, touchTimer: 0, touchPop: 0, queued: null, runDir: v(side === 0 ? 1 : -1, 0), stamina: 1, energy: 1, charge: 0, passHeld: 0, passCharge: 0, passPower: null, runTime: 0, misread: 0, readFlight: -1, kickKind: 'pass', penaltyGuess: 0,
           trickAnim: 0, trickKind: null, trickDir: 1, trickCooldown: 0, trickBoost: 0,
           celebrate: null, move: null, moveAnim: 0, handling: false, edgeHold: 0, superKind: null, superTime: 0,
           mul, match: freshMatchStats(),
@@ -1354,12 +1358,16 @@ export class MatchSim {
       if (input.passHeld && !input.shootHeld) {
         p.passHeld += _dt;
         p.passCharge = clamp((p.passHeld - PASS_TAP) / PASS_FILL, 0, 1);
+        // The team-mate it would go to sees it coming and waits for it.
+        const look = l > 0.05 ? norm(want) : v(Math.cos(p.facing), Math.sin(p.facing));
+        this.passLook[p.side] = this.passReceiver(p, look, this.length * (0.12 + 0.48 * p.passCharge), this.passHelp().cone);
       } else if (p.passHeld > 0 || input.pass) {
         passNow = true;
         p.passPower = p.passHeld > PASS_TAP ? p.passCharge : null;
         p.passHeld = 0;
         p.passCharge = 0;
       }
+      if (!input.passHeld || input.shootHeld) this.passLook[p.side] = null;
       if (input.shootHeld) {
         p.charge = Math.min(1, p.charge + _dt / 0.7);
         p.passHeld = 0;
@@ -1385,6 +1393,7 @@ export class MatchSim {
       p.queued = null;
       p.passHeld = 0;
       p.passCharge = 0;
+      this.passLook[p.side] = null;
     }
   }
 
@@ -1508,6 +1517,12 @@ export class MatchSim {
       return;
     }
 
+    if (p.runTime > 0) { p.runTime -= dt; if (p.runTime <= 0) p.runTime = -4; } else p.runTime = Math.min(0, p.runTime + dt);
+    if (!isCpuTeam && teamHasBall && this.passLook[p.side] === p) {
+      // The human is lining up a pass to us: stop and wait for it.
+      this.steer(p, v(), 14);
+      return;
+    }
     if (p.think <= 0) {
       p.think = isCpuTeam ? diff.think : 0.25;
       // The thrower may not touch it again, so a team-mate goes for it instead.
@@ -1535,6 +1550,8 @@ export class MatchSim {
           clamp(sideSign * this.width * lane + (carrier.pos.z * 0.2), -this.width / 2 + 1, this.width / 2 - 1),
         );
         if (p.role === 'DEF') p.aiTarget.x = clamp(p.home.x + (b.pos.x - p.home.x) * 0.5, -this.length / 2 + 2, this.length / 2 - 2);
+        // The human's team-mates read the game: show for the ball, run in behind, find space.
+        if (!isCpuTeam) p.aiTarget = this.supportRun(p, carrier, p.aiTarget, mates, opps);
       } else {
         // Defend: drop between the ball and our goal, near the formation spot.
         const toBall = v(b.pos.x - p.home.x, b.pos.z - p.home.z);
@@ -1566,10 +1583,107 @@ export class MatchSim {
         // Hold formation until the ball moves.
         p.aiTarget = v(p.home.x, p.home.z);
       }
+      // The human is closing the dribbler down: their team-mates pick up the other attackers, one each, goal-side.
+      const mark = !isCpuTeam && oppHasBall && chaser !== p ? this.markFor(p, b.owner!) : null;
+      if (mark) p.aiTarget = v(mark.pos.x + (own - mark.pos.x) * 0.18, mark.pos.z * 0.85);
       p.aiTarget = this.inPlay(p.aiTarget, margin);
     }
     const chaser = oppHasBall && this.nearestOutfield(this.teamOf(p.side), b.pos) === p;
-    this.moveTowards(p, p.aiTarget, chaser ? 1.12 : 1);
+    this.moveTowards(p, p.aiTarget, chaser || (p.runTime > 0 && teamHasBall) ? 1.12 : 1);
+  }
+
+  /**
+   * Where one of the human's team-mates goes while their side has the ball. The closest one comes short when the
+   * carrier is under pressure, the front players now and then run in behind the last defender, and everyone else
+   * looks around their usual spot (`anchor`) for space with a clear lane from the ball, away from team-mates and out
+   * of the carrier's path.
+   */
+  private supportRun(p: SimPlayer, carrier: SimPlayer, anchor: V2, mates: SimPlayer[], opps: SimPlayer[]): V2 {
+    const s = Math.max(0.8, this.stats.scale);
+    const dir = p.side === 0 ? 1 : -1;
+    const field = opps.filter((o) => !o.isKeeper);
+    const presser = this.nearest(field, carrier.pos);
+    const pressed = presser !== null && dist(presser.pos, carrier.pos) < 2.2 * s;
+    const helpers = mates.filter((m) => m !== carrier && !m.isKeeper && m !== this.controlledBy[p.side]);
+    if (presser && pressed && this.nearest(helpers, carrier.pos) === p) {
+      // Come short at an angle, on our side of the carrier and away from the defender.
+      const away = norm(v(carrier.pos.x - presser.pos.x, carrier.pos.z - presser.pos.z));
+      const side = away.x * (p.pos.z - carrier.pos.z) - away.z * (p.pos.x - carrier.pos.x) >= 0 ? 1 : -1;
+      const r = 3 * s + 1;
+      return this.inPlay(v(carrier.pos.x + (away.x * 0.4 - away.z * side * 0.9) * r, carrier.pos.z + (away.z * 0.4 + away.x * side * 0.9) * r), 1);
+    }
+    const lookingUp = !pressed && Math.cos(carrier.facing) * dir > 0.3;
+    if ((p.role === 'ATT' || p.role === 'WING') && p.runTime === 0 && lookingUp && Math.random() < 0.15) p.runTime = 1.8;
+    if (p.runTime > 0 && lookingUp && field.length) {
+      // Run in behind: past the last defender, but not into the keeper's arms.
+      const last = field.reduce((a, o) => (o.pos.x * dir > a.pos.x * dir ? o : a));
+      const x = Math.max(p.pos.x * dir + 3, last.pos.x * dir + 2.5) * dir;
+      return this.inPlay(v(clamp(x, -this.length / 2 + 2.5, this.length / 2 - 2.5), p.pos.z * 0.6 + anchor.z * 0.4), 1);
+    }
+    if (p.runTime > 0) p.runTime = -4; // the run is off: the carrier is in trouble or looking elsewhere
+    const spacing = 2.5 * s + 0.5;
+    const others = mates.filter((m) => m !== p && !m.isKeeper);
+    // Lanes are judged from where the carrier and the defenders will be in a moment, as the pass would be played.
+    const from = v(carrier.pos.x + carrier.vel.x * 0.4, carrier.pos.z + carrier.vel.z * 0.4);
+    const soon = opps.map((o) => v(o.pos.x + o.vel.x * 0.4, o.pos.z + o.vel.z * 0.4));
+    const score = (c: V2): number => {
+      const near = this.nearest(field, c);
+      // Near their usual spot, but above all somewhere they can get to now.
+      let sc = Math.min(near ? dist(near.pos, c) : 6, 6) * 0.8 - dist(c, anchor) * 0.2 - dist(c, p.pos) * 0.35;
+      const to = v(c.x - from.x, c.z - from.z);
+      const d = len(to), n = norm(to);
+      if (d < 3) sc -= (3 - d) * 2;
+      for (const o of soon) {
+        const rx = o.x - from.x, rz = o.z - from.z;
+        const along = rx * n.x + rz * n.z;
+        if (along > 0.3 && along < d && Math.abs(rx * n.z - rz * n.x) < 1.3) sc -= 6;
+      }
+      // Team-mates count where they are heading; the carrier where they are.
+      for (const m of others) {
+        const md = dist(m === carrier || m === this.controlledBy[p.side] ? m.pos : m.aiTarget, c);
+        if (md < spacing) sc -= (spacing - md) * 1.5;
+      }
+      const ahead = (c.x - carrier.pos.x) * carrier.runDir.x + (c.z - carrier.pos.z) * carrier.runDir.z;
+      const off = Math.abs((c.x - carrier.pos.x) * carrier.runDir.z - (c.z - carrier.pos.z) * carrier.runDir.x);
+      if (ahead > 0 && ahead < 5 * s && off < 1.3) sc -= 4; // in the dribbler's way
+      return sc;
+    };
+    let best = this.inPlay(anchor, 1), bestScore = score(best);
+    // Stay put unless somewhere is clearly better, so nobody dithers.
+    const keep = this.inPlay(p.aiTarget, 1), keepScore = score(keep) + 1.2;
+    if (keepScore > bestScore) { best = keep; bestScore = keepScore; }
+    const r = 2 * s + 0.5;
+    for (const centre of [anchor, p.pos]) {
+      for (let i = 0; i < 8; i++) {
+        const a = (i * Math.PI) / 4;
+        const c = this.inPlay(v(centre.x + Math.cos(a) * r, centre.z + Math.sin(a) * r), 1);
+        const sc = score(c);
+        if (sc > bestScore) { best = c; bestScore = sc; }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * While the human closes down the dribbler, which other attacker this team-mate picks up: the human's other
+   * outfield players share out the attackers in our half, one each, nearest first. Null when nobody needs marking.
+   */
+  private markFor(p: SimPlayer, carrier: SimPlayer): SimPlayer | null {
+    const human = this.controlledBy[p.side];
+    if (!human || dist(human.pos, carrier.pos) > 3.5) return null;
+    const own = this.ownGoalX(p.side);
+    const free = this.teamOf(carrier.side).filter((o) => o !== carrier && !o.isKeeper && Math.abs(o.pos.x - own) < this.length * 0.55);
+    const markers = this.teamOf(p.side).filter((m) => m !== human && !m.isKeeper);
+    const pairs: [SimPlayer, SimPlayer, number][] = [];
+    for (const m of markers) for (const o of free) pairs.push([m, o, dist(m.pos, o.pos)]);
+    pairs.sort((a, c) => a[2] - c[2]);
+    const taken = new Set<SimPlayer>(), busy = new Set<SimPlayer>();
+    for (const [m, o] of pairs) {
+      if (busy.has(m) || taken.has(o)) continue;
+      if (m === p) return o;
+      busy.add(m); taken.add(o);
+    }
+    return null;
   }
 
   /** Keeper with the ball (or taking a goal kick): roll it to an open team-mate, or boot it upfield. */
