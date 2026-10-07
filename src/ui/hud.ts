@@ -1,4 +1,4 @@
-import type { MatchSim, Side, SimEvent } from '../game/sim';
+import type { MatchSim, Side, SimEvent, TrickKind } from '../game/sim';
 import { POSITION_LABELS, type Player } from '../data/types';
 import { wireDragSwap } from './dragSwap';
 import { soundSettings, wireSoundSettings } from './soundSettings';
@@ -629,9 +629,12 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
           showBanner(`<div class="save-text">${what} to ${esc(team.name)}</div>`, 1400);
           if (said) say(said);
         } else if (ev.type === 'trick' && ev.ok) {
+          const who = esc(ev.player?.name ?? '');
           showBanner(ev.kind === 'nutmeg'
-            ? `<div class="goal-text goal-text-small">NUTMEG!</div><div class="goal-sub">${esc(ev.player?.name ?? '')} through the legs!</div>`
-            : `<div class="save-text">Step-over! ${esc(ev.player?.name ?? '')} sends them the wrong way!</div>`, 1300);
+            ? `<div class="goal-text goal-text-small">NUTMEG!</div><div class="goal-sub">${who} through the legs!</div>`
+            : ev.kind === 'rainbow'
+              ? `<div class="goal-text goal-text-small">RAINBOW FLICK!</div><div class="goal-sub">${who} flicks it over their head!</div>`
+              : `<div class="save-text">${trickBanner(ev.kind as TrickKind, who)}</div>`, 1300);
           if (said) say(said);
         } else if (said) say(said);
       });
@@ -685,13 +688,25 @@ function toggleFullscreen(): void {
 const tipKeys = (profile: 'solo' | 'p1' | 'p2') => ({ shoot: firstKey(profile, 'shoot'), pass: firstKey(profile, 'pass') });
 const TOUCH_TIP_KEYS = { shoot: 'Shoot', pass: 'Pass' };
 
+/** The banner for a skill move that beat a defender (the name is already escaped). */
+function trickBanner(kind: TrickKind, who: string): string {
+  switch (kind) {
+    case 'feint': return `Body swerve! ${who} wobbles past!`;
+    case 'dragback': return `Drag-back! ${who} turns away!`;
+    case 'cruyff': return `Cruyff turn! ${who} fools them!`;
+    case 'roulette': return `Roulette! ${who} spins away!`;
+    case 'elastico': return `Elastico! ${who} flicks it round them!`;
+    default: return `Step-over! ${who} sends them the wrong way!`;
+  }
+}
+
 const kbd = (a: 'shoot' | 'pass' | 'trick') => `<kbd>${esc(firstKey('solo', a))}</kbd>`;
 /** Built on demand so the cards show the player's own key bindings. */
 const TUTORIAL_TEXT = (): Record<Exclude<TutorialStep, 'done'>, { title: string; keys: string; touch: string }> => ({
   move: { title: '1. Run with the ball', keys: `Use <kbd>${esc(moveKeysLabel('solo'))}</kbd> or the stick to dribble to the yellow star.`, touch: 'Drag the joystick to dribble to the yellow star.' },
   pass: { title: '2. Pass to your team-mate', keys: `Point towards your team-mate and press ${kbd('pass')} to pass. Hold it longer for a longer pass.`, touch: 'Point the joystick towards your team-mate and tap <b>Pass</b>. Hold it longer for a longer pass.' },
   shoot: { title: '3. Score a goal!', keys: `Run at goal, hold ${kbd('shoot')} to power up, then let go to shoot.`, touch: 'Run at goal, hold <b>Shoot</b> to power up, then let go.' },
-  trick: { title: '4. Show off a trick', keys: `Press ${kbd('trick')} for a step-over. With a defender right in front, it's a nutmeg!`, touch: 'Tap <b>Trick</b> for a step-over. With a defender right in front, it\'s a nutmeg!' },
+  trick: { title: '4. Show off a trick', keys: `Press ${kbd('trick')} for a skill move. Push back or sideways at the same time for a different one!`, touch: 'Tap <b>Trick</b> for a skill move. Push back or sideways at the same time for a different one!' },
 });
 
 const GOAL_LINES = ['What a strike!', 'Top corner!', 'The keeper had no chance!', 'Cool as you like!', 'Smashed it!', 'Into the net!', 'Goal of the season?', 'Brilliant finish!'];
