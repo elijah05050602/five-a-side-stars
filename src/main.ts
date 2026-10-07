@@ -86,7 +86,7 @@ const router: Router = {
         void ahead.catch(() => ({})).then((a) => router.go(finishMatch(result, o, stickers, a)));
       },
       () => { match = null; router.go(o.tournament ? { name: 'tournament', state: o.tournament } : o.league ? { name: 'league' } : o.career ? { name: 'career' } : { name: 'menu' }); },
-      { weather: o.weather });
+      { weather: o.weather, starId: o.starId });
     // `?debug` exposes the running match so screenshot scripts can poke at it.
     if (location.search.includes('debug')) (window as unknown as { __match?: MatchScene }).__match = match;
   },

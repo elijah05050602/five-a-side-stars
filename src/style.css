@@ -675,6 +675,31 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .psc-skills { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .9rem; }
 .psc-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .85rem; color: #3a4a63; }
 .psc-stats strong { color: var(--navy); }
+.star-card, .star-pick { max-width: 900px; margin: 14px auto 0; border: 3px solid var(--yellow-deep); background: linear-gradient(180deg, #fff8dc, #ffffff 40%); }
+.star-card h4 { margin: 10px 0 6px; }
+.star-name { font-size: 1.3rem; }
+.star-card .psc-top { flex-wrap: wrap; }
+.star-points { margin-left: auto; display: flex; flex-direction: column; align-items: center; background: #eef2ff; border: 2px solid var(--navy); border-radius: 14px; padding: 4px 12px; font-size: .8rem; font-weight: 700; }
+.star-points strong { font-size: 1.6rem; line-height: 1; }
+.star-points.has-points { background: var(--yellow); box-shadow: var(--drop); }
+.star-grew { font-weight: 700; color: var(--green-ink); }
+.star-train { gap: 8px; flex-wrap: nowrap; }
+.star-train .btn-icon { min-height: 44px; min-width: 44px; padding: 0; }
+.star-train .btn:disabled { opacity: .35; cursor: default; }
+.xp-bar { display: inline-block; width: 64px; height: 10px; border-radius: 999px; background: #dfe5f0; border: 2px solid var(--navy); overflow: hidden; }
+.xp-bar i { display: block; height: 100%; background: var(--yellow-deep); }
+.star-skills .skill-row { grid-template-columns: minmax(110px, 1fr) auto auto; }
+@media (max-width: 400px) { .xp-bar { width: 40px; } }
+.milestones { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+.milestone { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 1.6rem; padding: 6px 4px; border-radius: 12px; background: #eef2ff; filter: grayscale(1); opacity: .45; text-align: center; }
+.milestone small { font-size: .7rem; font-weight: 700; color: var(--navy); line-height: 1.1; }
+.milestone.is-got { filter: none; opacity: 1; background: #fff3c4; border: 2px solid var(--yellow-deep); }
+.star-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.star-pick-btn { display: flex; align-items: center; gap: 10px; text-align: left; justify-content: flex-start; min-height: 64px; }
+.star-pick-btn.is-suggested { border-color: var(--yellow-deep); }
+.star-note { background: #fff3c4; border: 3px solid var(--yellow-deep); border-radius: 14px; padding: 8px 14px; margin: 10px 0; text-align: left; }
+.star-note h3 { margin: 0 0 4px; }
+.star-note .plain-list { margin: 0; }
 
 /* Positions and formations */
 .chip-mid { background: #e5dcff; }

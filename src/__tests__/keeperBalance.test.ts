@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { IDLE_INPUT, MatchSim, type Side } from '../game/sim';
 import type { Difficulty } from '../data/types';
 import { team } from './helpers';
+import { seedRandom } from './setup';
 
+// The teams are made when the file loads, before each test's seed, so seed here too: their looks (build, height) change a keeper's reach.
+seedRandom(4321);
 const home = team('h', 'Home', 'U8');
 // The same players under new ids, so both keepers are equally good and only the difficulty differs.
 const away = { ...home, id: 'a', name: 'Away', players: home.players.map((p) => ({ ...p, id: `${p.id}-a` })) };

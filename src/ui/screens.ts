@@ -33,6 +33,8 @@ export interface StartOptions {
   league?: boolean;
   /** Career match: the result feeds the career and grows the players. */
   career?: boolean;
+  /** Career match: the Star's player id, marked with a gold star on the pitch. */
+  starId?: string;
   cpuLevel?: number;
   /** Weather and time of day for the match; 'random' or missing picks for you. */
   weather?: WeatherChoice;
