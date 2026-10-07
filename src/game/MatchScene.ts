@@ -42,18 +42,13 @@ export interface SceneOptions {
  * build-up before them at normal speed.
  */
 const REPLAY_BEFORE = 210;
-const REPLAY_AFTER = 72;
+const REPLAY_AFTER = 45;
 const REPLAY_SLOW = 90;
-/** Seconds after a goal before its replay starts: the ball hitting the net is seen live, and then filmed to the end. */
-const REPLAY_WAIT = 1.3;
-/** The replay's slow motion switches to the goal-line camera once the ball is this close to the goal line. */
-const GOAL_CAM_RANGE = 7;
 
 /** One recorded frame of the match, used for the instant replay. */
 interface ReplayFrame {
   players: { x: number; z: number; facing: number; speed: number; kick: number; dive: number; diveDir: number; stun: number; recover: number }[];
-  /** g: the goal the ball has gone into (1 or -1), or 0. */
-  ball: { x: number; y: number; z: number; vx: number; vz: number; g: -1 | 0 | 1 };
+  ball: { x: number; y: number; z: number; vx: number; vz: number };
 }
 
 export interface MatchResult {
@@ -111,7 +106,7 @@ export class MatchScene {
   private readonly extras: ReturnType<typeof pitchExtras>;
   /** Rolling record of the last few seconds, oldest first. */
   private readonly history: ReplayFrame[] = [];
-  private replay: { frames: ReplayFrame[]; t: number; wait: number; slowFrom: number; hold: number; goalCam: boolean } | null = null;
+  private replay: { frames: ReplayFrame[]; t: number; wait: number; slowFrom: number; hold: number } | null = null;
   /** Frames filmed since the latest goal, for the end of its replay. */
   private afterGoal = 0;
   /** The team-mate waving for a pass, chosen afresh every so often. */
@@ -393,26 +388,9 @@ export class MatchScene {
     const b = this.sim.ball;
     this.history.push({
       players: this.sim.players.map((p) => ({ x: p.pos.x, z: p.pos.z, facing: p.facing, speed: Math.hypot(p.vel.x, p.vel.z), kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, recover: Math.min(1, p.recover / DIVE_RECOVER) })),
-      ball: { x: b.pos.x, y: b.y, z: b.pos.z, vx: b.vel.x, vz: b.vel.z, g: b.inGoal },
+      ball: { x: b.pos.x, y: b.y, z: b.pos.z, vx: b.vel.x, vz: b.vel.z },
     });
     if (this.history.length > 300) this.history.shift();
-  }
-
-  /**
-   * The replay's goal-line camera: low down by the corner of the goal, looking across the goal mouth, so the
-   * net bulging out at the back and sides shows side-on. Upright screens get a higher view in front of the goal.
-   */
-  private goalCamShot(): { pos: THREE.Vector3; look: THREE.Vector3 } {
-    const last = this.replay?.frames[this.replay.frames.length - 1];
-    const sx = (last ? Math.sign(last.ball.x) : 1) || 1;
-    const L = this.sim.length / 2, g = this.sim;
-    if (this.upfield) {
-      return { pos: new THREE.Vector3(sx * (L - 4.2), g.goalHeight + 2.4, 1.2), look: new THREE.Vector3(sx * (L + g.goalDepth * 0.6), 0.5, 0) };
-    }
-    return {
-      pos: new THREE.Vector3(sx * (L - 1.1), g.goalHeight + 0.3, g.goalWidth / 2 + 3.4),
-      look: new THREE.Vector3(sx * (L + g.goalDepth * 0.5), g.goalHeight * 0.35, 0),
-    };
   }
 
   /** Play the build-up back at normal speed, then the shot and the ball hitting the net slowly. Returns true while the replay has the screen. */
@@ -425,11 +403,7 @@ export class MatchScene {
       r.frames = this.history.slice(-(REPLAY_BEFORE + this.afterGoal));
       r.slowFrom = Math.max(0, r.frames.length - this.afterGoal - REPLAY_SLOW);
     }
-    if (r.t === 0) {
-      this.hud.setReplay(true);
-      // The nets start still, and bulge again when the replayed ball hits them.
-      for (const n of this.extras.nets) n.reset();
-    }
+    if (r.t === 0) this.hud.setReplay(true);
     const speed = Math.floor(r.t * 60) < r.slowFrom ? 1 : 0.55;
     r.t += dt * speed;
     const idx = Math.min(r.frames.length - 1, Math.floor(r.t * 60));
@@ -442,10 +416,6 @@ export class MatchScene {
       m.setSelected(false, 0xffffff);
     });
     this.ball.update(f.ball.x, f.ball.y, f.ball.z, this.sim.ball.radius, f.ball.vx, f.ball.vz, dt * speed);
-    const netBall = { x: f.ball.x, y: f.ball.y, z: f.ball.z, r: this.sim.ball.radius, inGoal: f.ball.g };
-    for (const n of this.extras.nets) n.update(dt * speed, netBall);
-    // In the slow motion near the goal, a low camera by the goal shows the ball hitting the net.
-    r.goalCam = idx >= r.slowFrom && Math.abs(f.ball.x) > this.sim.length / 2 - GOAL_CAM_RANGE;
     this.camTarget.lerp(new THREE.Vector3(THREE.MathUtils.clamp(f.ball.x, -this.sim.length * 0.4, this.sim.length * 0.4), 0, THREE.MathUtils.clamp(f.ball.z, -this.sim.width * 0.25, this.sim.width * 0.25)), 1 - Math.pow(0.02, dt));
     // Hold the last picture a moment before cutting to the celebration.
     if (idx >= r.frames.length - 1 && (r.hold += dt) > 0.4) { this.replay = null; this.hud.setReplay(false); }
@@ -599,7 +569,7 @@ export class MatchScene {
       if (!this.calm) this.puffFor(ev);
       if (ev.type === 'goal') {
         this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, this.sim.score[0], this.sim.score[1]);
-        if (this.sim.mode !== 'training' && !getSettings().reduceMotion && this.history.length > 30) { this.replay = { frames: [], t: 0, wait: REPLAY_WAIT, slowFrom: 0, hold: 0, goalCam: false }; this.afterGoal = 0; }
+        if (this.sim.mode !== 'training' && !getSettings().reduceMotion && this.history.length > 30) { this.replay = { frames: [], t: 0, wait: 1.1, slowFrom: 0, hold: 0 }; this.afterGoal = 0; }
       }
     }
     if (this.coach) {
@@ -622,17 +592,17 @@ export class MatchScene {
     this.weather.update(dt);
     this.effects(dt);
     this.crowd.update(dt);
+    // The nets follow the ball in live play only; a replay leaves them to settle.
+    const b = this.sim.ball;
+    for (const n of this.extras.nets) n.update(dt, { x: b.pos.x, y: b.y, z: b.pos.z, r: b.radius, inGoal: b.inGoal });
 
     // Sync models
-    const b = this.sim.ball;
     const scale = this.sim.stats.scale;
     if (this.runReplay(dt, scale)) {
-      const shot = this.replay?.goalCam ? this.goalCamShot() : null;
-      const k = 1 - Math.pow(shot ? 0.004 : 0.02, dt);
-      this.camPos.lerp(shot ? shot.pos : this.cameraGoal(this.camTarget), k);
-      this.camLook.lerp(shot ? shot.look : new THREE.Vector3(this.camTarget.x, 0.5, this.camTarget.z), k);
+      const goal = this.cameraGoal(this.camTarget);
+      this.camPos.lerp(goal, 1 - Math.pow(0.02, dt));
       this.camera.position.copy(this.camPos);
-      this.camera.lookAt(this.camLook);
+      this.camera.lookAt(this.camTarget.x, 0.5, this.camTarget.z);
       this.renderer.render(this.scene, this.camera);
       return;
     }
@@ -674,8 +644,6 @@ export class MatchScene {
     }
     this.updateBench(dt);
     this.ball.update(b.pos.x, b.y, b.pos.z, b.radius, b.vel.x, b.vel.z, dt);
-    const netBall = { x: b.pos.x, y: b.y, z: b.pos.z, r: b.radius, inGoal: b.inGoal };
-    for (const n of this.extras.nets) n.update(dt, netBall);
 
     // Camera follows a blend of the ball and the controlled player, clamped to the pitch.
     const c1 = this.sim.controlled, c2 = this.sim.controlled2;

@@ -22,7 +22,7 @@ npm run typecheck && npm run lint && npm test && npm run build && npm run e2e
 - `src/game/MatchScene.ts`: draws a sim and runs the match loop. `src/game/background.ts` and
   `simWorker.ts` play the computer-vs-computer matches off the main thread.
 - `src/game/goalFrame.ts`: the posts, crossbar and net, shared by the sim (the ball bounces off the frame and
-  sinks into the netting) and the drawn net in `Pitch.ts` (`GoalNet`), which follows the ball, including in replays.
+  sinks into the netting) and the drawn net in `Pitch.ts` (`GoalNet`), which follows the ball in live play (not in replays).
 - `src/game/supers.ts`: the super skills' names, colours and timings. Their rules are in `sim.ts` (`superFor`, `runSuper`), and the cutscene is in `MatchScene.ts` (`startCut`). Super code runs inside `safely()` and the cutscene inside try/catch, so a bug there switches supers off for the match instead of stopping it.
 - `src/game/league.ts`, `tournament.ts` and `career.ts`: the saved modes.
 - `src/ui/screens.ts` routes between screens. Each screen is `src/ui/screens/<name>.ts`, with
