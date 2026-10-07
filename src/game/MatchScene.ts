@@ -32,6 +32,8 @@ export type SimMode = NonNullable<SimConfig['mode']>;
 export interface SceneOptions {
   /** Weather and time of day; 'random' picks for you. */
   weather?: WeatherChoice;
+  /** A career match: the id of the player's Star, who wears a gold star over their head. */
+  starId?: string;
 }
 
 /**
@@ -210,6 +212,7 @@ export class MatchScene {
       const kit = p.isKeeper ? team.keeperKit : team.kit;
       const m = new PlayerModel(p.info, kit, this.sim.stats.scale);
       m.setTeamColour(ringColours[p.side]);
+      if (p.side === 0 && options.starId && p.info.id === options.starId) m.setStar(true);
       this.models.set(p, m);
       this.scene.add(m.group);
     }

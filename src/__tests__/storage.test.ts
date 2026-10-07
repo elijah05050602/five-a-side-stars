@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { cupInProgress, deleteTeam, exportSave, getLeague, getSettings, getTeam, getTeams, getTournament, hasBackup, importSave, reloadSave, resetAll, restoreBackup, saveTeam, setLeague, setTournament, updateSettings } from '../data/storage';
+import { cupInProgress, deleteTeam, exportSave, getCareer, getLeague, getSettings, getTeam, getTeams, getTournament, hasBackup, importSave, reloadSave, resetAll, restoreBackup, saveTeam, setLeague, setTournament, updateSettings } from '../data/storage';
 import { getProgress } from '../data/progress';
 import { createLeague } from '../game/league';
+import { createCareer, freshSeasonStats } from '../game/career';
 import { createTournament } from '../game/tournament';
 import { team } from './helpers';
 
@@ -67,6 +68,25 @@ describe('save file', () => {
     localStorage.setItem(KEY, '{not json');
     reloadSave();
     expect(getTeams().length).toBe(2);
+  });
+
+  it('gives a career saved before Stars its top scorer as the Star, and asks to pick', () => {
+    resetAll();
+    const { career, team: you } = createCareer(team('src', 'Old Timers', 'U8'), 60);
+    saveTeam(you);
+    const scorer = you.players[2];
+    const old: Record<string, unknown> = { ...career, careerStats: { [scorer.id]: { ...freshSeasonStats(), played: 4, goals: 6 } } };
+    for (const k of ['starId', 'starPicked', 'trainingPoints', 'milestones']) delete old[k];
+    const save = JSON.parse(localStorage.getItem(KEY)!);
+    save.career = old;
+    localStorage.setItem(KEY, JSON.stringify(save));
+    reloadSave();
+    const c = getCareer()!;
+    expect(c.starId).toBe(scorer.id);
+    expect(c.starPicked).toBe(false);
+    expect(c.trainingPoints).toBe(0);
+    expect(c.milestones).toEqual([]);
+    expect(c.year).toBe(1);
   });
 
   it('keeps settings and the league in the same save', () => {

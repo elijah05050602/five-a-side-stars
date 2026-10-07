@@ -1,6 +1,6 @@
 import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, uid } from './defaults';
 import type { LeagueState } from '../game/league';
-import type { CareerState } from '../game/career';
+import { defaultStar, type CareerState } from '../game/career';
 import type { TournamentState } from '../game/tournament';
 import { ensureSkills, fitSkills } from './skills';
 import { freshProgress, type Progress } from './progress';
@@ -102,6 +102,7 @@ function readSave(raw: string): { save: SaveFile; repaired: boolean } {
   if (parsed.progress !== undefined && !progress) repaired = true;
   const league = readOptional(parsed.league, isLeague);
   const career = readOptional(parsed.career, isCareer);
+  if (career && career !== 'broken') mendStar(career, teams);
   const tournament = readOptional(parsed.tournament, isTournament);
   if ([league, career, tournament].some((x) => x === 'broken')) repaired = true;
   return {
@@ -252,6 +253,22 @@ function isLeague(v: unknown): v is LeagueState {
 function isCareer(v: unknown): v is CareerState {
   return isObj(v) && typeof v.teamId === 'string' && typeof v.year === 'number' && typeof v.season === 'number' && isLeague(v.league) && isObj(v.seasonStats) && isObj(v.careerStats) && Array.isArray(v.history);
 }
+/**
+ * Star fields (added with Your Star): a career saved before them, or with a Star who has
+ * left the squad, gets the best player so far and a prompt to pick.
+ */
+function mendStar(c: CareerState, teams: Team[]): void {
+  const raw = c as Partial<CareerState>;
+  const team = teams.find((t) => t.id === c.teamId);
+  const valid = typeof raw.starId === 'string' && !!team?.players.some((p) => p.id === raw.starId);
+  if (!valid) {
+    c.starId = team ? defaultStar(team, c.careerStats) : '';
+    c.starPicked = false;
+  } else c.starPicked = raw.starPicked === true;
+  c.trainingPoints = typeof raw.trainingPoints === 'number' && Number.isFinite(raw.trainingPoints) && raw.trainingPoints >= 0 ? Math.floor(raw.trainingPoints) : 0;
+  c.milestones = Array.isArray(raw.milestones) ? raw.milestones.filter((m): m is string => typeof m === 'string') : [];
+}
+
 function isTournament(v: unknown): v is TournamentState {
   if (!isObj(v) || typeof v.humanTeamId !== 'string' || !Array.isArray(v.semis) || v.semis.length !== 2 || !['semi', 'final', 'done'].includes(v.stage as string)) return false;
   for (const f of [...v.semis, ...(v.final ? [v.final] : [])] as Record<string, unknown>[]) {
