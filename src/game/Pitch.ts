@@ -1,6 +1,17 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { addOutline, toonMaterial } from './toon';
 import { POST_R, netPresses, roofHeight, type GoalShape, type NetPanel } from './goalFrame';
+import { AdBoards, type BoardFace, type BoardTeam } from './adBoards';
+import { GROUNDS, type Ground } from './grounds';
+import { shared } from './renderer';
+import { SKYLINE_RADIUS } from './skyline';
+import {
+  StadiumLife, bannerMaterial, buildBallStopNetting, buildBigScreen, buildDugout, buildEndStand, buildExtraBunting, buildFence,
+  buildGulls, buildKiosk, buildPitchside, buildPoleFlags, buildStand, buildTree, ledFace, standLayout,
+} from './stadium';
+
+export { standLayout, type StandLayout } from './stadium';
 
 export interface PitchDims {
   length: number; width: number; goalWidth: number; goalHeight: number; goalDepth: number;
@@ -14,6 +25,17 @@ export interface PitchDims {
   netDetail?: NetDetail;
   netCols?: number;
   calmNets?: boolean;
+  /** Where the match is played (default Mount Apo Park), and the two teams, for the boards, banners and flags. */
+  ground?: Ground;
+  teams?: [BoardTeam, BoardTeam];
+  /** Graphics: smaller pictures on the boards (phones). */
+  lite?: boolean;
+  /** Graphics: the end stand, the people by the pitch and the flags that wave (Medium and High). */
+  extras?: boolean;
+  /** Graphics: fine grass blades over the stripes for the low replay cameras (Medium and High). */
+  grassDetail?: boolean;
+  /** Reduce motion: the boards change without sliding and nothing flashes. */
+  calm?: boolean;
 }
 
 /** Where the four floodlight towers stand: [x, y, z] of each lamp head. */
@@ -23,22 +45,60 @@ export function floodlightPositions(L: number, W: number): [number, number, numb
   return out;
 }
 
-/** The parts of the pitch the match scene animates: nets and the big scoreboard. The fans live in Crowd.ts. */
-export interface PitchExtras { nets: GoalNet[]; scoreboard: Scoreboard }
+/** The parts of the pitch the match scene animates: nets, the big scoreboard, the LED boards and the stadium's little movements. The fans live in Crowd.ts. */
+export interface PitchExtras { nets: GoalNet[]; scoreboard: Scoreboard; boards: AdBoards; life: StadiumLife }
 export function pitchExtras(pitch: THREE.Group): PitchExtras {
   return pitch.userData.extras as PitchExtras;
 }
 
-const KIT_PALETTE = ['#e63946', '#3da5f4', '#ffd23f', '#2eb872', '#ff6fb5', '#ff7a00', '#6a4c93', '#ffffff', '#1b2a41'];
+const DEFAULT_TEAMS: [BoardTeam, BoardTeam] = [
+  { name: 'Home', short: 'HOM', shirt: '#e63946', shirt2: '#ffffff' },
+  { name: 'Away', short: 'AWY', shirt: '#3da5f4', shirt2: '#1b2a41' },
+];
+
+/** Worn grass where the most running happens: in front of each goal and round the centre spot. */
+export interface GrassWear { length: number; width: number; goalWidth: number; planeLength: number; planeWidth: number }
 
 /** Mown stripes with a sprinkle of lighter and darker blades, so the grass is not a flat colour. */
-export function grassTexture(stripes: number, light: string, dark: string, speckle = true): THREE.CanvasTexture {
+export function grassTexture(stripes: number, light: string, dark: string, speckle = true, wear?: GrassWear): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 1024; c.height = 1024;
   const ctx = c.getContext('2d')!;
   for (let i = 0; i < stripes; i++) {
     ctx.fillStyle = i % 2 === 0 ? light : dark;
     ctx.fillRect((i * 1024) / stripes, 0, 1024 / stripes + 1, 1024);
+  }
+  if (wear) {
+    // Canvas x runs along the pitch, canvas y across it (top is the far touchline).
+    const px = (x: number) => (x / wear.planeLength + 0.5) * 1024, pz = (z: number) => (z / wear.planeWidth + 0.5) * 1024;
+    const scale = 1024 / wear.planeLength;
+    const patch = (x: number, z: number, rx: number, rz: number, alpha: number) => {
+      ctx.save();
+      ctx.translate(px(x), pz(z));
+      ctx.scale(rx * scale, rz * 1024 / wear.planeWidth);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      g.addColorStop(0, `rgba(196,184,120,${alpha})`);
+      g.addColorStop(0.55, `rgba(170,175,110,${alpha * 0.5})`);
+      g.addColorStop(1, 'rgba(170,175,110,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(0, 0, 1, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    };
+    for (const sx of [-1, 1]) {
+      // The goalmouth takes the most wear, the keeper's spot on the line most of all.
+      patch(sx * (wear.length / 2 - 0.9), 0, 1.6, wear.goalWidth * 0.55, 0.42);
+      patch(sx * (wear.length / 2 - 0.35), 0, 0.7, wear.goalWidth * 0.3, 0.38);
+    }
+    patch(0, 0, 1.4, 1.4, 0.3);
+    // Scuffs: little bare streaks, thickest in the goalmouths.
+    for (let i = 0; i < 700; i++) {
+      const sx = Math.random() < 0.5 ? -1 : 1;
+      const mouth = Math.random() < 0.8;
+      const x = mouth ? sx * (wear.length / 2 - Math.random() * 2.2) : (Math.random() - 0.5) * 3;
+      const z = mouth ? (Math.random() - 0.5) * wear.goalWidth * 1.1 : (Math.random() - 0.5) * 3;
+      ctx.fillStyle = Math.random() < 0.6 ? 'rgba(150,130,80,0.22)' : 'rgba(225,215,160,0.18)';
+      ctx.fillRect(px(x), pz(z), 2 + Math.random() * 5, 1 + Math.random() * 2);
+    }
   }
   if (speckle) {
     for (let i = 0; i < 9000; i++) {
@@ -53,58 +113,103 @@ export function grassTexture(stripes: number, light: string, dark: string, speck
   return tex;
 }
 
-/** Cheerful advertising-board style panels: colour blocks with stars and balls, no words. */
-function boardTexture(): THREE.CanvasTexture {
+let bladeTex: THREE.CanvasTexture | null = null;
+/** A small tile of grass blades, repeated every metre or so over the stripes. Painted once and kept. */
+function bladeTexture(): THREE.CanvasTexture {
+  if (bladeTex) return bladeTex;
   const c = document.createElement('canvas');
-  c.width = 1024; c.height = 128;
+  c.width = c.height = 256;
   const ctx = c.getContext('2d')!;
-  const colours = ['#3da5f4', '#ffd23f', '#2eb872', '#ff6fb5', '#ff7a00', '#6a4c93'];
-  const panels = 8;
-  for (let i = 0; i < panels; i++) {
-    ctx.fillStyle = colours[i % colours.length];
-    ctx.fillRect((i * 1024) / panels, 0, 1024 / panels, 128);
-    const cx = (i + 0.5) * (1024 / panels), cy = 64;
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    if (i % 2 === 0) {
-      // Star
-      ctx.beginPath();
-      for (let k = 0; k < 10; k++) { const r = k % 2 === 0 ? 34 : 14; const a = (k / 10) * Math.PI * 2 - Math.PI / 2; ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); }
-      ctx.closePath(); ctx.fill();
-    } else {
-      // Ball
-      ctx.beginPath(); ctx.arc(cx, cy, 30, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#1b1b1b';
-      for (let k = 0; k < 5; k++) { const a = (k / 5) * Math.PI * 2; ctx.beginPath(); ctx.arc(cx + Math.cos(a) * 17, cy + Math.sin(a) * 17, 7, 0, Math.PI * 2); ctx.fill(); }
-      ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgb(128,128,128)';
+  ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 2600; i++) {
+    const x = Math.random() * 256, y = Math.random() * 256, len = 4 + Math.random() * 9, lean = (Math.random() - 0.5) * 3;
+    const v = Math.random() < 0.5 ? 70 + Math.random() * 40 : 170 + Math.random() * 60;
+    ctx.strokeStyle = `rgb(${v},${v},${v})`;
+    ctx.lineWidth = 1 + Math.random();
+    // Drawn three times across each edge so the tile repeats without a seam.
+    for (const dx of [-256, 0, 256]) for (const dy of [-256, 0, 256]) {
+      ctx.beginPath(); ctx.moveTo(x + dx, y + dy); ctx.lineTo(x + dx + lean, y + dy - len); ctx.stroke();
     }
   }
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  for (let i = 1; i < panels; i++) ctx.fillRect((i * 1024) / panels - 2, 0, 4, 128);
+  bladeTex = shared(new THREE.CanvasTexture(c));
+  bladeTex.wrapS = bladeTex.wrapT = THREE.RepeatWrapping;
+  bladeTex.anisotropy = 8;
+  return bladeTex;
+}
+
+/** Fine blades over the grass's own picture, so the low cameras see grass rather than a smooth green. */
+function addGrassBlades(mat: THREE.Material, repeat: [number, number]): void {
+  const uniforms = { uBlades: { value: bladeTexture() }, uBladeRepeat: { value: new THREE.Vector2(...repeat) } };
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform sampler2D uBlades;\nuniform vec2 uBladeRepeat;')
+      .replace('#include <map_fragment>', '#include <map_fragment>\n#ifdef USE_MAP\n  diffuseColor.rgb *= mix(0.86, 1.12, texture2D(uBlades, vMapUv * uBladeRepeat).r);\n#endif');
+  };
+  mat.customProgramCacheKey = () => 'grass-blades';
+}
+
+/** A strip along the boards' backs: navy with a faint Goal Rush! stencil, repeated every three metres. */
+function boardBackTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#1b2a41';
+  ctx.fillRect(0, 0, 512, 128);
+  ctx.font = '600 54px Fredoka, "Trebuchet MS", system-ui, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.fillText('GOAL RUSH!', 256, 68);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
   return tex;
 }
 
-/** Grass, markings, rebound boards, two goals with nets, flags, a little stand and some scenery. */
+/** "GOAL RUSH!" painted faintly on the grass beside the halfway line, by the far touchline. */
+function pitchArt(width: number): THREE.Mesh {
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 160;
+  const ctx = c.getContext('2d')!;
+  ctx.font = '600 128px Fredoka, "Trebuchet MS", system-ui, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('GOAL RUSH!', 512, 88);
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 8;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, width * 160 / 1024), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.32, depthWrite: false }));
+  mesh.rotation.x = -Math.PI / 2;
+  return mesh;
+}
+
+/** Grass, markings, LED boards, two goals with nets, flags, the stadium round it and the ground's own scenery. */
 export function buildPitch(d: PitchDims): THREE.Group {
   const g = new THREE.Group();
   const L = d.length, W = d.width;
+  const ground = d.ground ?? GROUNDS.apo;
+  const teams = d.teams ?? DEFAULT_TEAMS;
+  const life = new StadiumLife(!!d.calm);
+  const extras = d.extras ?? true;
   // The grass fills most of the screen, so on Low it skips the costly physically based lighting.
   const surface = (opts: { map: THREE.Texture; roughness: number }): THREE.MeshStandardMaterial | THREE.MeshLambertMaterial =>
     d.pbr === false ? new THREE.MeshLambertMaterial({ map: opts.map }) : new THREE.MeshStandardMaterial(opts);
 
-  const grass = new THREE.Mesh(new THREE.PlaneGeometry(L + 6, W + 6), surface({ map: grassTexture(12, '#3cc47c', '#33b36f'), roughness: 1 }));
+  const grassMat = surface({ map: grassTexture(12, '#3cc47c', '#33b36f', true, { length: L, width: W, goalWidth: d.goalWidth, planeLength: L + 6, planeWidth: W + 6 }), roughness: 1 });
+  if (d.grassDetail) addGrassBlades(grassMat, [(L + 6) / 1.1, (W + 6) / 1.1]);
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(L + 6, W + 6), grassMat);
   grass.rotation.x = -Math.PI / 2;
   grass.receiveShadow = true;
   grass.userData.grass = true;
   g.add(grass);
 
-  // Surround: darker, rougher grass outside the boards.
-  const apronTex = grassTexture(1, '#259a60', '#259a60');
+  // Surround: darker, rougher grass outside the boards (sand at the seaside).
+  const apronTex = grassTexture(1, ground.surround, ground.surround);
   apronTex.wrapS = apronTex.wrapT = THREE.RepeatWrapping;
-  apronTex.repeat.set(6, 6);
-  const apron = new THREE.Mesh(new THREE.PlaneGeometry(L + 60, W + 60), surface({ map: apronTex, roughness: 1 }));
+  // Out to the painted skyline (skyline.ts), so no sky shows under the hills from a high camera.
+  apronTex.repeat.set(36, 36);
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(SKYLINE_RADIUS * 2.2, SKYLINE_RADIUS * 2.2), surface({ map: apronTex, roughness: 1 }));
   apron.rotation.x = -Math.PI / 2;
   apron.position.y = -0.01;
   apron.receiveShadow = true;
@@ -119,7 +224,8 @@ export function buildPitch(d: PitchDims): THREE.Group {
     m4.makeRotationX(-Math.PI / 2).setPosition(x, 0.0, z);
     daisy.setMatrixAt(i, m4);
   }
-  g.add(daisy);
+  if (ground.surround !== '#e3cf9a') g.add(daisy); // no daisies on the sand
+  else { daisy.geometry.dispose(); (daisy.material as THREE.Material).dispose(); daisy.dispose(); }
 
   // Line markings as thin flat boxes slightly above the grass.
   const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -144,63 +250,89 @@ export function buildPitch(d: PitchDims): THREE.Group {
   };
   flat(new THREE.RingGeometry(W * 0.12 - lw, W * 0.12, 48), 0, 0);
   flat(new THREE.CircleGeometry(0.12, 12), 0, 0, 0.006);
+  const flagMat = new THREE.MeshBasicMaterial({ color: teams[0].shirt, side: THREE.DoubleSide });
   for (const sx of [-1, 1]) {
     flat(new THREE.RingGeometry(W * 0.26 - lw, W * 0.26, 48, 1, sx > 0 ? Math.PI / 2 : -Math.PI / 2, Math.PI), (sx * L) / 2, 0);
     flat(new THREE.CircleGeometry(0.12, 12), sx * (L / 2 - W * 0.26 - 0.6), 0, 0.006);
-    // Corner arcs and flags
+    // Corner arcs and flags in the home team's colour
     for (const sz of [-1, 1]) {
       const start = sx > 0 ? (sz > 0 ? Math.PI : Math.PI / 2) : (sz > 0 ? -Math.PI / 2 : 0);
       flat(new THREE.RingGeometry(0.6 - lw, 0.6, 16, 1, start, Math.PI / 2), (sx * L) / 2, (sz * W) / 2);
-      g.add(buildFlag((sx * L) / 2 + sx * 0.25, (sz * W) / 2 + sz * 0.25));
+      g.add(buildFlag((sx * L) / 2 + sx * 0.25, (sz * W) / 2 + sz * 0.25, flagMat, extras ? life : null));
     }
   }
 
-  // Rebound boards around the pitch, leaving the goal mouths open.
+  // LED boards round the pitch, leaving the goal mouths open. The board itself is a navy box with a
+  // stencilled back; its pitch-side face is part of the one AdBoards mesh made below.
   const boardH = 0.9;
-  const boardTex = boardTexture();
+  const leds: BoardFace[] = [];
+  const bodyMat = toonMaterial({ color: 0x1b2a41 });
+  const backTex = boardBackTexture();
+  const backMat = toonMaterial({ map: backTex });
   const boardTop = toonMaterial({ color: 0x1b2a41 });
-  const board = (x: number, z: number, lx: number, lz: number) => {
-    const tex = boardTex.clone();
-    tex.needsUpdate = true;
-    tex.repeat.set(Math.max(1, Math.round(Math.max(lx, lz) / 8)), 1);
-    const mat = surface({ map: tex, roughness: 0.7 });
-    const m = new THREE.Mesh(new THREE.BoxGeometry(lx, boardH, lz), mat);
+  const t = 0.15;
+  const board = (x: number, z: number, lx: number, lz: number, nx: number, nz: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(lx, boardH, lz), bodyMat);
     m.position.set(x, boardH / 2, z);
     m.castShadow = true;
     g.add(m);
     const cap = new THREE.Mesh(new THREE.BoxGeometry(lx + 0.06, 0.1, lz + 0.06), boardTop);
     cap.position.set(x, boardH + 0.03, z);
     g.add(cap);
+    const len = Math.max(lx, lz);
+    const normal = new THREE.Vector3(nx, 0, nz);
+    leds.push(ledFace(x + nx * (t / 2 + 0.004), boardH * 0.5, z + nz * (t / 2 + 0.004), normal, len - 0.02, boardH - 0.08));
+    // The back, facing away from the pitch: a stencil repeated every three metres.
+    const backGeo = new THREE.PlaneGeometry(len, boardH - 0.08);
+    const uv = backGeo.attributes.uv as THREE.BufferAttribute;
+    for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * len / 3);
+    const back = new THREE.Mesh(backGeo, backMat);
+    back.position.set(x - nx * (t / 2 + 0.004), boardH * 0.5, z - nz * (t / 2 + 0.004));
+    back.rotation.y = Math.atan2(-nx, -nz);
+    g.add(back);
   };
-  const t = 0.15;
   const rs = d.runoffSide ?? 0, re = d.runoffEnd ?? 0;
   const bl = L + re * 2, bw = W + rs * 2;
-  board(0, -bw / 2 - t / 2, bl + t * 2, t);
-  board(0, bw / 2 + t / 2, bl + t * 2, t);
+  board(0, -bw / 2 - t / 2, bl + t * 2, t, 0, 1);
+  board(0, bw / 2 + t / 2, bl + t * 2, t, 0, -1);
   const nets: GoalNet[] = [];
   for (const sx of [-1, 1] as const) {
     if (re > d.goalDepth) {
       // Boards set back behind the goal, so the ball can run out for a goal kick or a corner.
-      board(sx * (bl / 2 + t / 2), 0, t, bw);
+      board(sx * (bl / 2 + t / 2), 0, t, bw, -sx, 0);
     } else {
       const sideLen = (W - d.goalWidth) / 2;
-      board(sx * (L / 2 + t / 2), -(d.goalWidth / 2 + sideLen / 2), t, sideLen);
-      board(sx * (L / 2 + t / 2), d.goalWidth / 2 + sideLen / 2, t, sideLen);
+      board(sx * (L / 2 + t / 2), -(d.goalWidth / 2 + sideLen / 2), t, sideLen, -sx, 0);
+      board(sx * (L / 2 + t / 2), d.goalWidth / 2 + sideLen / 2, t, sideLen, -sx, 0);
     }
     const net = new GoalNet(sx, d, d.netDetail, d.netCols, d.calmNets);
     nets.push(net);
     g.add(buildGoal(sx, d), net.group);
   }
+  if (rs >= 1) {
+    const art = pitchArt(Math.min(6, L * 0.22));
+    art.position.set(0, 0.004, -W / 2 - rs * 0.5);
+    g.add(art);
+  }
 
-  // A stand along the far side (the fans are in Crowd.ts), benches and cones on the near side.
-  g.add(buildStand(L, W));
-  const scoreboard = new Scoreboard();
+  // The stand along the far side (the fans are in Crowd.ts), with the end stand behind the +x goal on
+  // Medium and High; netting and banners behind both goals; benches in dugouts on the near side.
+  const bannerMat = bannerMaterial(teams);
+  // The new stadium parts are merged even on High (see stadiumParts), so they go in a list as they are added.
+  const parts: THREE.Object3D[] = [];
+  const part = (o: THREE.Object3D) => { parts.push(o); g.add(o); };
+  part(buildStand({ L, W, ground, teams, leds, bannerMat }));
+  if (extras) part(buildEndStand({ L, W, ground, teams, leds, bannerMat, runoffEnd: re }));
+  part(buildBallStopNetting(L, bl, bw, d.goalDepth, bannerMat));
+  const scoreboard = new Scoreboard(teams);
   scoreboard.group.position.set(-L / 2 - 7.5, 0, 0);
   scoreboard.group.rotation.y = Math.PI / 2;
   g.add(scoreboard.group);
   for (const [x, y, z] of floodlightPositions(L, W)) g.add(buildFloodlight(x, y, z));
-  g.userData.extras = { nets, scoreboard } satisfies PitchExtras;
-  for (const sx of [-1, 1]) g.add(buildBench(sx * L * 0.18, W / 2 + 2.2));
+  for (const sx of [-1, 1]) {
+    g.add(buildBench(sx * L * 0.18, W / 2 + 2.2));
+    part(buildDugout(sx * L * 0.18, W / 2 + 2.2));
+  }
   const coneMat = toonMaterial({ color: 0xff7a00 });
   for (let i = 0; i < 4; i++) {
     const cone = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.4, 8), coneMat);
@@ -209,92 +341,64 @@ export function buildPitch(d: PitchDims): THREE.Group {
     addOutline(cone, 0.02);
     g.add(cone);
   }
+  const lay = standLayout(L, W);
+  part(buildKiosk(lay, extras ? life : null));
+  if (extras) part(buildPitchside(L, { goalWidth: d.goalWidth, runoffEnd: re, bl, bw }, life));
 
-  // Round, friendly trees around the outside so the camera edge isn't bare.
-  const leafMats = [0x1d8f5a, 0x2aa86a, 0x177a4a].map((c) => toonMaterial({ color: c }));
+  // Each ground's own touches.
+  if (ground.bigScreen) part(buildBigScreen(L, leds));
+  if (ground.poleFlags) part(buildPoleFlags(L, W, teams, extras ? life : null));
+  if (ground.gulls) part(buildGulls(lay));
+  if (ground.fence) part(buildFence(L, W));
+  if (ground.extraBunting) part(buildExtraBunting(bl, bw));
+
+  // Trees of the ground's kind round the outside, so the camera edge isn't bare.
+  const leafMats = ground.leaves.map((c) => toonMaterial({ color: c }));
   const trunkMat = toonMaterial({ color: 0x8b5a2b });
   for (let i = 0; i < 16; i++) {
-    const tree = new THREE.Group();
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 1.0, 7), trunkMat);
-    trunk.position.y = 0.5;
-    addOutline(trunk, 0.03);
-    const size = 1.1 + (i % 3) * 0.3;
-    const top = new THREE.Mesh(new THREE.SphereGeometry(size, 10, 8), leafMats[i % 3]);
-    top.position.y = 1.0 + size * 0.9;
-    top.castShadow = true;
-    top.userData.leaves = true;
-    addOutline(top, 0.05);
-    const top2 = new THREE.Mesh(new THREE.SphereGeometry(size * 0.7, 9, 7), leafMats[(i + 1) % 3]);
-    top2.position.set(size * 0.5, 1.0 + size * 1.3, size * 0.3);
-    addOutline(top2, 0.04);
-    tree.add(trunk, top, top2);
     const a = (i / 16) * Math.PI * 2 + 0.2;
+    // Leave room for the big screen behind the +x goal.
+    if (ground.bigScreen && Math.cos(a) > 0.9) continue;
+    const tree = buildTree(ground.trees, i, leafMats, trunkMat);
     const far = Math.abs(Math.sin(a)) > 0.7 && Math.sin(a) < 0 ? 5 : 0; // leave room for the stand
     tree.position.set(Math.cos(a) * (L / 2 + 8 + (i % 3) * 1.5), 0, Math.sin(a) * (W / 2 + 7 + ((i * 2) % 3) + far));
     g.add(tree);
   }
+
+  // Every LED face (boards, stand roofs, big screen) in one mesh.
+  const boards = new AdBoards(leds, { teams, ground: ground.name, lite: !!d.lite, calm: !!d.calm });
+  g.add(boards.mesh);
   // Only the players and the ball then draw into the shadow map, which is most of its cost saved.
   if (d.sceneryShadows === false) g.traverse((o) => { o.castShadow = false; });
+  g.userData.extras = { nets, scoreboard, boards, life } satisfies PitchExtras;
+  g.userData.stadiumParts = parts;
   return g;
 }
 
-function buildFlag(x: number, z: number): THREE.Group {
+/**
+ * The stadium's many small parts (stands, people, kiosk, netting...). High graphics keeps the rest of
+ * the scenery as separate meshes, but merges these, which looks the same and saves a couple of hundred draw calls.
+ */
+export function stadiumParts(pitch: THREE.Group): THREE.Object3D[] {
+  return (pitch.userData.stadiumParts as THREE.Object3D[] | undefined) ?? [];
+}
+
+/** A corner flag on its pole; it waves when `life` is given. */
+function buildFlag(x: number, z: number, mat: THREE.Material, life: StadiumLife | null): THREE.Group {
   const g = new THREE.Group();
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.025, 1.5, 6), toonMaterial({ color: 0xffffff }));
   pole.position.y = 0.75;
   const shape = new THREE.Shape();
   shape.moveTo(0, 0); shape.lineTo(0.45, -0.14); shape.lineTo(0, -0.3); shape.closePath();
-  const flag = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color: 0xffd23f, side: THREE.DoubleSide }));
+  const flag = new THREE.Mesh(new THREE.ShapeGeometry(shape), mat);
   flag.position.set(0, 1.5, 0);
   flag.rotation.y = Math.atan2(-z, -x);
   g.add(pole, flag);
+  if (life) {
+    flag.userData.dynamic = true;
+    life.wavers.push({ o: flag, base: flag.rotation.y, phase: x * 0.7 + z * 0.3 });
+  }
   g.position.set(x, 0, z);
-  return g;
-}
-
-export interface StandLayout { len: number; z0: number; rows: number; rowDepth: number; rowRise: number; baseHeight: number; roofY: number }
-
-/** Where the stand's seat rows are; the crowd (Crowd.ts) sits its fans on these. Row r tops out at baseHeight + r * rowRise, at z0 - r * rowDepth. The roof's underside is at roofY. */
-export function standLayout(L: number, W: number): StandLayout {
-  return { len: L * 0.8, z0: -W / 2 - 3.2, rows: 3, rowDepth: 1.2, rowRise: 0.6, baseHeight: 0.6, roofY: 3.14 };
-}
-
-/** Three stepped rows of seats under a roof with bunting. The fans themselves are added by Crowd. */
-function buildStand(L: number, W: number): THREE.Group {
-  const g = new THREE.Group();
-  const { len, z0, rows, rowDepth, rowRise, baseHeight, roofY } = standLayout(L, W);
-  const stepMat = toonMaterial({ color: 0xb8c4d6 });
-  for (let r = 0; r < rows; r++) {
-    const h = baseHeight + r * rowRise;
-    const step = new THREE.Mesh(new THREE.BoxGeometry(len, h, rowDepth), stepMat);
-    step.position.set(0, h / 2, z0 - r * rowDepth);
-    step.receiveShadow = true;
-    step.castShadow = true;
-    g.add(step);
-  }
-  // Roof on two posts, with bunting along the front edge.
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(len + 0.6, 0.12, rows * rowDepth + 0.8), toonMaterial({ color: 0x3da5f4 }));
-  roof.position.set(0, roofY + 0.06, z0 - (rows - 1) * rowDepth / 2);
-  roof.castShadow = true;
-  g.add(roof);
-  const postMat = toonMaterial({ color: 0x1b2a41 });
-  for (const sx of [-1, 1]) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.2, 6), postMat);
-    post.position.set(sx * (len / 2 + 0.2), 1.6, z0 - rows * rowDepth + 0.4);
-    g.add(post);
-  }
-  const flagCount = Math.floor(len / 0.5);
-  const tri = new THREE.Shape();
-  tri.moveTo(-0.18, 0); tri.lineTo(0.18, 0); tri.lineTo(0, -0.32); tri.closePath();
-  const bunting = new THREE.InstancedMesh(new THREE.ShapeGeometry(tri), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), flagCount);
-  const bm = new THREE.Matrix4();
-  const bc = new THREE.Color();
-  for (let i = 0; i < flagCount; i++) {
-    bm.makeTranslation(-len / 2 + 0.25 + i * 0.5, 3.1 - Math.abs(Math.sin(i * 0.9)) * 0.08, z0 + 0.95);
-    bunting.setMatrixAt(i, bm);
-    bunting.setColorAt(i, bc.set(KIT_PALETTE[i % KIT_PALETTE.length]));
-  }
-  g.add(bunting);
   return g;
 }
 
@@ -560,7 +664,7 @@ export class Scoreboard {
   private readonly canvas = document.createElement('canvas');
   private readonly tex: THREE.CanvasTexture;
 
-  constructor() {
+  constructor(private readonly teams: [BoardTeam, BoardTeam] = DEFAULT_TEAMS) {
     this.canvas.width = 512; this.canvas.height = 224;
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
@@ -591,10 +695,15 @@ export class Scoreboard {
     c.fillRect(12, 12, 488, 200);
     c.textAlign = 'center';
     c.textBaseline = 'middle';
+    // A stripe in each team's shirt colour under its code (the codes are made and checked by shortCode()).
+    c.fillStyle = this.teams[0].shirt;
+    c.fillRect(40, 98, 120, 8);
+    c.fillStyle = this.teams[1].shirt;
+    c.fillRect(352, 98, 120, 8);
     c.fillStyle = '#ffffff';
     c.font = 'bold 54px system-ui, sans-serif';
-    c.fillText(home.slice(0, 3).toUpperCase(), 100, 70);
-    c.fillText(away.slice(0, 3).toUpperCase(), 412, 70);
+    c.fillText(home.toUpperCase(), 100, 70, 150);
+    c.fillText(away.toUpperCase(), 412, 70, 150);
     c.fillStyle = '#ffd23f';
     c.font = 'bold 120px system-ui, sans-serif';
     c.fillText(String(h), 100, 158);
@@ -602,29 +711,31 @@ export class Scoreboard {
     c.fillStyle = '#8d99ae';
     c.font = 'bold 48px system-ui, sans-serif';
     c.fillText('-', 256, 150);
-    c.fillStyle = '#3da5f4';
-    c.font = 'bold 26px system-ui, sans-serif';
-    c.fillText('FIVE-A-SIDE STARS', 256, 46);
+    c.fillStyle = '#ffd23f';
+    c.font = 'bold 30px system-ui, sans-serif';
+    c.fillText('GOAL RUSH!', 256, 46);
     this.tex.needsUpdate = true;
   }
 }
 
-/** A floodlight tower: a tall pole with a bank of six lamps. Weather turns the lamps on at night. */
+/** A floodlight tower: a tall pole with a bank of twelve lamps in a frame. Weather turns the lamps on at night. */
 function buildFloodlight(x: number, y: number, z: number): THREE.Group {
   const g = new THREE.Group();
   const poleMat = toonMaterial({ color: 0x9aa7b8 });
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.16, y, 8), poleMat);
   pole.position.y = y / 2;
   pole.castShadow = true;
-  const head = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.9, 0.3), toonMaterial({ color: 0x1b2a41 }));
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.1, 0.3), toonMaterial({ color: 0x1b2a41 }));
   head.position.y = y;
+  const rim = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.08, 0.36), poleMat);
+  rim.position.set(0, 0.6, 0);
+  head.add(rim);
   const lampMat = new THREE.MeshStandardMaterial({ color: 0xf6f8ff, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.3 });
-  for (let i = 0; i < 6; i++) {
-    const lamp = new THREE.Mesh(new THREE.CircleGeometry(0.17, 10), lampMat);
-    lamp.position.set(-0.6 + (i % 3) * 0.6, y + (i < 3 ? 0.2 : -0.2), 0.16);
-    lamp.userData.lamp = true;
-    head.add(lamp);
-  }
+  // All twelve lamps in one mesh, so a tower costs one draw call for them even on High.
+  const lamps = mergeGeometries(Array.from({ length: 12 }, (_, i) => new THREE.CircleGeometry(0.15, 10).translate(-0.7 + (i % 4) * (1.4 / 3), 0.33 - Math.floor(i / 4) * 0.33, 0.16)))!;
+  const lamp = new THREE.Mesh(lamps, lampMat);
+  lamp.userData.lamp = true;
+  head.add(lamp);
   g.add(pole, head);
   g.position.set(x, 0, z);
   g.lookAt(0, 0, 0);

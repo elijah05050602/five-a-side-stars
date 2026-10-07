@@ -11,6 +11,7 @@ import { loadPlayerAsset } from './game/playerAsset';
 import { gameRenderer, showDrawError } from './game/renderer';
 import { canLeaveScreen, finishMatch, goBack, leaveScreen, playAhead, renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
 import { armBack, initBackButton } from './ui/backButton';
+import type { Occasion } from './game/grounds';
 
 // Straight away rather than on 'load': the service worker then stores every file of the game while
 // this first visit is still open, so one visit is enough to play offline.
@@ -56,6 +57,13 @@ function enterMatch(): ReturnType<typeof gameRenderer> {
   return renderer;
 }
 
+/** What kind of match it is: where it is played and how full the stands are follow from it. */
+function occasionFor(o: StartOptions, mode: string): Occasion {
+  if (o.tournament) return o.tournament.stage === 'final' ? 'final' : 'cup';
+  if (o.league || o.career) return 'league';
+  return mode === 'training' ? 'training' : 'friendly';
+}
+
 const router: Router = {
   go(screen: Screen) {
     // A screen with unsaved changes (the team builder) asks first, and may keep the player there.
@@ -86,7 +94,7 @@ const router: Router = {
         void ahead.catch(() => ({})).then((a) => router.go(finishMatch(result, o, stickers, a)));
       },
       () => { match = null; router.go(o.tournament ? { name: 'tournament', state: o.tournament } : o.league ? { name: 'league' } : o.career ? { name: 'career' } : { name: 'menu' }); },
-      { weather: o.weather, starId: o.starId });
+      { weather: o.weather, starId: o.starId, occasion: occasionFor(o, mode) });
     // `?debug` exposes the running match so screenshot scripts can poke at it.
     if (location.search.includes('debug')) (window as unknown as { __match?: MatchScene }).__match = match;
   },
@@ -99,7 +107,8 @@ const router: Router = {
     if (!renderer) return;
     match = new MatchScene(renderer, ui, { home, away, difficulty: 'easy', halfSeconds: 600, humanSide: 0, mode: 'tutorial' },
       () => leave({ name: 'setup', homeId: home.id }),
-      () => leave({ name: 'menu' }));
+      () => leave({ name: 'menu' }),
+      { occasion: 'training' });
   },
 };
 

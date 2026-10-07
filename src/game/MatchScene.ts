@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { BallModel } from './BallModel';
 import { Input, PressLatch, type InputState } from './input';
 import { CAMERA_HEIGHT_SCALE, getControls } from '../data/controls';
-import { buildPitch, pitchExtras } from './Pitch';
+import { buildPitch, pitchExtras, stadiumParts } from './Pitch';
+import type { BoardTeam } from './adBoards';
 import { Crowd } from './Crowd';
 import { Commentator } from './commentary';
 import { Weather, resolveConditions, type Conditions, type WeatherChoice } from './Weather';
@@ -23,6 +24,7 @@ import { EXPOSURE, TONE_MAPPING, disposeObject } from './renderer';
 import { BallTrail, Puffs, SuperAura } from './effects';
 import { SUPERS, type SuperKind } from './supers';
 import { P1_RING, P2_RING, teamRingColours } from './ringColours';
+import { GROUNDS, crowdFill, groundFor, type Ground, type GroundId, type Occasion } from './grounds';
 import { goalCamShot } from './replayCamera';
 
 /** Whether the touch buttons are showing (the same test the CSS uses). */
@@ -35,6 +37,8 @@ export interface SceneOptions {
   weather?: WeatherChoice;
   /** A career match: the id of the player's Star, who wears a gold star over their head. */
   starId?: string;
+  /** What kind of match it is, for where it is played and how full the stands are (default a friendly). */
+  occasion?: Occasion;
 }
 
 /**
@@ -101,6 +105,8 @@ export class MatchScene {
   private readonly commentator: Commentator;
   private readonly voice = new Commentary();
   readonly conditions: Conditions;
+  /** Where the match is played. */
+  readonly ground: Ground;
   private readonly weather: Weather;
   private readonly pitch: THREE.Group;
   private readonly sun: THREE.DirectionalLight;
@@ -208,16 +214,27 @@ export class MatchScene {
     this.scene.add(sun, rim, sky);
 
     const runoff = this.sim.mode === 'match';
-    const pitch = buildPitch({ sceneryShadows: gfx.sceneryShadows, pbr: gfx.pbrGround, length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth, runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0, netDetail: gfx.netDetail, netCols: gfx.netCols, calmNets: this.calm });
+    const occasion = options.occasion ?? 'friendly';
+    // `?ground=seaside` (or any ground's id) picks the ground, for testing and screenshots.
+    const asked = new URLSearchParams(location.search).get('ground');
+    this.ground = asked && asked in GROUNDS ? GROUNDS[asked as GroundId] : groundFor({ occasion, homeId: this.sim.teams[0].id, weather: this.conditions.weather, time: this.conditions.time });
+    const boardTeams = this.sim.teams.map((t) => ({ name: t.name, short: t.short, shirt: t.kit.shirt, shirt2: t.kit.shirt2 })) as [BoardTeam, BoardTeam];
+    const pitch = buildPitch({
+      sceneryShadows: gfx.sceneryShadows, pbr: gfx.pbrGround, length: this.sim.length, width: this.sim.width, goalWidth: this.sim.goalWidth, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth,
+      runoffSide: runoff ? RUNOFF_SIDE : 0, runoffEnd: runoff ? RUNOFF_END : 0, netDetail: gfx.netDetail, netCols: gfx.netCols, calmNets: this.calm,
+      ground: this.ground, teams: boardTeams, lite: gfx.tier === 'low', extras: gfx.stadiumExtras, grassDetail: gfx.grassDetail, calm: this.calm,
+    });
     this.scene.add(pitch);
     this.pitch = pitch;
     this.extras = pitchExtras(pitch);
     // The weather restyles the sun and the sky light; the rim light keeps its own colour and angle.
-    this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, gfx, { sun, sky });
-    if (gfx.batchScenery) batchStatic(pitch, [...this.extras.nets.map((n) => n.group), this.extras.scoreboard.group]);
+    this.weather = new Weather(this.scene, { length: this.sim.length, width: this.sim.width }, this.conditions, gfx, { sun, sky }, this.ground);
+    const keep = [...this.extras.nets.map((n) => n.group), this.extras.scoreboard.group];
+    if (gfx.batchScenery) batchStatic(pitch, keep);
+    else for (const part of stadiumParts(pitch)) batchStatic(part, keep);
     this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, 0, 0);
 
-    this.crowd = new Crowd(this.sim, { lite: gfx.liteCrowd });
+    this.crowd = new Crowd(this.sim, { lite: gfx.liteCrowd, fill: crowdFill(occasion), endStand: gfx.stadiumExtras ? { runoffEnd: runoff ? RUNOFF_END : 0 } : null, flagsForAll: occasion === 'final' });
     this.crowd.setConditions({ night: this.conditions.time === 'night', weather: this.conditions.weather });
     this.scene.add(this.crowd.group);
     // Dev builds only: lets a test script poke the crowd (window.__crowd.onEvent({ type: 'goal', side: 0 })).
@@ -257,6 +274,8 @@ export class MatchScene {
       onSubs: (side, lineup) => this.sim.requestSubs(side, lineup),
       onSkipReplay: () => { this.skipTapped = true; },
     }, this.coach ?? undefined);
+    // Name the ground in the commentary ticker as the players come out.
+    if (this.sim.mode !== 'tutorial') this.hud.say(`Today's match is at ${this.ground.name}!`);
     this.input.attachJoystick(this.hud.joystickZone, this.hud.joystickBase, this.hud.joystickKnob);
     this.input.attachButton(this.hud.btnShoot, 'shoot');
     this.input.attachButton(this.hud.btnPass, 'pass');
@@ -573,6 +592,22 @@ export class MatchScene {
     return new THREE.Vector3(target.x, height, target.z + height * 0.9);
   }
 
+  /** The LED boards join in: GOAL! in the scorer's colours until the restart, a super skill's name, PENALTY! */
+  private boardsFor(ev: SimEvent): void {
+    try {
+      const boards = this.extras.boards;
+      if (ev.type === 'goal' && (ev.side === 0 || ev.side === 1)) {
+        boards.show('GOAL!', this.sim.teams[ev.side].kit.shirt, this.sim.shootout ? 3 : Infinity);
+        this.extras.life.goal();
+      } else if (ev.type === 'kickoff' || ev.type === 'fulltime') boards.clear();
+      else if (ev.type === 'super' && ev.superKind && !boards.showing) boards.show(SUPERS[ev.superKind].name.toUpperCase(), SUPERS[ev.superKind].css, 3);
+      else if (ev.type === 'foul' && ev.kind === 'penalty' && !boards.showing) boards.show('PENALTY!', '#e63946', 3);
+    } catch (e) {
+      // The boards are only decoration: never let them stop the match.
+      console.warn('ad boards', e);
+    }
+  }
+
   private frame = (now: number): void => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.frame);
@@ -627,6 +662,7 @@ export class MatchScene {
       if (ev.type === 'sub') this.onSub(ev);
       this.crowd.onEvent(ev);
       if (!this.calm) this.puffFor(ev);
+      this.boardsFor(ev);
       // Each shoot-out kick starts a fresh replay clip, so the winning kick's replay never shows the kick before it.
       if (ev.type === 'whistle' && this.sim.shootout) this.history.length = 0;
       if (ev.type === 'goal') {
@@ -654,6 +690,8 @@ export class MatchScene {
     if (quip) this.hud.say(quip);
     this.sfx.update(dt, this.sim);
     this.weather.update(dt);
+    this.extras.boards.update(dt);
+    this.extras.life.update(dt);
     this.effects(dt);
     this.crowd.update(dt);
     // The nets follow the ball in live play only; a replay leaves them to settle.
@@ -874,6 +912,7 @@ export class MatchScene {
     this.sfx.dispose();
     this.voice.dispose();
     this.weather.dispose();
+    this.extras.boards.dispose();
     this.hud.destroy();
     this.models.forEach((m) => m.dispose());
     this.benchModels.forEach((m) => m.dispose());

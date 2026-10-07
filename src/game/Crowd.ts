@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { MatchSim, SimEvent } from './sim';
 import { standLayout } from './Pitch';
+import { SEAT_SPACING, endSeatSpots, endStandLayout, seatSpots, standAisles } from './stadium';
 import { toonMaterial } from './toon';
 import { faceTexture, type Expression } from './playerFace';
 import { kitTexture } from './kitTexture';
@@ -36,6 +37,13 @@ interface Fan {
   hair: THREE.Color;
   bald: boolean;
   flag: number; umbrella: number; glow: number;
+  /** Waves the flag all match long; other flag holders only hold theirs up at kick-off and when cheering. */
+  keen: boolean;
+  flagUp: boolean;
+  /** Underside of the roof over this fan's seat: nothing they hold or do pokes through it. */
+  roof: number;
+  /** In the main stand (the goal camera's crowd shot and the confetti are there). */
+  main: boolean;
   /** Index into this side's full-kit body mesh, or -1 for everyday clothes. */
   kit: number;
   scarf: number; cap: number;
@@ -66,7 +74,6 @@ const CONFETTI = ['#ffd23f', '#ff6fb5', '#3da5f4', '#2eb872', '#ffffff', '#ff7a0
 
 interface Confetto { x: number; y: number; z: number; vx: number; vy: number; vz: number; spin: number; rx: number; ry: number; life: number }
 
-const SEAT_SPACING = 0.55;
 /** Height of an umbrella's tip, and of a flag's top, above the hand holding it, before the fan's size scales it. */
 const UMBRELLA_TOP = 0.74, FLAG_TOP = 0.9;
 const SHOULDER_Y = 0.5, SHOULDER_X = 0.2, HEAD_Y = 0.79, ARM_LEN = 0.38;
@@ -142,7 +149,11 @@ export class Crowd {
   private partySide: 0 | 1 | null = null;
   private confettiDue = 0;
 
-  constructor(private readonly sim: MatchSim, opts: { lite: boolean }) {
+  /**
+   * `fill` is how full the stands are (0..1, see crowdFill), `endStand` fills the small stand behind the
+   * +x goal too, and `flagsForAll` (a cup final) gives every team fan a flag.
+   */
+  constructor(private readonly sim: MatchSim, opts: { lite: boolean; fill?: number; endStand?: { runoffEnd: number } | null; flagsForAll?: boolean }) {
     this.calm = getSettings().reduceMotion;
     const lite = opts.lite;
     const idle = (): SideMood => ({ mood: 'idle', prev: 'idle', since: 99, left: 0 });
@@ -153,39 +164,59 @@ export class Crowd {
     this.len = lay.len;
     this.lay = lay;
     const kits = [sim.teams[0].kit, sim.teams[1].kit];
-    const perRow = Math.floor(lay.len / SEAT_SPACING);
-    const empty = lite ? 0.3 : 0.08;
+    // Fewer fans on phones, and fewer at a friendly than at a cup final.
+    const fill = (opts.fill ?? 0.85) * (lite ? 0.78 : 0.95);
+    const aisles = standAisles(lay);
+    const newFan = (x: number, y: number, z: number, yaw: number, side: 0 | 1 | 2, along: number, roof: number, main: boolean): Fan => {
+      const kit = side === 2 ? null : kits[side];
+      // About a third of each team's fans wear the full club kit; the rest wear everyday clothes,
+      // in team colours or not, and show who they support with a scarf or a cap.
+      const shirt = new THREE.Color(kit ? (Math.random() < 0.55 ? kit.shirt : Math.random() < 0.4 ? kit.shirt2 : pick(CASUAL)) : pick([...NEUTRAL_SHIRTS, ...CASUAL]));
+      const bald = Math.random() < 0.12;
+      return {
+        x, y, z, yaw,
+        size: 0.82 + Math.random() * 0.3,
+        side, phase: Math.random() * Math.PI * 2,
+        energy: 0.65 + Math.random() * 0.55,
+        delay: Math.random() * 0.35 + Math.abs(along) * 0.1,
+        shirt, hair: new THREE.Color(pick(HAIRS)), bald,
+        flag: -1, umbrella: -1, glow: -1, kit: -1, scarf: -1, cap: -1, keen: false, flagUp: true, roof, main,
+        face: F.neutral, blink: 1 + Math.random() * 5,
+        fidget: 0, fidgetNext: 3 + Math.random() * 20,
+        rise: 0, lean: 0, nod: 0, look: 0, lf: 0.25, ls: 0.1, rf: 0.25, rs: 0.1,
+      };
+    };
+    // Main stand: home fans to the left, away to the right, the middle block mostly families.
+    const spots = seatSpots(lay);
     for (let r = 0; r < lay.rows; r++) {
-      for (let i = 0; i < perRow; i++) {
-        if (Math.random() < empty) continue;
-        const x = -lay.len / 2 + SEAT_SPACING * (i + 0.5) + (Math.random() - 0.5) * 0.12;
+      for (const sx of spots) {
+        if (Math.random() > fill) continue;
+        const x = sx + (Math.random() - 0.5) * 0.12;
         const along = x / (lay.len / 2);
         let side: 0 | 1 | 2 = along < 0 ? 0 : 1;
-        if (Math.random() < 0.14 || Math.abs(along) < 0.06) side = 2;
+        const middle = x > aisles[0] && x < aisles[1];
+        if (Math.random() < (middle ? 0.45 : 0.14) || Math.abs(along) < 0.06) side = 2;
         else if (Math.random() < 0.1) side = side === 0 ? 1 : 0; // the odd away fan in the home end
-        const kit = side === 2 ? null : kits[side];
-        // About a third of each team's fans wear the full club kit; the rest wear everyday clothes,
-        // in team colours or not, and show who they support with a scarf or a cap.
-        const shirt = new THREE.Color(kit ? (Math.random() < 0.55 ? kit.shirt : Math.random() < 0.4 ? kit.shirt2 : pick(CASUAL)) : pick([...NEUTRAL_SHIRTS, ...CASUAL]));
-        const bald = Math.random() < 0.12;
-        this.fans.push({
-          x, y: lay.baseHeight + r * lay.rowRise, z: lay.z0 - r * lay.rowDepth + (Math.random() - 0.5) * 0.15,
-          yaw: (Math.random() - 0.5) * 0.25 - along * 0.15,
-          size: 0.82 + Math.random() * 0.3,
-          side, phase: Math.random() * Math.PI * 2,
-          energy: 0.65 + Math.random() * 0.55,
-          delay: Math.random() * 0.35 + Math.abs(along) * 0.1,
-          shirt, hair: new THREE.Color(pick(HAIRS)), bald,
-          flag: -1, umbrella: -1, glow: -1, kit: -1, scarf: -1, cap: -1,
-          face: F.neutral, blink: 1 + Math.random() * 5,
-          fidget: 0, fidgetNext: 3 + Math.random() * 20,
-          rise: 0, lean: 0, nod: 0, look: 0, lf: 0.25, ls: 0.1, rf: 0.25, rs: 0.1,
-        });
+        this.fans.push(newFan(x, lay.baseHeight + r * lay.rowRise, lay.z0 - r * lay.rowDepth + (Math.random() - 0.5) * 0.15,
+          (Math.random() - 0.5) * 0.25 - along * 0.15, side, along, lay.roofY, true));
+      }
+    }
+    // End stand behind the +x goal (Medium and High): families, facing down the pitch.
+    if (opts.endStand) {
+      const end = endStandLayout(sim.length, sim.width, opts.endStand.runoffEnd);
+      for (let r = 0; r < end.rows; r++) {
+        for (const sz of endSeatSpots(end)) {
+          if (Math.random() > fill * 0.9) continue;
+          const roll = Math.random();
+          const side: 0 | 1 | 2 = roll < 0.6 ? 2 : roll < 0.85 ? 0 : 1;
+          this.fans.push(newFan(end.x0 + r * end.rowDepth + (Math.random() - 0.5) * 0.15, end.baseHeight + r * end.rowRise, sz + (Math.random() - 0.5) * 0.12,
+            -Math.PI / 2 + (Math.random() - 0.5) * 0.25 - sz * 0.02, side, sz / (end.len / 2), end.roofY, false));
+        }
       }
     }
     const n = this.fans.length;
     for (const side of [0, 1] as const) {
-      const xs = this.fans.filter((f) => f.side === side).map((f) => f.x);
+      const xs = this.fans.filter((f) => f.side === side && f.main).map((f) => f.x);
       this.ends[side] = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : (side === 0 ? -1 : 1) * lay.len / 4;
     }
 
@@ -289,10 +320,12 @@ export class Crowd {
       if (teamFan && Math.random() < 0.35) f.kit = kitCount[f.side]++;
       if (Math.random() < (teamFan ? (f.kit >= 0 ? 0.15 : 0.5) : 0.1)) f.scarf = scarves++;
       else if (Math.random() < 0.25) f.cap = caps++;
-      if (f.side !== 2 && Math.random() < 0.2) f.flag = flags++;
+      // A few keen fans wave a flag all match; many more hold one up at kick-off and after a goal (all of them at a final).
+      if (f.side !== 2 && Math.random() < 0.2) { f.flag = flags++; f.keen = true; }
+      else if (f.side !== 2 && Math.random() < (opts.flagsForAll ? 1 : 0.4)) f.flag = flags++;
       // Never two umbrellas side by side, or their canopies poke through each other.
       const prev = this.fans[j - 1];
-      const nextToUmbrella = prev && prev.y === f.y && f.x - prev.x < SEAT_SPACING * 1.5 && prev.umbrella >= 0;
+      const nextToUmbrella = prev && prev.y === f.y && Math.abs(f.x - prev.x) + Math.abs(f.z - prev.z) < SEAT_SPACING * 1.5 && prev.umbrella >= 0;
       if (!nextToUmbrella && Math.random() < 0.4) f.umbrella = umbrellas++;
       if (Math.random() < 0.45) f.glow = glows++;
     });
@@ -500,7 +533,7 @@ export class Crowd {
       // Solo fidgets keep a calm crowd alive.
       f.fidgetNext -= dt;
       if (f.fidgetNext <= 0) { f.fidget = 1.4; f.fidgetNext = 8 + Math.random() * 25; }
-      if (f.fidget > 0) { f.fidget -= dt; if (mood === 'idle') mood = f.flag >= 0 ? 'cheer' : 'clap'; }
+      if (f.fidget > 0) { f.fidget -= dt; if (mood === 'idle') mood = f.keen ? 'cheer' : 'clap'; }
 
       // Target pose for the mood. f = arm raised forward/up (0 down, ~2.9 overhead), s = splayed out sideways.
       let rise = 0, lean = 0, nod = 0, hop = 0, lf = 0.3, ls = 0.12, rf = 0.3, rs = 0.12;
@@ -562,6 +595,7 @@ export class Crowd {
           lf = rf = 0.15; ls = rs = 0.05;
           break;
       }
+      f.flagUp = f.keen || mood === 'cheer' || mood === 'clap' || mood === 'party';
       if (f.flag >= 0 && (mood === 'cheer' || mood === 'clap' || mood === 'party')) { rf = 2.6 + Math.sin(t * 7 + f.phase) * 0.35; rs = 0.3; }
       if (this.waveX !== Infinity) {
         const w = Math.exp(-(((f.x - this.waveX) / 1.3) ** 2));
@@ -647,7 +681,7 @@ export class Crowd {
     trs(_base, f.x, f.y, f.z, 0, f.yaw, 0, f.size);
     // Torso: hips at the seat, lifted when standing and jumping, leaning forward or back.
     // The back row jumps no higher than the roof lets them, so heads and hats never poke through it.
-    const up = Math.min(lift + hop, (this.lay.roofY - 0.06 - f.y) / f.size - HEAD_Y - 0.3);
+    const up = Math.min(lift + hop, (f.roof - 0.06 - f.y) / f.size - HEAD_Y - 0.3);
     _torso.multiplyMatrices(_base, trs(_m, 0, up, 0, f.lean));
 
     this.legs.setMatrixAt(i, _tmp.multiplyMatrices(_torso, _m.compose(_p.set(0, 0.12, 0.02), _q.identity(), _s.set(1, lift + 0.12, 1))));
@@ -675,14 +709,15 @@ export class Crowd {
       this.arms.setMatrixAt(i * 2 + (side < 0 ? 0 : 1), _arm);
       _hand.set(0, -ARM_LEN, 0).applyMatrix4(_arm);
       // Props stay upright in the hand, with a bit of sway.
-      if (side > 0 && f.flag >= 0) {
+      if (side > 0 && f.flag >= 0 && !f.flagUp) this.flags.setMatrixAt(f.flag, _m.makeScale(0, 0, 0));
+      else if (side > 0 && f.flag >= 0) {
         const sway = Math.sin(t * 7 + f.phase) * 0.3 * Math.max(0, (f.rf - 1) / 1.9);
-        const y = Math.min(_hand.y, this.lay.roofY - 0.08 - FLAG_TOP * f.size); // flags stay under the roof too
+        const y = Math.min(_hand.y, f.roof - 0.08 - FLAG_TOP * f.size); // flags stay under the roof too
         this.flags.setMatrixAt(f.flag, trs(_m, _hand.x, y, _hand.z, 0, f.yaw + 0.4, sway, f.size));
       }
       if (side < 0 && f.umbrella >= 0) {
         // Slide the umbrella down in the hand rather than let it poke through the roof when a fan jumps up.
-        const y = Math.min(_hand.y, this.lay.roofY - 0.08 - UMBRELLA_TOP * f.size);
+        const y = Math.min(_hand.y, f.roof - 0.08 - UMBRELLA_TOP * f.size);
         this.umbrellas.setMatrixAt(f.umbrella, trs(_m, _hand.x, y, _hand.z, 0, 0, -0.18, f.size));
       }
       if (f.glow >= 0 && side === (f.flag >= 0 ? -1 : 1)) {
