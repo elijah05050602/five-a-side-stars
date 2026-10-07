@@ -1,7 +1,7 @@
 /** Remappable controls: keyboard keys per player, gamepad buttons and the on-screen touch layout, saved per browser. */
 
-export type Action = 'up' | 'down' | 'left' | 'right' | 'shoot' | 'pass' | 'lob' | 'sprint' | 'switch' | 'trick' | 'pause';
-export const ACTIONS: Action[] = ['up', 'down', 'left', 'right', 'shoot', 'pass', 'lob', 'sprint', 'switch', 'trick', 'pause'];
+export type Action = 'up' | 'down' | 'left' | 'right' | 'shoot' | 'pass' | 'lob' | 'sprint' | 'switch' | 'trick' | 'pause' | 'subs';
+export const ACTIONS: Action[] = ['up', 'down', 'left', 'right', 'shoot', 'pass', 'lob', 'sprint', 'switch', 'trick', 'pause', 'subs'];
 
 /** Which physical keys (KeyboardEvent.code) drive each action. */
 export type KeyMap = Record<Action, string[]>;
@@ -48,20 +48,20 @@ export const PAD_SLOTS = 2;
 
 export const ACTION_LABELS: Record<Action, string> = {
   up: 'Move up', down: 'Move down', left: 'Move left', right: 'Move right',
-  shoot: 'Shoot (hold to power up)', pass: 'Pass', lob: 'Lob pass / cross', sprint: 'Sprint', switch: 'Switch player', trick: 'Trick', pause: 'Pause',
+  shoot: 'Shoot (hold to power up)', pass: 'Pass', lob: 'Lob pass / cross', sprint: 'Sprint', switch: 'Switch player', trick: 'Trick', pause: 'Pause', subs: 'Subs',
 };
 
 const SOLO_KEYS = (): KeyMap => ({
   up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'],
   shoot: ['Space', 'KeyA', 'KeyX'], pass: ['KeyD', 'KeyZ', 'Enter'], lob: ['KeyS', 'KeyV'], sprint: ['ShiftLeft', 'ShiftRight'],
-  switch: ['KeyQ', 'KeyE'], trick: ['KeyC', 'KeyW'], pause: ['Escape', 'KeyP'],
+  switch: ['KeyQ', 'KeyE'], trick: ['KeyC', 'KeyW'], pause: ['Escape', 'KeyP'], subs: ['KeyB'],
 });
 
 /** The single-player keys before pass moved to D and lob to S (WASD moved as well as the arrows then). */
 const OLD_SOLO_KEYS: KeyMap = {
   up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
   shoot: ['Space', 'KeyX', 'KeyK'], pass: ['KeyZ', 'Enter', 'KeyJ'], lob: ['KeyV', 'KeyI'], sprint: ['ShiftLeft', 'ShiftRight', 'KeyL'],
-  switch: ['KeyQ', 'KeyE'], trick: ['KeyC', 'KeyU'], pause: ['Escape', 'KeyP'],
+  switch: ['KeyQ', 'KeyE'], trick: ['KeyC', 'KeyU'], pause: ['Escape', 'KeyP'], subs: ['KeyB'],
 };
 
 export function defaultControls(): ControlsConfig {
@@ -72,18 +72,18 @@ export function defaultControls(): ControlsConfig {
       // Two players on one keyboard: player 1 on the left-hand side...
       p1: {
         up: ['KeyW'], down: ['KeyS'], left: ['KeyA'], right: ['KeyD'],
-        shoot: ['Space', 'KeyF'], pass: ['KeyZ', 'KeyG'], lob: ['KeyV', 'KeyR'], sprint: ['ShiftLeft'], switch: ['KeyQ'], trick: ['KeyC', 'KeyH'], pause: ['Escape', 'KeyP'],
+        shoot: ['Space', 'KeyF'], pass: ['KeyZ', 'KeyG'], lob: ['KeyV', 'KeyR'], sprint: ['ShiftLeft'], switch: ['KeyQ'], trick: ['KeyC', 'KeyH'], pause: ['Escape', 'KeyP'], subs: ['KeyB'],
       },
       // ...and player 2 on the arrow keys.
       p2: {
         up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'],
-        shoot: ['Enter', 'Numpad0'], pass: ['Slash', 'NumpadDecimal'], lob: ['Semicolon', 'Numpad2'], sprint: ['ShiftRight', 'ControlRight'], switch: ['Period', 'NumpadEnter'], trick: ['Quote', 'Numpad1'], pause: ['Escape'],
+        shoot: ['Enter', 'Numpad0'], pass: ['Slash', 'NumpadDecimal'], lob: ['Semicolon', 'Numpad2'], sprint: ['ShiftRight', 'ControlRight'], switch: ['Period', 'NumpadEnter'], trick: ['Quote', 'Numpad1'], pause: ['Escape'], subs: ['KeyM', 'Numpad3'],
       },
     },
-    // Standard mapping: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 9 Start, 12-15 d-pad.
+    // Standard mapping: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 Back/Select, 9 Start, 12-15 d-pad.
     pad: {
       up: [12], down: [13], left: [14], right: [15],
-      shoot: [1], pass: [0], lob: [3], sprint: [7, 5], switch: [4], trick: [2], pause: [9],
+      shoot: [1], pass: [0], lob: [3], sprint: [7, 5], switch: [4], trick: [2], pause: [9], subs: [8],
     },
     touch: { size: 1, leftHanded: false, opacity: 1 },
     camera: { height: 'mid', portrait: 'upfield' },

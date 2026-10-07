@@ -75,6 +75,45 @@ export function makeBadge(colour1: string, colour2: string, icon = pick(BADGE_IC
   return { shape, icon, colour1, colour2 };
 }
 
+/** Run `fn` with Math.random replaced by a generator seeded from `seed`, so it makes the same things every time. */
+function seeded<T>(seed: string, fn: () => T): T {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
+  const real = Math.random;
+  Math.random = () => {
+    h = (h + 0x6d2b79f5) | 0;
+    let t = Math.imul(h ^ (h >>> 15), 1 | h);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  try { return fn(); } finally { Math.random = real; }
+}
+
+/**
+ * Two subs, a defender and an attacker, for a computer team that has only its starting five. They are made
+ * for the match and never saved, and are the same two every time for the same team. Their ratings are the
+ * team's outfield average, so bringing them on keeps the team as strong as it was.
+ */
+export function extraSubs(team: Team): Player[] {
+  const outfield = team.players.filter((p) => p.position !== 'GK');
+  const taken = new Set(team.players.map((p) => p.number));
+  const names = new Set(team.players.map((p) => p.name));
+  return seeded(team.id, () => (['DEF', 'ATT'] as Position[]).map((position) => {
+    let name = randomPlayerName();
+    for (let guard = 0; names.has(name) && guard < 30; guard++) name = randomPlayerName();
+    names.add(name);
+    let number = 12;
+    while (taken.has(number)) number++;
+    taken.add(number);
+    const p = makePlayer(position, number, name, false, team.ageGroup);
+    p.id = `sub-${team.id}-${position}`;
+    if (outfield.length) for (const k of Object.keys(p.skills) as (keyof Player['skills'])[]) {
+      p.skills[k] = Math.round(outfield.reduce((n, q) => n + (q.skills?.[k] ?? p.skills[k]), 0) / outfield.length);
+    }
+    return p;
+  }));
+}
+
 /** The five who start: flagged starters first, always with exactly one keeper. */
 export function startingFive(team: Team): Player[] {
   const starters = team.players.filter((p) => p.starter);

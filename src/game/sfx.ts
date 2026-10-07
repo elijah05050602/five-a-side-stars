@@ -184,6 +184,9 @@ export class Sfx {
         this.whistle(t, [0.14, 0.14]);
         this.groan(t + 0.1);
         break;
+      case 'sub':
+        this.whistle(t, [0.14, 0.14]);
+        break;
       case 'whistle':
       case 'kickoff':
         this.whistle(t, [0.45]);

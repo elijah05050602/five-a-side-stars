@@ -129,3 +129,30 @@ test('a cup run survives leaving the cup screen', async ({ page }) => {
   await expect(heading(page)).toContainText('Cup');
   expect(errors).toEqual([]);
 });
+
+test('a sub picked on the subs card comes on at the next stoppage', async ({ page }) => {
+  const errors: string[] = [];
+  await toLobby(page, errors);
+  await page.locator('#m-play').click();
+  await page.locator('#s-go').click();
+  await expect.poll(() => page.evaluate(() => !!(window as DebugWindow).__match)).toBe(true);
+  type SubsWindow = Window & { __match: { sim: { phase: string; bench: { name: string }[][]; teamOf: (s: number) => { info: { name: string } }[]; pendingSubs: Map<number, unknown>[] } } };
+  const onPitch = () => page.evaluate(() => (window as unknown as SubsWindow).__match.sim.teamOf(0).map((p) => p.info.name));
+  const sub = await page.evaluate(() => (window as unknown as SubsWindow).__match.sim.bench[0][0].name);
+  // B opens the card and pauses the match; tap the sub, then the player to bring off.
+  await page.keyboard.press('KeyB');
+  await expect(page.locator('#overlay:not([hidden]) h2')).toContainText('Subs');
+  expect(await page.evaluate(() => (window as unknown as SubsWindow).__match.sim.phase)).toBe('paused');
+  const off = (await onPitch())[1];
+  await page.locator('.subs-bench .subs-player').first().click();
+  await page.locator('.subs-pitch .subs-player').nth(1).click();
+  await expect(page.locator('.subs-pitch .subs-player').nth(1)).toContainText(sub);
+  await expect(page.locator('.subs-bench .subs-player').first()).toContainText(off);
+  await page.locator('#subs-done').click();
+  // The ball was dead for the kick-off, so the sub is on straight away.
+  await expect.poll(onPitch).toContain(sub);
+  expect(await onPitch()).not.toContain(off);
+  await expect(page.locator('#hud-banner')).toContainText(`On comes ${sub} for ${off}`);
+  await expect.poll(() => page.evaluate(() => (window as unknown as SubsWindow).__match.sim.phase)).not.toBe('paused');
+  expect(errors).toEqual([]);
+});

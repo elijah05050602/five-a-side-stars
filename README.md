@@ -40,6 +40,7 @@ Pages workflow runs the tests again before it deploys.
 - **Positions and line-ups**: a player can be good in more than one position (tick "Can also play"), and formations put players in spots they can play first. On the squad step, drag a player onto another (or tap one, then the other) to swap them, or drag a sub onto the pitch to bring them on.
 - **Team sheet**: from the squad step of the team builder, download a printable PNG team sheet.
 - **Weather and time of day**: pick sunny, cloudy, rain, snow, sunset or a night game under floodlights on the setup screen, or let the game surprise you.
+- **🔁 Subs**: a team with more than five players can swap anyone on the pitch for anyone on the bench while the ball is out of play (a throw-in, corner, goal kick or free kick, after a goal, at a kick-off or at half time). Tap Subs, then drag a sub onto a player (or tap one, then the other). A sub picked while the ball is in play comes on at the next stoppage. There is no limit, and players can go back on. Players slowly tire as they run (good Stamina tires slower, and the bench refills energy), and a tired player is a little slower. Computer teams get two subs if they have only five, and make up to two changes a half in the second half. Everyone who gets on the pitch counts for player of the match and career growth.
 - **⭐ Super skills**: in a match, a star meter fills with play (shots, skill moves and saves fill it faster). When it is full, the Trick button becomes the Super button, and the super depends on the player's position: a striker's 🚀 Rocket Shot, a winger's ⚡ Turbo Dash, a midfielder's or keeper's 🌈 Magic Pass that nobody can cut out, a defender's 💪 Bulldozer run. Without the ball it is a 🛡️ Super Slide tackle, or 🧤 Giant Gloves for your keeper. Play freezes for a short cutscene (letterbox bars, a camera swoop, a pillar of light and a banner; a tap skips it), then the super plays out in slow motion. Computer teams get supers too, but never on Starter, and only Hard uses Rocket Shots and Giant Gloves. The Parents Zone can turn the cutscenes or the supers off, and if anything in them ever fails, they switch themselves off for that match and play carries on.
 - **Commentary and replays**: a commentator who knows the score, calls shots wide, over or off the bar, and an instant replay of every goal: the build-up at normal speed, then the shot and the ball hitting the net in slow motion. Press shoot, pass or lob to skip it (off when motion is set to calm).
 
@@ -91,6 +92,7 @@ added to a phone or tablet home screen.
 | Sprint | Shift | Sprint button |
 | Switch player | Q | Switch button |
 | Pause | Esc or P | Pause button |
+| Subs | B (player 2: M) | Subs button |
 
 Two players on one keyboard: player 1 uses WASD, Space (shoot), Z (pass), left
 Shift (sprint) and Q (switch); player 2 uses the arrow keys, Enter, `/`, right

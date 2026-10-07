@@ -1,4 +1,6 @@
-import type { MatchSim, SimEvent } from '../game/sim';
+import type { MatchSim, Side, SimEvent } from '../game/sim';
+import { POSITION_LABELS, type Player } from '../data/types';
+import { wireDragSwap } from './dragSwap';
 import { soundSettings, wireSoundSettings } from './soundSettings';
 import { graphicsSettings, wireGraphicsSettings } from './graphicsSettings';
 import { TUTORIAL_STEPS, type TutorialCoach, type TutorialStep } from '../game/tutorial';
@@ -28,7 +30,17 @@ export interface HudRefs {
   /** Where the hero is on screen, 0..1 across and down, so the glow and speed lines centre on them. */
   superFocus(x: number, y: number): void;
   superEnd(): void;
+  /** Open the subs card for a side (the match pauses while it is up). */
+  openSubs(side: Side): void;
   destroy(): void;
+}
+
+/** What the subs card tells the match. */
+export interface SubsCallbacks {
+  /** Open the subs card for a side: pause the match and call openSubs. */
+  onOpenSubs(side: Side): void;
+  /** The line-up picked on the card: `lineup[i]` goes in sim.teamOf(side)[i]'s spot. */
+  onSubs(side: Side, lineup: string[]): void;
 }
 
 function fmtClock(sim: MatchSim): string {
@@ -71,7 +83,7 @@ function celebrate(root: HTMLElement, kit: { shirt: string; shirt2: string }, si
   if (score) { score.classList.remove('is-pop'); void score.offsetWidth; score.classList.add('is-pop'); }
 }
 
-export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void; onCamera?(): void }, coach?: TutorialCoach): HudRefs {
+export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void; onCamera?(): void } & Partial<SubsCallbacks>, coach?: TutorialCoach): HudRefs {
   const [home, away] = sim.teams;
   const mode = sim.mode;
   root.innerHTML = `
@@ -91,6 +103,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       ${mode === 'shootout' ? `<div class="pens-board"><div class="pens-line"><span class="pens-name">${esc(home.short)}</span><span id="pens-h"></span></div><div class="pens-line"><span class="pens-name">${esc(away.short)}</span><span id="pens-a"></span></div></div>` : ''}
       <div class="hud-tip" id="hud-tip"></div>
       <button class="hud-pause" id="hud-pause" aria-label="Pause">❚❚</button>
+      ${mode === 'match' ? '<button class="hud-subs" id="hud-subs" hidden aria-label="Subs"><span aria-hidden="true">🔁</span><span class="hud-subs-txt" aria-hidden="true">Subs</span></button>' : ''}
       <div class="hud-player-box hud-player-box-p2" id="hud-player-box-2" style="display:none">
         <div class="hud-player hud-player-p2" id="hud-player-2"></div>
         <div class="bar"><span class="bar-label">Sprint</span><div class="bar-track"><div class="bar-fill bar-stamina" id="bar-stamina-2"></div></div></div>
@@ -231,6 +244,92 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   let lastPens = -1;
   let lastTaking: number | null = null;
   pauseBtn.addEventListener('click', () => cb.onPause());
+
+  // Subs: a button by Pause (player 1's team), and on the pause card for each player's team.
+  const subsBtn = root.querySelector<HTMLButtonElement>('#hud-subs');
+  const subsTxt = subsBtn?.querySelector<HTMLElement>('.hud-subs-txt') ?? null;
+  subsBtn?.addEventListener('click', () => { if (sim.config.humanSide != null) cb.onOpenSubs?.(sim.config.humanSide); });
+  /** The card being shown: whose team, the planned line-up, the player picked by a tap, and whether the pause card opened it. */
+  let subs: { side: Side; plan: string[]; picked: string | null; fromPause: boolean; undrag: () => void } | null = null;
+  const closeSubs = () => { subs?.undrag(); subs = null; };
+  /** Get the subs card ready (it starts from the line-up with any waiting subs on), and draw it now if the match is paused. */
+  const openSubsCard = (s: MatchSim, side: Side, fromPause: boolean) => {
+    closeSubs();
+    const plan = s.teamOf(side).map((p, i) => s.pendingSubs[side].get(i)?.id ?? p.id);
+    const card = { side, plan, picked: null, fromPause, undrag: () => {} };
+    subs = card;
+    // Drop a bench player on a pitch player (or the other way round) to swap them.
+    card.undrag = wireDragSwap(overlay, (a, b) => { if (subs === card && planSwap(card.plan, a, b)) { card.picked = null; renderSubs(s, b); } });
+    if (s.phase === 'paused') renderSubs(s); // otherwise renderOverlay draws it when the pause takes effect
+  };
+  /** Swap a player in the line-up with one out of it. Two on the pitch, or two on the bench, do not swap. */
+  const planSwap = (plan: string[], a: string, b: string): boolean => {
+    const ia = plan.indexOf(a), ib = plan.indexOf(b);
+    if ((ia >= 0) === (ib >= 0)) return false;
+    if (ia >= 0) plan[ia] = b; else plan[ib] = a;
+    return true;
+  };
+  const renderSubs = (s: MatchSim, focusId?: string) => {
+    const c = subs!;
+    const side = c.side;
+    const team = s.teams[side];
+    const onPitch = s.teamOf(side);
+    const everyone: Player[] = [...onPitch.map((p) => p.info), ...s.bench[side]];
+    const byId = new Map(everyone.map((p) => [p.id, p]));
+    const benchNow = everyone.filter((p) => !c.plan.includes(p.id));
+    const changes = c.plan.filter((id, i) => id !== onPitch[i].id).length;
+    const two = s.config.humanSide2 != null;
+    const tile = (pl: Player, where: string, coming: '' | 'on' | 'off', gloves: boolean) => {
+      const energy = Math.round(s.energyOf(pl.id) * 100);
+      return `<button class="subs-player ${c.picked === pl.id ? 'is-picked' : ''} ${coming ? `is-${coming}` : ''}" data-swap="${esc(pl.id)}" data-pick="${esc(pl.id)}" data-swap-label="${pl.number} ${esc(pl.name)}" aria-pressed="${c.picked === pl.id}"
+        aria-label="${pl.number} ${esc(pl.name)}, ${where}, energy ${energy}%${coming === 'on' ? ', coming on' : coming === 'off' ? ', coming off' : ''}">
+        <span class="subs-num" style="background:${esc(team.kit.shirt)}">${pl.number}</span>
+        <span class="subs-name">${esc(pl.name)}</span>
+        <span class="subs-pos">${where}${gloves && pl.position !== 'GK' ? ' 🧤' : ''}</span>
+        <span class="subs-energy" aria-hidden="true"><i class="${energy < 40 ? 'is-low' : ''}" style="width:${energy}%"></i></span>
+        ${coming ? `<span class="chip subs-chip">${coming === 'on' ? 'Coming on' : 'Coming off'}</span>` : ''}
+      </button>`;
+    };
+    const status = changes === 0 ? 'Drag a sub onto a player on the pitch, or tap one and then the other.'
+      : s.ballDead() ? `${changes === 1 ? 'The change happens' : 'The changes happen'} as soon as you press Done.`
+        : `The ball is in play, so ${changes === 1 ? 'the sub comes' : 'the subs come'} on when it next goes out.`;
+    overlay.hidden = false;
+    overlay.innerHTML = `
+      <div class="card overlay-card subs-card">
+        <h2>🔁 ${two ? `P${side === s.config.humanSide ? 1 : 2} subs` : 'Subs'}</h2>
+        <p class="muted subs-status" aria-live="polite">${status}</p>
+        <div class="subs-label">On the pitch</div>
+        <div class="subs-row subs-pitch">${c.plan.map((id, i) => {
+          const p = onPitch[i];
+          return tile(byId.get(id)!, POSITION_LABELS[p.isKeeper ? 'GK' : p.role], id !== p.id ? 'on' : '', p.isKeeper);
+        }).join('')}</div>
+        <div class="subs-label">On the bench</div>
+        <div class="subs-row subs-bench">${benchNow.map((pl) => tile(pl, 'Sub', onPitch.some((p) => p.id === pl.id) ? 'off' : '', false)).join('')}</div>
+        <div class="row">
+          <button class="btn btn-primary" id="subs-done">Done ✅</button>
+          <button class="btn btn-ghost" id="subs-cancel">${c.fromPause ? 'Back' : 'Cancel'}</button>
+        </div>
+      </div>`;
+    overlay.querySelectorAll<HTMLElement>('[data-pick]').forEach((b) => b.addEventListener('click', () => {
+      const id = b.dataset.pick!;
+      if (c.picked === id) c.picked = null;
+      else if (c.picked && planSwap(c.plan, c.picked, id)) c.picked = null;
+      else c.picked = id;
+      renderSubs(s, id);
+    }));
+    overlay.querySelector('#subs-done')!.addEventListener('click', () => {
+      cb.onSubs?.(side, [...c.plan]);
+      closeSubs();
+      cb.onResume();
+    });
+    overlay.querySelector('#subs-cancel')!.addEventListener('click', () => {
+      const back = c.fromPause;
+      closeSubs();
+      if (back) renderOverlay(s); else cb.onResume();
+    });
+    const again = focusId ? [...overlay.querySelectorAll<HTMLElement>('[data-pick]')].find((b) => b.dataset.pick === focusId) : null;
+    if (again) again.focus({ preventScroll: true }); else focusCard();
+  };
   const tutCard = root.querySelector<HTMLElement>('#tut-card');
   root.querySelector('#tut-skip')?.addEventListener('click', () => cb.onQuit());
   let tutKey = '';
@@ -271,7 +370,18 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     bannerTimer = window.setTimeout(() => banner.classList.remove('show'), ms);
   };
 
+  /** Buttons on the pause card to open each human team's subs card. */
+  const subsButtons = (s: MatchSim) => {
+    if (mode !== 'match' || !cb.onSubs) return '';
+    const sides = [s.config.humanSide, s.config.humanSide2].filter((x): x is Side => x != null && s.canSub(x));
+    if (!sides.length) return '';
+    const two = s.config.humanSide2 != null;
+    return `<div class="row">${sides.map((side) => `<button class="btn btn-ghost" data-subs="${side}">🔁 ${two ? `P${side === s.config.humanSide ? 1 : 2} subs` : 'Make a sub'}${s.pendingSubs[side].size ? ' (ready)' : ''}</button>`).join('')}</div>`;
+  };
+
   const renderOverlay = (s: MatchSim) => {
+    if (s.phase !== 'paused') closeSubs();
+    if (s.phase === 'paused' && subs) { renderSubs(s); return; }
     if (s.phase === 'paused') {
       overlay.hidden = false;
       overlay.innerHTML = `
@@ -288,6 +398,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
                 : touch
                   ? '<p class="muted">Drag the stick to run, hold Shoot to power up, then let go. The orange ring marks your player.</p>'
                   : `<p class="muted">${esc(controlsSentence('solo'))}. Hold shoot to power up, then let go. A controller works too. The orange ring and arrow mark your player; the small rings show each team's colour.</p>`}
+          ${subsButtons(s)}
           ${cameraPicker()}
           ${soundSettings()}
           ${graphicsSettings(true)}
@@ -297,6 +408,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
           </div>
         </div>`;
       overlay.querySelector('#ov-resume')!.addEventListener('click', () => cb.onResume());
+      overlay.querySelectorAll<HTMLElement>('[data-subs]').forEach((b) => b.addEventListener('click', () => openSubsCard(s, Number(b.dataset.subs) as Side, true)));
       wireSoundSettings(overlay);
       wireGraphicsSettings(overlay);
       overlay.querySelectorAll<HTMLElement>('[data-cam-height], [data-cam-view]').forEach((b) => b.addEventListener('click', () => {
@@ -379,6 +491,9 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       superCut.hidden = true;
       superCut.classList.remove('is-on');
     },
+    openSubs(side) {
+      if (sim.canSub(side) && sim.phase !== 'fulltime') openSubsCard(sim, side, false);
+    },
     update(s, events, lines) {
       sbH.textContent = String(s.score[0]);
       if (mode !== 'training') sbA.textContent = String(s.score[1]);
@@ -411,6 +526,25 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         barPower2.style.width = `${Math.round(s.controlled2.charge * 100)}%`;
       } else playerBox2.style.display = 'none';
       showSupers(s);
+      if (subsBtn && subsTxt) {
+        const side = s.config.humanSide;
+        const can = side != null && s.canSub(side) && s.phase !== 'fulltime';
+        if (subsBtn.hidden === can) subsBtn.hidden = !can;
+        if (can) {
+          const waiting = s.pendingSubs[side].size > 0;
+          subsBtn.classList.toggle('is-waiting', waiting);
+          subsBtn.classList.toggle('is-ready', !waiting && s.ballDead() && s.phase !== 'paused');
+          const word = waiting ? 'Ready' : 'Subs';
+          if (subsTxt.textContent !== word) { subsTxt.textContent = word; subsBtn.setAttribute('aria-label', waiting ? 'Subs: a sub is ready to come on' : 'Subs'); }
+        }
+      }
+      // Subs made this frame: one banner, naming the team when it is the computer's change.
+      const changes = events.filter((ev) => ev.type === 'sub' && ev.player && ev.off);
+      if (changes.length) {
+        const onComes = (ev: SimEvent) => (s.isHuman(ev.side!) ? 'On comes' : `${s.teams[ev.side!].name}: on comes`);
+        showBanner(`<div class="save-text">🔁 ${changes.map((ev) => `${esc(onComes(ev))} <strong>${esc(ev.player!.name)}</strong> for ${esc(ev.off!.name)}`).join('<br/>')}</div>`, 2200);
+        announce(changes.map((ev) => `${onComes(ev)} ${ev.player!.name} for ${ev.off!.name}.`).join(' '));
+      }
       events.forEach((ev, i) => {
         const said = lines?.[i] ?? null;
         if (ev.type === 'goal' && ev.player) {
@@ -467,6 +601,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       cardPad(s);
     },
     destroy() {
+      closeSubs();
       window.clearTimeout(bannerTimer);
       window.clearTimeout(commTimer);
       window.removeEventListener('keydown', onCardKey, true);

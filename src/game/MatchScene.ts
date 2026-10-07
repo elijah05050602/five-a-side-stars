@@ -58,8 +58,10 @@ export interface MatchResult {
   home: SimConfig['home'];
   away: SimConfig['away'];
   stats: { touches: [number, number]; distance: [number, number] };
-  /** What each starter did, by player id. */
+  /** What everyone who played did, by player id. */
   players: Record<string, PlayerMatchStats>;
+  /** How much of the match each player was on the pitch for, 0 to 1, by player id. Missing means the starting five played it all. */
+  played?: Record<string, number>;
   /** Penalty-by-penalty record in a shoot-out (true = scored). */
   shootout: [boolean[], boolean[]] | null;
   trainingPoints: number;
@@ -79,6 +81,16 @@ export class MatchScene {
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
   private readonly models = new Map<SimPlayer, PlayerModel>();
+  /**
+   * The subs, standing by their team's bench on the near touchline, by player id. They are all built at kick-off
+   * so a sub never stalls the match while a model loads; a player who goes off walks over and joins them.
+   */
+  private readonly benchModels = new Map<string, PlayerModel>();
+  private readonly walkers: { m: PlayerModel; t: number }[] = [];
+  /** Models dressed in the keeper's kit. */
+  private readonly gloved = new WeakSet<PlayerModel>();
+  private readonly ringColours: ReturnType<typeof teamRingColours>;
+  private readonly starId: string | undefined;
   private readonly ball: BallModel;
   private readonly input: Input;
   private readonly input2: Input | null;
@@ -206,16 +218,10 @@ export class MatchScene {
     // Dev builds only: lets a test script poke the crowd (window.__crowd.onEvent({ type: 'goal', side: 0 })).
     if (import.meta.env.DEV) (window as unknown as { __crowd: Crowd }).__crowd = this.crowd;
 
-    const ringColours = teamRingColours(this.sim.teams[0].kit, this.sim.teams[1].kit);
-    for (const p of this.sim.players) {
-      const team = this.sim.teams[p.side];
-      const kit = p.isKeeper ? team.keeperKit : team.kit;
-      const m = new PlayerModel(p.info, kit, this.sim.stats.scale);
-      m.setTeamColour(ringColours[p.side]);
-      if (p.side === 0 && options.starId && p.info.id === options.starId) m.setStar(true);
-      this.models.set(p, m);
-      this.scene.add(m.group);
-    }
+    this.starId = options.starId;
+    this.ringColours = teamRingColours(this.sim.teams[0].kit, this.sim.teams[1].kit);
+    for (const p of this.sim.players) this.models.set(p, this.makeModel(p.info, p.side, p.isKeeper));
+    for (const side of [0, 1] as Side[]) for (const info of this.sim.bench[side]) this.benchModels.set(info.id, this.makeModel(info, side, info.position === 'GK'));
     this.ball = new BallModel(this.sim.ball.radius);
     this.scene.add(this.ball.group);
     this.trail = new BallTrail(this.sim.ball.radius);
@@ -242,6 +248,8 @@ export class MatchScene {
       onQuit: () => { this.dispose(); this.onQuit(); },
       onFinish: () => { const r = this.result(); this.dispose(); this.onFinish(r); },
       onCamera: () => this.updateView(),
+      onOpenSubs: (side) => this.openSubs(side),
+      onSubs: (side, lineup) => this.sim.requestSubs(side, lineup),
     }, this.coach ?? undefined);
     this.input.attachJoystick(this.hud.joystickZone, this.hud.joystickBase, this.hud.joystickKnob);
     this.input.attachButton(this.hud.btnShoot, 'shoot');
@@ -296,6 +304,83 @@ export class MatchScene {
     this.frameMs = 16.7;
     this.renderer.setPixelRatio(pr);
     this.resize();
+  }
+
+  private makeModel(info: SimPlayer['info'], side: Side, keeper: boolean): PlayerModel {
+    const team = this.sim.teams[side];
+    const m = new PlayerModel(info, keeper ? team.keeperKit : team.kit, this.sim.stats.scale);
+    m.setTeamColour(this.ringColours[side]);
+    if (side === 0 && this.starId && info.id === this.starId) m.setStar(true);
+    if (keeper) this.gloved.add(m);
+    this.scene.add(m.group);
+    return m;
+  }
+
+  /** Where a sub stands: in a row in front of their team's bench, just behind the boards. */
+  private benchStand(side: Side, id: string): THREE.Vector3 {
+    const row = this.sim.bench[side];
+    const i = Math.max(0, row.findIndex((b) => b.id === id));
+    const x = (side === 0 ? -1 : 1) * this.sim.length * 0.18 + (i - (row.length - 1) / 2) * 0.85;
+    return new THREE.Vector3(x, 0, this.sim.width / 2 + 1.75);
+  }
+
+  /** A sub has come on: their model takes over on the pitch, and the player going off walks to the bench. */
+  private onSub(ev: SimEvent): void {
+    const p = this.sim.players.find((q) => q.id === ev.player?.id);
+    if (!p || !ev.off) return;
+    const old = this.models.get(p);
+    let incoming = this.benchModels.get(p.id);
+    this.benchModels.delete(p.id);
+    // A sub going in goal needs the keeper's kit (and a keeper coming off, the outfield one).
+    if (!incoming || this.gloved.has(incoming) !== p.isKeeper) {
+      incoming?.dispose();
+      incoming = this.makeModel(p.info, p.side, p.isKeeper);
+      incoming.group.position.set(p.pos.x, 0, p.pos.z);
+    }
+    this.models.set(p, incoming);
+    if (old) {
+      old.setSelected(false);
+      this.benchModels.set(ev.off.id, old);
+      this.walkers.push({ m: old, t: 0 });
+    }
+  }
+
+  /** The subs stand by the bench watching the ball, and anyone just subbed off walks over to join them. */
+  private updateBench(dt: number): void {
+    const b = this.sim.ball;
+    const scale = this.sim.stats.scale;
+    for (const side of [0, 1] as Side[]) {
+      for (const info of this.sim.bench[side]) {
+        const m = this.benchModels.get(info.id);
+        if (!m) continue;
+        const spot = this.benchStand(side, info.id);
+        const w = this.walkers.find((x) => x.m === m);
+        let speed = 0;
+        if (w) {
+          w.t += dt;
+          const to = new THREE.Vector3().subVectors(spot, m.group.position);
+          const d = to.length();
+          const step = Math.min(d, 3.2 * scale * dt + 0.02);
+          if (d > 0.05) {
+            m.group.position.addScaledVector(to, step / d);
+            m.setFacing(Math.atan2(to.z, to.x));
+            speed = step / Math.max(dt, 1e-3);
+          }
+          if (d <= 0.05 || w.t > 12) { m.group.position.copy(spot); this.walkers.splice(this.walkers.indexOf(w), 1); }
+        } else {
+          m.group.position.copy(spot);
+          m.setFacing(Math.atan2(b.pos.z - spot.z, b.pos.x - spot.x));
+        }
+        m.animate(this.cut ? dt * 0.02 : dt, { speed, kick: 0, dive: 0, diveDir: 1, stun: 0, recover: 0, tackle: 0, scale, wobble: 0, mood: 'neutral', gazeX: 0, gazeY: 0, cheer: false });
+      }
+    }
+  }
+
+  /** Pause and bring up a side's subs card (Done or Cancel on the card carries on). */
+  private openSubs(side: Side): void {
+    if (!this.sim.canSub(side) || this.sim.phase === 'fulltime') return;
+    this.hud.openSubs(side);
+    if (this.sim.phase !== 'paused') this.sim.togglePause();
   }
 
   /** Snapshot the sim for the replay buffer (about five seconds kept). */
@@ -381,6 +466,7 @@ export class MatchScene {
       away: this.sim.config.away,
       stats: { touches, distance },
       players: this.sim.playerStats(),
+      played: this.sim.mode === 'match' ? this.sim.playedShare() : undefined,
       shootout: this.sim.shootout ? [[...this.sim.shootout.results[0]], [...this.sim.shootout.results[1]]] : null,
       trainingPoints: this.sim.trainingPoints,
       twoPlayer: this.sim.config.humanSide2 != null,
@@ -444,6 +530,8 @@ export class MatchScene {
     const raw2 = this.input2?.poll();
     const input2 = raw2 && this.latches[1].take(this.toPitch(raw2));
     if (input.pause || input2?.pause) this.sim.togglePause();
+    else if (input.subs && this.sim.config.humanSide != null) this.openSubs(this.sim.config.humanSide);
+    else if (input2?.subs && this.sim.config.humanSide2 != null) this.openSubs(this.sim.config.humanSide2);
     // Fixed 60 Hz simulation steps for stable physics. The sim waits while a replay plays.
     const replaying = !!this.replay && this.replay.wait <= 0;
     // Shoot, pass or lob during a replay skips it (taps during a replay are dropped below, so it kicks nothing).
@@ -456,7 +544,7 @@ export class MatchScene {
     const step = 1 / 60;
     let steps = 0;
     while (!replaying && !cutting && this.acc >= step && steps < 8) {
-      const once = { shoot: false, pass: false, lob: false, switchPlayer: false, pause: false, trick: false };
+      const once = { shoot: false, pass: false, lob: false, switchPlayer: false, pause: false, trick: false, subs: false };
       this.sim.step(step, steps === 0 ? input : { ...input, ...once }, input2 ? (steps === 0 ? input2 : { ...input2, ...once }) : undefined);
       const live = this.sim.phase === 'play' || this.sim.phase === 'setpiece' || this.sim.phase === 'kickoff';
       // Keep filming for a moment after a goal, so its replay shows the ball hit the net.
@@ -476,6 +564,7 @@ export class MatchScene {
     for (const ev of this.sim.events) {
       this.sfx.play(ev);
       if (ev.type === 'fulltime') music.jingle(this.fullTimeJingle());
+      if (ev.type === 'sub') this.onSub(ev);
       this.crowd.onEvent(ev);
       if (!this.calm) this.puffFor(ev);
       if (ev.type === 'goal') {
@@ -553,6 +642,7 @@ export class MatchScene {
       const isP2 = p === this.sim.controlled2;
       m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? P1_RING : isP2 ? P2_RING : 0xffffff);
     }
+    this.updateBench(dt);
     this.ball.update(b.pos.x, b.y, b.pos.z, b.radius, b.vel.x, b.vel.z, dt);
 
     // Camera follows a blend of the ball and the controlled player, clamped to the pitch.
@@ -721,6 +811,7 @@ export class MatchScene {
     this.weather.dispose();
     this.hud.destroy();
     this.models.forEach((m) => m.dispose());
+    this.benchModels.forEach((m) => m.dispose());
     this.crowd.dispose();
     // The crowd frees its own meshes but not the textures it borrows from caches (kit shirts, the fans'
     // faces): this frees their GPU copies too, and they are uploaded again if the next match wants them.
