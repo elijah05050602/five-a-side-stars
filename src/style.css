@@ -348,10 +348,49 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 .hud-comm.show { opacity: 1; transform: translate(-50%, 0); }
 .hud-comm-mic { font-size: 20px; }
 @media (pointer: coarse) { .hud-comm { bottom: auto; top: 112px; font-size: 15px; } }
-.replay-frame { position: absolute; inset: 0; pointer-events: none; }
-.replay-frame::before, .replay-frame::after { content: ''; position: absolute; left: 0; right: 0; height: 9vh; background: #0b1220; }
-.replay-frame::before { top: 0; }
-.replay-frame::after { bottom: 0; }
+.replay-frame { position: absolute; inset: 0; overflow: hidden; pointer-events: auto; cursor: pointer; touch-action: none; --rf-bar: 12vh; }
+.replay-frame.is-out { pointer-events: none; }
+@media (orientation: portrait) { .replay-frame { --rf-bar: 8vh; } }
+/* The goal replay plays on a clean screen: every button, bar and the scoreboard fade away until it ends. */
+.hud.is-replay :is(.touch-controls, .hud-pause, .hud-subs, .hud-player-box, .hud-comm, .hud-banner, .hud-tip, .scoreboard, .pens-board, .confetti) { opacity: 0 !important; visibility: hidden; pointer-events: none !important; transition: opacity .3s, visibility 0s .3s; }
+.rf-bar { position: absolute; left: 0; right: 0; height: calc(var(--rf-bar) + env(safe-area-inset-top)); background: #05070f; }
+.rf-top { top: 0; }
+.rf-bottom { bottom: 0; height: calc(var(--rf-bar) + env(safe-area-inset-bottom)); }
+.replay-frame.is-in .rf-top { animation: sc-bar-top .45s cubic-bezier(.2,.9,.3,1) both; }
+.replay-frame.is-in .rf-bottom { animation: sc-bar-bottom .45s cubic-bezier(.2,.9,.3,1) both; }
+.replay-frame.is-out .rf-top { animation: rf-bar-top-out .4s ease-in both; }
+.replay-frame.is-out .rf-bottom { animation: rf-bar-bottom-out .4s ease-in both; }
+/* The film look: a soft vignette, a warm grade and a faint grain. Low graphics keeps only the vignette. */
+.rf-vig { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 50%, transparent 45%, rgba(5,7,15,.35) 75%, rgba(5,7,15,.7) 100%); }
+.rf-grade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(255,170,80,.16), rgba(255,120,60,.08) 55%, rgba(40,60,140,.14)); mix-blend-mode: soft-light; }
+.rf-grain { position: absolute; inset: -50%; opacity: .12; mix-blend-mode: overlay; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); animation: rf-grain .5s steps(4) infinite; }
+.replay-frame.is-lite .rf-grade, .replay-frame.is-lite .rf-grain { display: none; }
+.replay-frame.is-out :is(.rf-vig, .rf-grade, .rf-grain, .replay-label, .rf-cap, .rf-skip) { opacity: 0; transition: opacity .2s; }
+.replay-label { position: absolute; top: calc(var(--rf-bar) + env(safe-area-inset-top) + 12px); right: calc(18px + env(safe-area-inset-right)); color: var(--navy); font-weight: 800; font-size: 20px; letter-spacing: 3px; background: #ffd23f; border: 3px solid var(--navy); box-shadow: 0 4px 0 var(--navy); padding: 2px 12px 2px 30px; border-radius: 999px; }
+.replay-label::before { content: ''; position: absolute; left: 11px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; background: var(--red); }
+/* The scorer's name slides in as the slow motion starts. */
+.rf-cap { position: absolute; left: calc(5vw + env(safe-area-inset-left)); bottom: calc(var(--rf-bar) + env(safe-area-inset-bottom) + 14px); display: flex; align-items: center; gap: 10px; padding: 8px 18px 8px 12px; background: rgba(27,42,65,.88); color: #fff; border-left: 6px solid #ffd23f; border-radius: 4px 14px 14px 4px; font-family: var(--font); opacity: 0; transform: translateX(-30px); }
+.rf-cap:empty { display: none; }
+.rf-cap b { font-size: clamp(18px, 3.4vmin, 28px); font-weight: 800; }
+.rf-cap-sub { font-size: clamp(13px, 2.2vmin, 17px); font-weight: 700; color: #ffd23f; }
+.rf-cap-ball { font-size: clamp(18px, 3.2vmin, 26px); }
+.replay-frame.is-slow .rf-cap { animation: rf-cap-in .5s .15s cubic-bezier(.2,1.3,.4,1) both; }
+/* "Tap to skip" sits in the bottom bar for the first two seconds. */
+.rf-skip { position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + var(--rf-bar) / 2); transform: translateY(50%); text-align: center; color: rgba(255,255,255,.85); font-weight: 700; font-size: 15px; letter-spacing: 1px; opacity: 0; }
+.replay-frame.is-in .rf-skip { animation: rf-skip 2.4s .3s ease-in-out both; }
+.rf-skip-touch { display: none; }
+@media (pointer: coarse) { .rf-skip-touch { display: inline; } .rf-skip-keys { display: none; } }
+/* A flash for the cut to slow motion, and a star wipe in and out. */
+.rf-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+.replay-frame.is-slow .rf-flash { animation: sc-flash .4s ease-out both; }
+.rf-wipe { position: absolute; left: 50%; top: 50%; width: 20vmax; height: 20vmax; background: #ffd23f; opacity: 0; pointer-events: none; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+.replay-frame.is-in .rf-wipe, .replay-frame.is-out .rf-wipe { animation: rf-wipe .55s ease-in both; }
+@keyframes rf-wipe { 0% { opacity: 1; transform: translate(-50%, -50%) scale(0) rotate(-30deg); } 55% { opacity: 1; transform: translate(-50%, -50%) scale(16) rotate(20deg); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(18) rotate(30deg); } }
+@keyframes rf-bar-top-out { to { transform: translateY(-100%); } }
+@keyframes rf-bar-bottom-out { to { transform: translateY(100%); } }
+@keyframes rf-cap-in { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: none; } }
+@keyframes rf-skip { 0%, 100% { opacity: 0; } 15%, 80% { opacity: 1; } }
+@keyframes rf-grain { 0% { transform: translate(0, 0); } 25% { transform: translate(-6%, 4%); } 50% { transform: translate(5%, -3%); } 75% { transform: translate(-3%, -6%); } 100% { transform: translate(0, 0); } }
 
 /* ---------- Super skills ---------- */
 @property --sc-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
@@ -392,8 +431,6 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 .abtn-trick.has-meter::before { content: ''; position: absolute; inset: -8px; border-radius: 50%; pointer-events: none; background: conic-gradient(#ffd23f calc(var(--meter, 0) * 1turn), rgba(27,42,65,0.35) 0); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); }
 .abtn-trick.is-super { background: radial-gradient(circle at 35% 30%, #fff3a0, #ffd23f 45%, #f4a000); color: var(--navy); transform: scale(1.25); box-shadow: 0 4px 0 var(--navy), 0 0 0 3px #fff, 0 0 22px 8px rgba(255,210,63,0.9); animation: sc-ready 0.5s ease-in-out infinite alternate; z-index: 1; }
 .abtn-trick.is-super.is-down { transform: scale(1.1); }
-.replay-label { position: absolute; top: calc(9vh + 12px); right: 18px; color: #fff; font-weight: 700; font-size: 22px; letter-spacing: 2px; background: var(--red); padding: 4px 12px; border-radius: 8px; animation: blink 1s steps(2) infinite; }
-@keyframes blink { 50% { opacity: .35; } }
 
 /* Phase 3 additions */
 .badge { vertical-align: middle; }

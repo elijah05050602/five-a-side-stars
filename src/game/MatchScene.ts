@@ -23,6 +23,7 @@ import { EXPOSURE, TONE_MAPPING, disposeObject } from './renderer';
 import { BallTrail, Puffs, SuperAura } from './effects';
 import { SUPERS, type SuperKind } from './supers';
 import { P1_RING, P2_RING, teamRingColours } from './ringColours';
+import { goalCamShot } from './replayCamera';
 
 /** Whether the touch buttons are showing (the same test the CSS uses). */
 const TOUCH_SCREEN = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
@@ -106,7 +107,11 @@ export class MatchScene {
   private readonly extras: ReturnType<typeof pitchExtras>;
   /** Rolling record of the last few seconds, oldest first. */
   private readonly history: ReplayFrame[] = [];
-  private replay: { frames: ReplayFrame[]; t: number; wait: number; slowFrom: number; hold: number } | null = null;
+  private replay: { frames: ReplayFrame[]; t: number; wait: number; slowFrom: number; hold: number; slow: boolean; goalSign: 1 | -1 } | null = null;
+  /** The screen was tapped during a replay, to skip it. */
+  private skipTapped = false;
+  /** The match camera's lens, put back after the replay's close-up. */
+  private readonly baseFov = 42;
   /** Frames filmed since the latest goal, for the end of its replay. */
   private afterGoal = 0;
   /** The team-mate waving for a pass, chosen afresh every so often. */
@@ -184,7 +189,7 @@ export class MatchScene {
     renderer.info.reset();
     this.scene.background = new THREE.Color('#8fd3ff');
     this.scene.fog = new THREE.Fog('#8fd3ff', 70, 130);
-    this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
+    this.camera = new THREE.PerspectiveCamera(this.baseFov, 1, 0.1, 200);
 
     const sun = new THREE.DirectionalLight(0xffffff, 2.2);
     this.sun = sun;
@@ -250,6 +255,7 @@ export class MatchScene {
       onCamera: () => this.updateView(),
       onOpenSubs: (side) => this.openSubs(side),
       onSubs: (side, lineup) => this.sim.requestSubs(side, lineup),
+      onSkipReplay: () => { this.skipTapped = true; },
     }, this.coach ?? undefined);
     this.input.attachJoystick(this.hud.joystickZone, this.hud.joystickBase, this.hud.joystickKnob);
     this.input.attachButton(this.hud.btnShoot, 'shoot');
@@ -393,33 +399,85 @@ export class MatchScene {
     if (this.history.length > 300) this.history.shift();
   }
 
-  /** Play the build-up back at normal speed, then the shot and the ball hitting the net slowly. Returns true while the replay has the screen. */
+  /**
+   * Play the build-up back at normal speed from a low TV angle, then cut to behind the net for the shot
+   * and the ball hitting the net in slow motion. The buttons are hidden and the picture gets cinema bars.
+   * Returns true while the replay has the screen; it sets the camera itself.
+   */
   private runReplay(dt: number, scale: number): boolean {
     const r = this.replay;
     if (!r) return false;
     if (r.wait > 0) { r.wait -= dt; return false; }
-    if (!r.frames.length) {
-      // Cut the clip now, once the moments after the goal are filmed too.
-      r.frames = this.history.slice(-(REPLAY_BEFORE + this.afterGoal));
-      r.slowFrom = Math.max(0, r.frames.length - this.afterGoal - REPLAY_SLOW);
+    try {
+      if (!r.frames.length) {
+        // Cut the clip now, once the moments after the goal are filmed too.
+        r.frames = this.history.slice(-(REPLAY_BEFORE + this.afterGoal));
+        r.slowFrom = Math.max(0, r.frames.length - this.afterGoal - REPLAY_SLOW);
+        r.goalSign = r.frames[r.frames.length - 1].ball.x >= 0 ? 1 : -1;
+      }
+      const first = r.t === 0;
+      if (first) {
+        const g = this.sim.goals[this.sim.goals.length - 1];
+        this.hud.setReplay(true, {
+          name: g ? g.scorer.name : '', team: g ? this.sim.teams[g.side].short : '', minute: g ? g.minute : 0, ownGoal: !!g?.ownGoal,
+          lite: this.gfx.tier === 'low',
+        });
+      }
+      // Paused from the keyboard: the replay waits too.
+      if (this.sim.phase === 'paused') dt = 0;
+      const speed = Math.floor(r.t * 60) < r.slowFrom ? 1 : 0.55;
+      r.t += dt * speed;
+      const idx = Math.min(r.frames.length - 1, Math.floor(r.t * 60));
+      const f = r.frames[idx];
+      this.sim.players.forEach((p, i) => {
+        const m = this.models.get(p)!, fp = f.players[i];
+        m.group.position.set(fp.x, 0, fp.z);
+        m.setFacing(fp.facing);
+        m.animate(dt * speed, { speed: fp.speed, kick: fp.kick, dive: fp.dive, diveDir: fp.diveDir, stun: fp.stun, recover: fp.recover, tackle: 0, scale, wobble: 0, mood: 'focus', gazeX: 0, gazeY: 0, cheer: false });
+        m.setSelected(false, 0xffffff);
+      });
+      this.ball.update(f.ball.x, f.ball.y, f.ball.z, this.sim.ball.radius, f.ball.vx, f.ball.vz, dt * speed);
+      const slow = idx >= r.slowFrom;
+      const cutNow = slow && !r.slow;
+      if (cutNow) { r.slow = true; this.hud.replayCut(); }
+      if (slow) {
+        // Behind the net, pushing in slowly as the ball comes in.
+        const push = (idx - r.slowFrom) / Math.max(1, r.frames.length - 1 - r.slowFrom);
+        const shot = goalCamShot({ length: this.sim.length, goalHeight: this.sim.goalHeight, goalDepth: this.sim.goalDepth, runoffEnd: RUNOFF_END }, r.goalSign, f.ball, this.camera.aspect, push);
+        this.camera.position.set(shot.pos.x, shot.pos.y, shot.pos.z);
+        this.camLook.lerp(new THREE.Vector3(shot.look.x, shot.look.y, shot.look.z), cutNow ? 1 : 1 - Math.pow(0.002, dt));
+        this.camera.lookAt(this.camLook);
+        if (Math.abs(this.camera.fov - shot.fov) > 0.01) { this.camera.fov = shot.fov; this.camera.updateProjectionMatrix(); }
+      } else {
+        // The build-up: lower and closer than the match camera, like a TV gantry.
+        this.camTarget.lerp(new THREE.Vector3(THREE.MathUtils.clamp(f.ball.x, -this.sim.length * 0.4, this.sim.length * 0.4), 0, THREE.MathUtils.clamp(f.ball.z, -this.sim.width * 0.25, this.sim.width * 0.25)), first ? 1 : 1 - Math.pow(0.02, dt));
+        const goal = this.cameraGoal(this.camTarget, 0.72);
+        if (!this.upfield) { goal.y *= 0.8; goal.z = this.camTarget.z + goal.y * 1.15; }
+        this.camPos.lerp(goal, first ? 1 : 1 - Math.pow(0.02, dt));
+        this.camLook.set(this.camTarget.x, 0.5, this.camTarget.z);
+        this.camera.position.copy(this.camPos);
+        this.camera.lookAt(this.camLook);
+      }
+      // Hold the last picture a moment before cutting to the celebration.
+      if (idx >= r.frames.length - 1 && (r.hold += dt) > 0.4) this.endReplay();
+    } catch (e) {
+      console.warn('Goal replay stopped after an error', e);
+      this.endReplay();
+      return false;
     }
-    if (r.t === 0) this.hud.setReplay(true);
-    const speed = Math.floor(r.t * 60) < r.slowFrom ? 1 : 0.55;
-    r.t += dt * speed;
-    const idx = Math.min(r.frames.length - 1, Math.floor(r.t * 60));
-    const f = r.frames[idx];
-    this.sim.players.forEach((p, i) => {
-      const m = this.models.get(p)!, fp = f.players[i];
-      m.group.position.set(fp.x, 0, fp.z);
-      m.setFacing(fp.facing);
-      m.animate(dt * speed, { speed: fp.speed, kick: fp.kick, dive: fp.dive, diveDir: fp.diveDir, stun: fp.stun, recover: fp.recover, tackle: 0, scale, wobble: 0, mood: 'focus', gazeX: 0, gazeY: 0, cheer: false });
-      m.setSelected(false, 0xffffff);
-    });
-    this.ball.update(f.ball.x, f.ball.y, f.ball.z, this.sim.ball.radius, f.ball.vx, f.ball.vz, dt * speed);
-    this.camTarget.lerp(new THREE.Vector3(THREE.MathUtils.clamp(f.ball.x, -this.sim.length * 0.4, this.sim.length * 0.4), 0, THREE.MathUtils.clamp(f.ball.z, -this.sim.width * 0.25, this.sim.width * 0.25)), 1 - Math.pow(0.02, dt));
-    // Hold the last picture a moment before cutting to the celebration.
-    if (idx >= r.frames.length - 1 && (r.hold += dt) > 0.4) { this.replay = null; this.hud.setReplay(false); }
     return true;
+  }
+
+  /** Finish or skip the replay: the buttons come back and the camera cuts back to the match. */
+  private endReplay(): void {
+    const was = this.replay && this.replay.t > 0;
+    this.replay = null;
+    try { this.hud.setReplay(false); } catch { /* the HUD is already gone */ }
+    if (this.camera.fov !== this.baseFov) { this.camera.fov = this.baseFov; this.camera.updateProjectionMatrix(); }
+    if (was) {
+      this.camPos.copy(this.cameraGoal(this.camTarget));
+      this.camLook.set(this.camTarget.x, 0.5, this.camTarget.z);
+    }
   }
 
   private resize(): void {
@@ -534,8 +592,10 @@ export class MatchScene {
     else if (input2?.subs && this.sim.config.humanSide2 != null) this.openSubs(this.sim.config.humanSide2);
     // Fixed 60 Hz simulation steps for stable physics. The sim waits while a replay plays.
     const replaying = !!this.replay && this.replay.wait <= 0;
-    // Shoot, pass or lob during a replay skips it (taps during a replay are dropped below, so it kicks nothing).
-    if (replaying && (input.shoot || input.pass || input.lob || input2?.shoot || input2?.pass || input2?.lob)) { this.replay = null; this.hud.setReplay(false); }
+    // A tap on the screen or any button during a replay skips it (taps during a replay are dropped below, so it kicks nothing).
+    const tapped = (i: InputState | undefined | null) => !!i && (i.shoot || i.pass || i.lob || i.trick || i.switchPlayer);
+    if (replaying && (this.skipTapped || tapped(input) || tapped(input2))) this.endReplay();
+    this.skipTapped = false;
     const cutting = !!this.cut;
     if (this.cut) this.tickCut(dt, input.shoot || input.pass || input.lob || input.trick || !!input2?.shoot || !!input2?.pass || !!input2?.lob || !!input2?.trick);
     // Slow motion just after a super's cutscene: the sim runs at under half speed for a moment.
@@ -569,7 +629,7 @@ export class MatchScene {
       if (!this.calm) this.puffFor(ev);
       if (ev.type === 'goal') {
         this.extras.scoreboard.set(this.sim.teams[0].short, this.sim.teams[1].short, this.sim.score[0], this.sim.score[1]);
-        if (this.sim.mode !== 'training' && !getSettings().reduceMotion && this.history.length > 30) { this.replay = { frames: [], t: 0, wait: 1.1, slowFrom: 0, hold: 0 }; this.afterGoal = 0; }
+        if (this.sim.mode !== 'training' && !getSettings().reduceMotion && this.history.length > 30) { this.replay = { frames: [], t: 0, wait: 1.1, slowFrom: 0, hold: 0, slow: false, goalSign: 1 }; this.afterGoal = 0; }
       }
     }
     if (this.coach) {
@@ -599,10 +659,6 @@ export class MatchScene {
     // Sync models
     const scale = this.sim.stats.scale;
     if (this.runReplay(dt, scale)) {
-      const goal = this.cameraGoal(this.camTarget);
-      this.camPos.lerp(goal, 1 - Math.pow(0.02, dt));
-      this.camera.position.copy(this.camPos);
-      this.camera.lookAt(this.camTarget.x, 0.5, this.camTarget.z);
       this.renderer.render(this.scene, this.camera);
       return;
     }
@@ -610,6 +666,8 @@ export class MatchScene {
     const lastGoal = this.sim.goals[this.sim.goals.length - 1];
     const celebrating = this.sim.phase === 'goal' && lastGoal ? lastGoal.side : -1;
     const sprintSpeed = this.sim.stats.speed * 1.05;
+    /** How fast the players' legs move: as slow as the sim while a super plays out in slow motion. */
+    const animDt = this.slowmo > 0 ? dt * 0.4 : dt;
     this.updateCaller(dt);
     const sp = this.sim.setPiece;
     for (const p of this.sim.players) {
@@ -637,13 +695,14 @@ export class MatchScene {
         st.mood = 'happy';
         if (this.cut.kind === 'rocket') { st.charge = 1; st.kickKind = 'shot'; } else st.cheer = true;
       }
-      m.animate(this.cut && p !== this.cut.p ? dt * 0.02 : dt, st);
+      // Everyone runs in slow motion with the sim after a super; in the cutscene the hero moves slowly and the rest are frozen.
+      m.animate(this.cut ? (p === this.cut.p ? dt * 0.25 : dt * 0.02) : animDt, st);
       const isP1 = p === this.sim.controlled;
       const isP2 = p === this.sim.controlled2;
       m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? P1_RING : isP2 ? P2_RING : 0xffffff);
     }
     this.updateBench(dt);
-    this.ball.update(b.pos.x, b.y, b.pos.z, b.radius, b.vel.x, b.vel.z, dt);
+    this.ball.update(b.pos.x, b.y, b.pos.z, b.radius, b.vel.x, b.vel.z, this.cut ? 0 : animDt);
 
     // Camera follows a blend of the ball and the controlled player, clamped to the pitch.
     const c1 = this.sim.controlled, c2 = this.sim.controlled2;
