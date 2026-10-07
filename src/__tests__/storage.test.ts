@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { cupInProgress, deleteTeam, exportSave, getCareer, getLeague, getSettings, getTeam, getTeams, getTournament, hasBackup, importSave, reloadSave, resetAll, restoreBackup, saveTeam, setLeague, setTournament, updateSettings } from '../data/storage';
+import { cupInProgress, deleteTeam, exportSave, getCareer, getLeague, setCareer, getSettings, getTeam, getTeams, getTournament, hasBackup, importSave, reloadSave, resetAll, restoreBackup, saveTeam, setLeague, setTournament, updateSettings } from '../data/storage';
 import { getProgress } from '../data/progress';
 import { createLeague } from '../game/league';
-import { createCareer, freshSeasonStats } from '../game/career';
+import { createCareer, freshSeasonStats, startTrialDay } from '../game/career';
 import { createTournament } from '../game/tournament';
 import { team } from './helpers';
 
@@ -86,7 +86,26 @@ describe('save file', () => {
     expect(c.starPicked).toBe(false);
     expect(c.trainingPoints).toBe(0);
     expect(c.milestones).toEqual([]);
+    expect(c.trialDay).toBeNull();
     expect(c.year).toBe(1);
+  });
+
+  it('keeps a Trial Day in progress, and drops one that cannot be read', () => {
+    resetAll();
+    const { career, team: you } = createCareer(team('src', 'Triallers', 'U8'), 60);
+    saveTeam(you);
+    career.year = 2;
+    career.trialDay = startTrialDay(career, you);
+    saveTeam(you);
+    setCareer(career);
+    reloadSave();
+    expect(getCareer()!.trialDay!.players.map((p) => p.id)).toEqual(career.trialDay.players.map((p) => p.id));
+    const save = JSON.parse(localStorage.getItem(KEY)!);
+    save.career.trialDay.players[0].position = 'Striker';
+    localStorage.setItem(KEY, JSON.stringify(save));
+    reloadSave();
+    expect(getCareer()!.trialDay).toBeNull();
+    expect(getCareer()!.teamId).toBe(you.id);
   });
 
   it('keeps settings and the league in the same save', () => {

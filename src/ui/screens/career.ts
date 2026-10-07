@@ -2,7 +2,7 @@ import { AGE_STATS } from '../../data/ageGroups';
 import { getCareer, getTeam, saveTeam, setCareer } from '../../data/storage';
 import { POSITION_LABELS } from '../../data/types';
 import { STAR_CAP, skillKeys, skillLabel, starsText } from '../../data/skills';
-import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, careerAge, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, seasonName, statRows, trainStar, type GrowthEvent } from '../../game/career';
+import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, signTriallist, careerAge, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, seasonName, statRows, trainStar, type GrowthEvent } from '../../game/career';
 import { recordCareer } from '../../data/progress';
 import { computeTable, nextFixture, tierInfo } from '../../game/league';
 import { esc } from '../hud';
@@ -20,6 +20,22 @@ function starPicker(c: CareerState, you: Team): string {
     <h3>🌟 ${lost ? 'Pick a new Star' : 'Who is your Star?'}</h3>
     <p class="muted">${lost ? 'Your Star has left the squad.' : 'Your Star is the player this career follows.'} You still play every match with the whole team, but your Star wears a gold star, earns training points to spend, and collects milestones.</p>
     <div class="star-pick-grid">${you.players.map((p) => `<button class="btn star-pick-btn ${p.id === c.starId ? 'is-suggested' : ''}" data-star="${esc(p.id)}">${kitChip(p.position === 'GK' ? you.keeperKit : you.kit, 36)}<span><strong>${esc(p.name)}</strong> #${p.number}<br/><span class="chip chip-pos chip-${p.position.toLowerCase()}">${POSITION_LABELS[p.position]}</span></span></button>`).join('')}</div>
+  </div>`;
+}
+
+/** After moving up: who moved on, and three triallists to choose one from. */
+function trialCard(c: CareerState, you: Team): string {
+  const t = c.trialDay!;
+  const cap = STAR_CAP[careerAge(c)];
+  return `<div class="card star-pick trial-card">
+    <h3>🏟️ Trial Day</h3>
+    ${t.left.length ? `<p>${t.left.map((l) => `👋 <strong>${esc(l.name)}</strong> (#${l.number}) has moved to another club. Good luck, ${esc(l.name)}!`).join('<br/>')}</p>` : '<p>Everyone is staying for another year!</p>'}
+    <p class="muted">Three youngsters have come for a trial. Pick one to join the squad.</p>
+    <div class="stat-cards">${t.players.map((p) => `<div class="card player-stat-card">
+      <div class="psc-top">${kitChip(p.position === 'GK' ? you.keeperKit : you.kit, 36)}<div><strong>${esc(p.name)}</strong> <span class="muted">#${p.number}</span><br/><span class="chip chip-pos chip-${p.position.toLowerCase()}">${POSITION_LABELS[p.position]}</span></div></div>
+      <div class="psc-skills">${skillKeys(p.position).map((k) => { const l = skillLabel(p.position, k); return `<span title="${esc(l.label)}">${l.emoji} <span class="stars">${starsText(p.skills[k], cap)}</span></span>`; }).join('')}</div>
+      <button class="btn btn-primary" data-sign="${esc(p.id)}">✍️ Sign ${esc(p.name)}</button>
+    </div>`).join('')}</div>
   </div>`;
 }
 
@@ -61,6 +77,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
   const age = careerAge(c);
   const star = careerStar(c, you);
   const choosing = !star || !c.starPicked;
+  const trial = !c.done && !choosing && !!c.trialDay;
   const tier = tierInfo(c.league.tier);
   const table = computeTable(c.league, you);
   const over = !c.done && careerSeasonOver(c);
@@ -103,12 +120,13 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       ${pending.length ? `<div class="card outcome-card"><h3>🎒 Moving up to the ${esc(AGE_STATS[age].label)}!</h3><p class="muted">Bigger pitch, longer matches and a higher star cap. Saved-up progress turns into stars:</p>${growthList(pending)}</div>` : ''}
       ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p></div>` : ''}
       ${choosing && !c.done ? starPicker(c, you) : ''}
+      ${trial ? trialCard(c, you) : ''}
       ${star && !choosing ? starCard(c, you, justGrew) : ''}
       ${c.done ? `<div class="card trophy-card"><div class="trophy">🎓</div><h2>All grown up!</h2><p class="muted">${esc(you.name)} played ${totals.played} matches from the Under 5s to the Under 10s, scored ${totals.goals} goals and won ${c.titles} mini-season title${c.titles === 1 ? '' : 's'}. What a journey.</p></div>` : ''}
       <div class="league-body">
         ${c.done ? '' : tableCard(table, c.league.tier, 'Top two go up a tier.')}
         <div class="card next-card">
-          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play') : c.done ? '<button class="btn btn-primary btn-big" id="k-new">🌱 Start a new career</button>' : `
+          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : trial ? '<p class="muted">Sign a new player to kick off.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play') : c.done ? '<button class="btn btn-primary btn-big" id="k-new">🌱 Start a new career</button>' : `
             <button class="btn btn-primary btn-big" id="k-next">${lastSeason ? (lastYear ? '🎓 Finish the career' : `🎒 Move up to ${CAREER_AGES[c.year]}`) : '▶️ Next mini season'}</button>`}
           <button class="btn btn-blue" id="k-edit">👕 Team looks</button>
           ${c.history.length ? `<details class="history"><summary>Past seasons</summary><ul class="plain-list muted">${c.history.map((h) => `<li>${esc(h.age)} ${esc(SEASON_NAMES[(h.miniSeason - 1) % SEASONS_PER_YEAR])}: ${ordinal(h.position)} in ${esc(tierInfo(h.tier).name)}${h.topScorer ? ` · top scorer ${esc(h.topScorer.name)} (${h.topScorer.goals})` : ''}</li>`).join('')}</ul></details>` : ''}
@@ -132,6 +150,12 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
   root.querySelector('#k-play')?.addEventListener('click', () => playNextMatch(router, next!, { halfSeconds: c.halfSeconds, career: true, cpuLevel: tier.level, starId: c.starId }));
   root.querySelectorAll<HTMLElement>('[data-star]').forEach((b) => b.addEventListener('click', () => {
     if (!pickStar(c, you, b.dataset.star!)) return;
+    setCareer(c);
+    renderCareer(root, router);
+  }));
+  root.querySelectorAll<HTMLElement>('[data-sign]').forEach((b) => b.addEventListener('click', () => {
+    if (!signTriallist(c, you, b.dataset.sign!)) return;
+    saveTeam(you);
     setCareer(c);
     renderCareer(root, router);
   }));
