@@ -121,9 +121,10 @@ const zeroSkills = (): Skills => Object.fromEntries(SKILL_KEYS.map((k) => [k, 0]
 /**
  * A fresh career: a copy of the chosen team sent back to the Under 5s, with
  * tiny stars that have room to grow. The copy is its own saved team so the
- * original is untouched.
+ * original is untouched. Give a `star` (one of the team's players, a player from
+ * another team, or one made up for the career) and they join as the Star.
  */
-export function createCareer(source: Team, halfSeconds: number): { career: CareerState; team: Team } {
+export function createCareer(source: Team, halfSeconds: number, star?: Player): { career: CareerState; team: Team } {
   const age = CAREER_AGES[0];
   const team: Team = {
     ...structuredClone(source),
@@ -134,11 +135,17 @@ export function createCareer(source: Team, halfSeconds: number): { career: Caree
     createdAt: Date.now(),
     players: source.players.map((p) => ({ ...p, id: uid(), skills: randomSkills(p.position, age), xp: zeroSkills() })),
   };
+  delete team.clubVersion;
+  let starId: string | null = null;
+  if (star) {
+    const own = source.players.findIndex((p) => p.id === star.id);
+    starId = own >= 0 ? team.players[own].id : joinSquad(team, star).id;
+  }
   const league = createLeague(team, halfSeconds, 5);
   const career: CareerState = {
     teamId: team.id, year: 1, season: 1, league, halfSeconds,
     seasonStats: {}, careerStats: {}, history: [], titles: 0, done: false, pendingGrowth: [],
-    starId: defaultStar(team), starPicked: false, trainingPoints: 0, milestones: [], trialDay: null,
+    starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null,
   };
   return { career, team };
 }
@@ -245,6 +252,34 @@ export function defaultStar(team: Team, stats: Record<string, PlayerSeasonStats>
   const best = [...team.players].sort((a, b) => score(b.id) - score(a.id))[0];
   if (best && score(best.id) > 0) return best.id;
   return (line.find((p) => p.position === 'ATT') ?? line.find((p) => p.position !== 'GK') ?? team.players[0])?.id ?? '';
+}
+
+/**
+ * A newcomer joins the career squad as a starter, in the place of a starter who
+ * plays where they do (or the last outfield starter), who moves to the bench. A
+ * full squad lets its last substitute go to make room.
+ */
+function joinSquad(team: Team, newcomer: Player): Player {
+  const age = team.ageGroup;
+  const p: Player = { ...structuredClone(newcomer), id: uid(), skills: randomSkills(newcomer.position, age), xp: zeroSkills(), starter: true };
+  delete p.positions;
+  if (team.players.length >= MAX_SQUAD) {
+    const sub = [...team.players].reverse().find((x) => !x.starter);
+    team.players = team.players.filter((x) => x !== (sub ?? team.players[team.players.length - 1]));
+  }
+  const starters = team.players.filter((x) => x.starter);
+  const keeper = p.position === 'GK';
+  const out = starters.find((x) => x.position === p.position)
+    ?? (keeper ? starters.find((x) => x.position === 'GK') : [...starters].reverse().find((x) => x.position !== 'GK'));
+  if (out && starters.length >= 5) {
+    out.starter = false;
+    // The newcomer lines up where the benched player did, keeping their own position as their natural one.
+    if (!keeper && out.position !== 'GK' && out.position !== p.position) { p.positions = [p.position]; p.position = out.position; }
+  }
+  const numbers = new Set(team.players.map((x) => x.number));
+  while (numbers.has(p.number) && p.number < 99) p.number++;
+  team.players.push(p);
+  return p;
 }
 
 /** The career's Star, or undefined if they have left the squad. */

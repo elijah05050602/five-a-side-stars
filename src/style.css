@@ -867,3 +867,15 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .sticker.is-shiny::after { content: ''; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, .75) 45%, transparent 60%); background-size: 250% 100%; animation: sticker-shine 3s ease-in-out infinite; pointer-events: none; }
 @keyframes sticker-shine { from { background-position: 120% 0; } to { background-position: -120% 0; } }
 @media (prefers-reduced-motion: reduce) { .sticker.is-shiny::after { animation: none; } }
+
+/* Career start: choose or create your Star, then a team */
+.career-start .options { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 900px; margin: 14px auto 0; }
+.career-start .options h3 { margin: 0; }
+.career-start .field select { max-width: 360px; }
+.career-start .field input { max-width: 360px; }
+.career-start #c-number { max-width: 110px; }
+.team-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.team-choice { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px; border: 3px solid transparent; cursor: pointer; font-family: var(--font); color: var(--navy); }
+.team-choice.is-active { border-color: var(--navy); background: #fff3c4; box-shadow: var(--drop); }
+.career-start .btn-kickoff { display: block; margin: 16px auto 0; }
+.career-start .btn-kickoff:disabled { opacity: .5; cursor: default; }
