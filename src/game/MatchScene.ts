@@ -666,6 +666,8 @@ export class MatchScene {
     const lastGoal = this.sim.goals[this.sim.goals.length - 1];
     const celebrating = this.sim.phase === 'goal' && lastGoal ? lastGoal.side : -1;
     const sprintSpeed = this.sim.stats.speed * 1.05;
+    /** How fast the players' legs move: as slow as the sim while a super plays out in slow motion. */
+    const animDt = this.slowmo > 0 ? dt * 0.4 : dt;
     this.updateCaller(dt);
     const sp = this.sim.setPiece;
     for (const p of this.sim.players) {
@@ -693,13 +695,14 @@ export class MatchScene {
         st.mood = 'happy';
         if (this.cut.kind === 'rocket') { st.charge = 1; st.kickKind = 'shot'; } else st.cheer = true;
       }
-      m.animate(this.cut && p !== this.cut.p ? dt * 0.02 : dt, st);
+      // Everyone runs in slow motion with the sim after a super; in the cutscene the hero moves slowly and the rest are frozen.
+      m.animate(this.cut ? (p === this.cut.p ? dt * 0.25 : dt * 0.02) : animDt, st);
       const isP1 = p === this.sim.controlled;
       const isP2 = p === this.sim.controlled2;
       m.setSelected(isP1 || isP2 || (this.sim.ball.owner === p && this.sim.config.humanSide === null), isP1 ? P1_RING : isP2 ? P2_RING : 0xffffff);
     }
     this.updateBench(dt);
-    this.ball.update(b.pos.x, b.y, b.pos.z, b.radius, b.vel.x, b.vel.z, dt);
+    this.ball.update(b.pos.x, b.y, b.pos.z, b.radius, b.vel.x, b.vel.z, this.cut ? 0 : animDt);
 
     // Camera follows a blend of the ball and the controlled player, clamped to the pitch.
     const c1 = this.sim.controlled, c2 = this.sim.controlled2;
