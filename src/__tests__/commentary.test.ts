@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Commentator, LINES, classifyShot, goalLine, line } from '../game/commentary';
+import { Commentator, LINES, classifyShot, goalKey, goalLine, line, placement, type LineKey } from '../game/commentary';
 import { resolveConditions } from '../game/Weather';
 import { IDLE_INPUT } from '../game/sim';
 import { cpuMatch, runUntil } from './helpers';
@@ -38,6 +38,35 @@ describe('commentary lines', () => {
     expect(goalLine({ ...base, score: [2, 2], wasDown: 2 }, first)).toContain('comeback');
     expect(goalLine({ ...base, score: [3, 2], wasDown: 1 }, first)).toContain('turned it around');
     expect(goalLine({ ...base, score: [1, 1], wasDown: 1 }, first)).toContain('levels it up');
+  });
+
+  it('sorts where a goal went in: corners near a post, the roof high, the middle low', () => {
+    const dims = { goalWidth: 3, goalHeight: 1.5, radius: 0.16 };
+    expect(placement({ y: 1.2, z: 1.2 }, dims)).toBe('topCorner');
+    expect(placement({ y: 1.2, z: 0 }, dims)).toBe('roof');
+    expect(placement({ y: 0.16, z: -1.2 }, dims)).toBe('bottomCorner');
+    expect(placement({ y: 0.16, z: 0.2 }, dims)).toBe('lowMiddle');
+    expect(placement({ y: 0.7, z: 0.6 }, dims)).toBe('plain');
+  });
+
+  it('only names a corner when the goal really went in one', () => {
+    const corner = /corner/i;
+    const placed: LineKey[] = ['goalTopCorner', 'goalBottomCorner', 'goalPenaltyCorner'];
+    for (const [key, lines] of Object.entries(LINES)) if (key.startsWith('goal') && !placed.includes(key as LineKey)) for (const l of lines) expect(l, key).not.toMatch(corner);
+    const base = { side: 0 as const, scorer: 'Mia', team: 'Rovers', ownGoal: false, minute: 10, scorerGoals: 1, mode: 'match' as const, score: [2, 1] as const };
+    // A ball rolled down the middle never gets a corner line, whatever the dice say.
+    for (let i = 0; i < 50; i++) {
+      const r = i / 50;
+      for (const extra of [{}, { penalty: true }, { mode: 'training' as const }]) {
+        const key = goalKey({ ...base, ...extra, placement: 'lowMiddle' }, () => r);
+        expect(placed, key).not.toContain(key);
+      }
+    }
+    expect(goalKey({ ...base, placement: 'topCorner' }, first)).toBe('goalTopCorner');
+    expect(goalKey({ ...base, placement: 'bottomCorner' }, first)).toBe('goalBottomCorner');
+    expect(goalKey({ ...base, placement: 'roof' }, first)).toBe('goalRoof');
+    expect(goalKey({ ...base, penalty: true, placement: 'topCorner' }, first)).toBe('goalPenaltyCorner');
+    expect(goalKey({ ...base, penalty: true, placement: 'plain' }, first)).toBe('goalPenalty');
   });
 });
 

@@ -167,7 +167,7 @@ describe('substitutions: energy and the computer', () => {
 
   it('the computer brings on fresh legs in the second half, at most two a half, the same way every time', () => {
     const play = () => {
-      seedRandom(99);
+      seedRandom(97); // a match where someone tires before a late stoppage
       const sim = cpuMatch({ halfSeconds: 90 });
       const events: SimEvent[] = [];
       runCollect(sim, (s) => s.phase === 'fulltime', events);

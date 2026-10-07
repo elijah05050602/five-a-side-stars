@@ -45,6 +45,8 @@ export function pickClip(count: number, last: number | undefined, rng: () => num
  */
 export const FALLBACK: Partial<Record<LineKey, LineKey>> = {
   goalHeader: 'goalLead', goalComeback: 'goalEqualiser', goalTurnaround: 'goalLead', goalTapIn: 'goalLead', missSitter: 'missWide',
+  // Not recorded yet (voice is on hold): a plain goal call, never one that names a corner.
+  goalRoof: 'goalLead', goalLowMiddle: 'goalLead',
 };
 
 /**

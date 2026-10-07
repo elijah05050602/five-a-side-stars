@@ -6,6 +6,7 @@ import { averageStars, skillMul } from '../data/skills';
 import type { InputState } from './input';
 import { SUPER_FILL, SUPER_TIME, type SuperKind } from './supers';
 import { frameHit, netPresses, roofHeight, type GoalShape } from './goalFrame';
+import { flightStep, GRASS_FRICTION, GRAVITY, heightAt, launchForCarry, vyForHeight } from './flight';
 
 /** Horizontal vector helpers (x along the pitch, z across it). */
 export interface V2 { x: number; z: number }
@@ -15,6 +16,8 @@ const dist = (a: V2, b: V2) => Math.hypot(a.x - b.x, a.z - b.z);
 const norm = (a: V2): V2 => { const l = len(a); return l > 1e-6 ? v(a.x / l, a.z / l) : v(); };
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 const rand = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
+/** Roughly a bell curve, mean 0 and spread 1, never beyond 3. */
+const randn = () => (Math.random() + Math.random() + Math.random() - 1.5) * 2;
 
 export type Side = 0 | 1; // 0 = home (attacks +x), 1 = away (attacks -x)
 
@@ -211,7 +214,11 @@ export interface SetPiece {
   targets: Map<SimPlayer, V2>;
 }
 
-export interface GoalEvent { side: Side; scorer: Player; minute: number; ownGoal: boolean }
+export interface GoalEvent {
+  side: Side; scorer: Player; minute: number; ownGoal: boolean;
+  /** Where the ball crossed the goal line: its height, and how far across the goal (0 is the middle). */
+  at?: { y: number; z: number };
+}
 
 export interface SimEvent {
   type: 'goal' | 'kickoff' | 'halftime' | 'fulltime' | 'save' | 'kick' | 'touch' | 'shot' | 'foul' | 'whistle' | 'miss' | 'restart' | 'trick' | 'super' | 'sub';
@@ -275,6 +282,8 @@ export const RUNOFF_END = 1.6;
 const NET_STIFF = 400;
 const NET_DAMP = 22;
 export const NET_GIVE = 0.55;
+/** How far a shot's height strays, as a share of the bar's height (see shotLoft). */
+export const SHOT_STRAY = 0.85;
 const NET_GRIP = 3;
 /** How much speed the ball keeps off a post or the crossbar. */
 const POST_BOUNCE = 0.6;
@@ -1519,12 +1528,7 @@ export class MatchSim {
     } else {
       // Big clearance upfield, away from whoever is closest.
       const awayZ = presser ? Math.sign(p.pos.z - presser.pos.z) || 1 : (Math.random() < 0.5 ? -1 : 1);
-      const boot = Math.sqrt(p.mul.strength); // Strength: a longer clearance
-      const loft = this.stats.power * 0.35 * boot;
-      // A punt is dropped from the hands and met low, so it flies just like a kick off the grass.
-      this.ball.y = 0;
-      this.kick(p, v(dir, awayZ * rand(0.2, 0.6)), this.stats.power * 0.95 * boot, loft);
-      p.kickKind = 'boot';
+      this.keeperBoot(p, v(dir, awayZ * rand(0.2, 0.6)), rand(0.9, 1));
       if (hands) this.setMove(p, 'punt'); // dropped from the hands and volleyed
     }
   }
@@ -2002,22 +2006,10 @@ export class MatchSim {
       b.spin += len(b.vel) * dt / b.radius;
       return;
     }
-    // Free ball: gravity, bounce, rolling friction and air drag.
-    b.vy -= 9.81 * dt;
-    b.y += b.vy * dt;
-    if (b.y <= 0) {
-      b.y = 0;
-      if (b.vy < -0.5) {
-        // A dropping lob checks up as it lands, so it sits up for the receiver.
-        if (b.lofted && b.vy < -2.5) { b.vel.x *= 0.7; b.vel.z *= 0.7; b.lofted = false; }
-        b.vy = -b.vy * 0.55;
-      } else b.vy = 0;
-    }
+    // Free ball: gravity, bounce (a dropping lob checks up as it lands), rolling friction and air drag, from flight.ts.
     const speed = len(b.vel);
-    const onGround = b.y < 0.01;
-    const friction = onGround ? (b.inGoal ? 6 : 3.2) : 0.4; // the grass inside the goal is long, and the net holds it
-    const drag = 0.06;
-    const newSpeed = Math.max(0, speed - (friction + drag * speed) * dt);
+    // The grass inside the goal is long, and the net holds it.
+    const newSpeed = flightStep(b, speed, dt, b.inGoal ? 6 : GRASS_FRICTION).speed;
     if (speed > 1e-4) b.vel = v((b.vel.x / speed) * newSpeed, (b.vel.z / speed) * newSpeed);
     b.pos.x += b.vel.x * dt;
     b.pos.z += b.vel.z * dt;
@@ -2054,8 +2046,16 @@ export class MatchSim {
     if (d <= 0) return;
     const crossed = sx * x0 - g.halfLength <= 0 && Math.abs(b.pos.z) < g.width / 2 && b.y < g.height;
     const wholly = Math.abs(b.pos.z) < g.width / 2 - r && b.y < roofHeight(g, d) - r && d < g.depth - r;
-    if (crossed || wholly) b.inGoal = sx;
+    if (crossed || wholly) {
+      b.inGoal = sx;
+      // Where it crossed the line, back along this step's flight.
+      const f = crossed && b.pos.x !== x0 ? clamp((sx * g.halfLength - x0) / (b.pos.x - x0), 0, 1) : 1;
+      this.crossedAt = { y: Math.max(0, b.y - b.vy * this.stepDt * (1 - f)), z: b.pos.z - b.vel.z * this.stepDt * (1 - f) };
+    }
   }
+
+  /** Where the ball last went over a goal line into the goal (for the goal event). */
+  private crossedAt: { y: number; z: number } | null = null;
 
   /**
    * The posts, the crossbar and the net. The ball bounces off the frame, and sinks into the netting,
@@ -2571,8 +2571,26 @@ export class MatchSim {
   private longKick(p: SimPlayer, aim: V2 | null, powerMul: number): void {
     const dir = p.side === 0 ? 1 : -1;
     const to = aim ?? v(dir, rand(-0.35, 0.35));
-    const boot = Math.sqrt(p.mul.strength); // Strength: a longer goal kick
-    this.kick(p, to, this.stats.power * 0.95 * powerMul * boot, this.stats.power * 0.33 * powerMul * boot);
+    this.keeperBoot(p, to, 0.6 + 0.4 * clamp((powerMul - 0.75) / 0.35, 0, 1));
+  }
+
+  /**
+   * A keeper's goal kick or punt. At full reach the first bounce lands by Strength: about 40% of the pitch from
+   * their own line for a weak kicker, halfway for an average one, 60-65% for the strongest. Passing decides how
+   * far it strays sideways, and it checks up as it lands like a lob.
+   */
+  private keeperBoot(p: SimPlayer, to: V2, reach: number): void {
+    const n = norm(to);
+    const share = clamp(0.5 + (p.mul.strength - 1) * 0.34 + rand(-0.03, 0.03), 0.36, 0.66);
+    const along = share * this.length * reach - Math.abs(p.pos.x - this.ownGoalX(p.side));
+    const carry = Math.max(4, along / Math.max(0.5, Math.abs(n.x)));
+    const stray = 0.12 * p.mul.passWobble;
+    const a = Math.atan2(n.z, n.x) + rand(-stray, stray);
+    const { speed, vy } = launchForCarry(carry, (GRAVITY * clamp(0.8 + carry * 0.03, 1, 1.8)) / 2, this.stats.power * 2);
+    // A punt is dropped from the hands and met low, so it flies just like a kick off the grass.
+    this.ball.y = 0;
+    this.kick(p, v(Math.cos(a), Math.sin(a)), speed, vy);
+    this.ball.lofted = true;
     p.kickKind = 'boot';
   }
 
@@ -2698,12 +2716,37 @@ export class MatchSim {
     }
     const d = dist(p.pos, goal);
     const power = this.stats.power * clamp(0.85 + d / this.length, 0.95, 1.25) * powerMul * (p.info.special === 'power' ? 1.18 : 1) * p.mul.power;
-    const loft = power * rand(0.06, 0.2) * (powerMul > 1 ? 1.3 : 1) * (help ? 0.75 : 1);
-    this.kick(p, dir, power, loft);
+    this.kick(p, dir, power, this.shotLoft(p, dir, goal.x, power, powerMul, isCpu, help, penalty));
     p.kickKind = 'shot';
     p.match.shots++;
     this.ball.penaltyShot = penalty;
     this.events.push({ type: 'shot', side: p.side, player: p.info });
+  }
+
+  /**
+   * How high a shot is struck. A tap is a low drive and a full charge rises towards the top of the goal (the
+   * computer mixes the two). Then it strays up or down: more for harder hits and from further out, and by level.
+   * Your shots on Starter never go over the bar; on Easy, Normal and Hard they stray more (0.4, 0.7, 1.0). The
+   * computer's stray comes from its accuracy, so a weak team skies more. The upward speed comes from running the
+   * flight ahead, so a long, hard shot rises and dips, and a soft one from far out loops down onto the bounce.
+   */
+  private shotLoft(p: SimPlayer, dir: V2, goalX: number, power: number, powerMul: number, isCpu: boolean, help: boolean, penalty: boolean): number {
+    const run = Math.abs(goalX - p.pos.x) / Math.max(0.2, Math.abs(norm(dir).x));
+    const r = this.ball.radius, bar = this.goalHeight;
+    const charge = isCpu ? Math.random() : clamp((powerMul - 0.85) / 0.45, 0, 1);
+    let y = r + (bar * 0.72 - r) * charge * rand(0.75, 1);
+    const level = isCpu ? 0.5 + 1.25 * (1 - this.diff.accuracy) : help ? 0 : 0.4 + 0.6 * this.cpuLevel();
+    const far = clamp((run / (this.length * 0.5)) ** 1.5, 0.1, 1.8);
+    y += randn() * level * (0.08 + 0.5 * charge * charge) * far * bar * SHOT_STRAY * (penalty ? 0.4 : 1);
+    const cap = help ? bar - r - 0.15 * this.stats.scale - 0.1 : Infinity;
+    y = clamp(y, r, cap);
+    const maxVy = Math.max(3, power * 0.6);
+    let vy = vyForHeight(run, power, y, maxVy);
+    if (help) {
+      // Starter: the run-ahead can land a touch high, so bring it down until it passes under the bar.
+      for (let i = 0; i < 20 && vy > 0 && (heightAt(run, power, vy) ?? 0) > cap; i++) vy = Math.max(0, vy - 0.15);
+    }
+    return vy;
   }
 
   /** A high ball dropping in the box is met with a header at goal. */
@@ -2787,12 +2830,12 @@ export class MatchSim {
     const d = Math.max(2, len(to));
     const t = this.lobFlightTime(d);
     // A pass lands a little short so it bounces on to the receiver; a cross drops just beyond them, to be met
-    // at chest or head height over the marker. In the air it only loses about 0.4 m/s each second plus drag.
+    // at chest or head height over the marker. The flight is run ahead with the sim's own physics, so it lands there.
     const carry = crossing && mate ? d + 0.4 * this.stats.scale + 0.3 : d * 0.9;
-    const speed = Math.min((carry + 0.2 * t * t) / (t - 0.03 * t * t), this.stats.power * 1.1);
+    const { speed, vy } = launchForCarry(carry, (GRAVITY * t) / 2, this.stats.power * 1.1);
     const wobble = (1 - this.stats.control) * 0.3 * p.mul.passWobble;
     const a = Math.atan2(to.z, to.x) + rand(-wobble, wobble);
-    this.kick(p, v(Math.cos(a), Math.sin(a)), speed, (9.81 * t) / 2);
+    this.kick(p, v(Math.cos(a), Math.sin(a)), speed, vy);
     p.kickKind = 'lob';
     this.ball.wasPass = true;
     this.ball.receiver = mate;
@@ -2832,7 +2875,7 @@ export class MatchSim {
       const touch = b.owner ?? b.lastKick ?? b.lastTouch ?? this.teamOf(scoringSide)[0];
       const ownGoal = touch.side !== scoringSide;
       const scorer = touch.info;
-      this.goals.push({ side: scoringSide, scorer, minute: this.minute, ownGoal });
+      this.goals.push({ side: scoringSide, scorer, minute: this.minute, ownGoal, at: this.crossedAt ?? { y: b.y, z: b.pos.z } });
       if (!ownGoal && this.mode === 'match') {
         touch.match.goals++;
         const a = b.assist;

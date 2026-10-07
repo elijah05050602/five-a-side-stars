@@ -31,16 +31,16 @@ export const LINES = {
   kickoffAfterGoal: ['{team} get us going again.', 'Back to the centre, {team} to restart.', 'Deep breaths, {team}. Off we go again.', 'Can {team} hit straight back?', 'Right, {team} go again!'],
   goalOpener: ['GOAL! {scorer} opens the scoring for {team}!', '{scorer} puts {team} in front! 1-0!', 'First goal of the game, and it is {scorer}!', 'GOAL! {scorer} gets the first goal for {team}!', '{scorer} breaks the deadlock! 1-0 to {team}!'],
   goalEqualiser: ['{scorer} levels it up! {score}!', 'All square again! {scorer} scores for {team}.', 'Equaliser! {team} are back in it thanks to {scorer}.', 'GOAL! {team} are level! {scorer}, {score}!', 'They have done it! {scorer} with the equaliser! {score}.'],
-  goalLead: ['{scorer} makes it {score}! {team} lead!', 'Another one for {team}! {scorer} scores!', '{team} pull ahead, {scorer} with the goal.', 'GOAL! {scorer} puts {team} in front, {score}!', 'Into the top corner! {scorer}! {score}.'],
+  goalLead: ['{scorer} makes it {score}! {team} lead!', 'Another one for {team}! {scorer} scores!', '{team} pull ahead, {scorer} with the goal.', 'GOAL! {scorer} puts {team} in front, {score}!'],
   goalExtend: ['{scorer} again! {team} are running away with this, {score}.', 'That is {score}! {scorer} adds another for {team}.', 'The scoreboard says {score}. {team} are flying!', '{scorer} scores! This is a goal party for {team}, {score}!', 'Yet another one! {scorer} makes it {score}!'],
   goalReply: ['{team} pull one back! {scorer} with the goal, {score}.', '{scorer} gives {team} hope! {score}.', 'Game on? {scorer} scores for {team}. {score}.', '{team} are not giving up! {scorer} scores, {score}.', 'Back in it! {scorer} for {team}, {score}.'],
   goalBrace: ['Two for {scorer}! What a game they are having.', '{scorer} doubles up! {score}.', '{scorer} cannot stop scoring! That is two!', 'Again! {scorer} with their second!'],
   goalHatTrick: ['HAT-TRICK! {scorer} has three! Someone give them the ball to keep!', 'Three goals for {scorer}! A hat-trick hero!', 'One, two... THREE! {scorer} has a hat-trick!'],
   goalLate: ['Late drama! {scorer} scores for {team} with the clock nearly up! {score}!', 'Right at the death! {scorer} makes it {score}!', 'Last-gasp goal! {scorer} for {team}! {score}!', 'Just in time! {scorer} scores! {score}!'],
   goalOwn: ['Oh no! Into their own net. {score}.', 'Unlucky! {scorer} turns it into their own goal. {score}.', 'That one went the wrong way for {scorer}. {score}.', 'Oh! Into their own goal from {scorer}. They will want to forget that. {score}.'],
-  goalPenalty: ['{scorer} steps up and SCORES from the spot! {score}.', 'Cool as a cucumber from the penalty spot, {scorer}! {score}.', '{scorer} runs up... GOAL! Right in the corner! {score}.'],
+  goalPenalty: ['{scorer} steps up and SCORES from the spot! {score}.', 'Cool as a cucumber from the penalty spot, {scorer}! {score}.'],
   goalLongRange: ['From miles out! {scorer} with a screamer for {team}! {score}.', 'What a hit! {scorer} from distance! {score}!', '{scorer} hits it from way back! GOAL! {score}!', 'What a strike from {scorer}! From nearly halfway! {score}!'],
-  goalTraining: ['In it goes!', 'Lovely finish!', 'That is the spot!', 'Keeper beaten!', 'Bottom corner!'],
+  goalTraining: ['In it goes!', 'Lovely finish!', 'That is the spot!', 'Keeper beaten!', 'Back of the net!'],
   goalRocket: ['ROCKET! Two points for that one!', 'Smashed it! A two-pointer!', 'BOOM! Two points! What power!'],
   goalShootout: ['{scorer} scores! {score} in the shoot-out.', 'Tucked away by {scorer}. {score}.', 'No mistake from {scorer}! {score}.', '{scorer} scores! Nerves of steel. {score}.'],
   save: ['Great save by {keeper}!', '{keeper} gets a hand to it!', 'Super stop from {keeper}!', 'Safe hands, {keeper}!', '{keeper} says no!', 'Saved! What reflexes from {keeper}!', '{keeper} has got it! Superb!'],
@@ -84,6 +84,12 @@ export const LINES = {
   goalTurnaround: ['{team} have turned it around! {scorer} puts them in front, {score}!', '{team} were losing, and now they lead! {scorer}! {score}!'],
   goalTapIn: ['Tapped in by {scorer}! {score}.', 'Right in front of goal, {scorer} makes no mistake! {score}.'],
   missSitter: ['How did {shooter} not score that?', 'From there, {shooter}? They will want that one again!', 'Oh no! What a chance for {shooter}!'],
+  // Only for goals that really went there (see placement()).
+  goalTopCorner: ['Into the top corner! {scorer}! {score}.', 'Top corner from {scorer}! The keeper had no chance! {score}.', 'Right into the top corner! What a strike, {scorer}! {score}.'],
+  goalBottomCorner: ['Bottom corner! {scorer} picks the spot! {score}.', 'Low and into the corner from {scorer}! {score}.', 'Tucked into the bottom corner by {scorer}! {score}.'],
+  goalRoof: ['Into the roof of the net! {scorer}! {score}.', '{scorer} smashes it into the roof of the net! {score}!'],
+  goalLowMiddle: ['Straight down the middle from {scorer}! {score}.', 'Under the keeper and in! {scorer}! {score}.', '{scorer} slides it through the middle! {score}.'],
+  goalPenaltyCorner: ['{scorer} runs up... GOAL! Right in the corner! {score}.', 'From the spot, {scorer} picks the corner! {score}.'],
   quietChasing: ['Time is running out for {team}. They need a goal!', 'Come on, {team}! Can they find a way back?'],
 } as const;
 
@@ -92,6 +98,21 @@ export type LineKey = keyof typeof LINES;
 export function line(key: LineKey, vars: Record<string, string | number> = {}, rng: () => number = Math.random): string {
   return fill(pickFrom([...LINES[key]], rng), vars);
 }
+
+/** Where a goal went in, from the height and the across-the-goal position where it crossed the line. */
+export type Placement = 'topCorner' | 'bottomCorner' | 'roof' | 'lowMiddle' | 'plain';
+
+export function placement(at: { y: number; z: number }, dims: { goalWidth: number; goalHeight: number; radius: number }): Placement {
+  const corner = Math.abs(at.z) > dims.goalWidth * 0.28;
+  const high = at.y > dims.goalHeight * 0.55;
+  const low = at.y < Math.max(dims.radius * 1.6, dims.goalHeight * 0.25);
+  if (high) return corner ? 'topCorner' : 'roof';
+  if (low && corner) return 'bottomCorner';
+  if (low && Math.abs(at.z) < dims.goalWidth * 0.15) return 'lowMiddle';
+  return 'plain';
+}
+
+const PLACEMENT_LINE: Record<Exclude<Placement, 'plain'>, LineKey> = { topCorner: 'goalTopCorner', bottomCorner: 'goalBottomCorner', roof: 'goalRoof', lowMiddle: 'goalLowMiddle' };
 
 export const scoreText = (s: readonly [number, number]) => `${s[0]}-${s[1]}`;
 
@@ -103,13 +124,16 @@ export interface GoalInfo {
   score: readonly [number, number]; side: Side; scorer: string; team: string; ownGoal: boolean; minute: number; scorerGoals: number;
   penalty?: boolean; longRange?: boolean; mode: 'match' | 'shootout' | 'training'; rocket?: boolean;
   header?: boolean; closeRange?: boolean;
+  /** Where it went in; the corner lines are only said when it really went there. */
+  placement?: Placement;
   /** The most goals the scoring side had been behind by before this goal. */
   wasDown?: number;
 }
 
 /** Which kind of goal line fits, from the score after it, who scored and how. */
 export function goalKey(o: GoalInfo, rng: () => number = Math.random): LineKey {
-  if (o.mode === 'training') return o.rocket ? 'goalRocket' : 'goalTraining';
+  const spot = o.placement && o.placement !== 'plain' ? PLACEMENT_LINE[o.placement] : null;
+  if (o.mode === 'training') return o.rocket ? 'goalRocket' : spot && rng() < 0.5 ? spot : 'goalTraining';
   if (o.mode === 'shootout') return 'goalShootout';
   if (o.ownGoal) return 'goalOwn';
   if (o.scorerGoals === 3) return 'goalHatTrick';
@@ -117,10 +141,11 @@ export function goalKey(o: GoalInfo, rng: () => number = Math.random): LineKey {
   if ((o.wasDown ?? 0) >= 2 && us === them) return 'goalComeback';
   if ((o.wasDown ?? 0) >= 1 && us === them + 1) return 'goalTurnaround';
   if (o.minute >= 37) return 'goalLate';
-  if (o.penalty) return 'goalPenalty';
+  if (o.penalty) return o.placement === 'topCorner' || o.placement === 'bottomCorner' ? 'goalPenaltyCorner' : 'goalPenalty';
   if (o.header) return 'goalHeader';
   if (o.longRange) return 'goalLongRange';
   if (o.scorerGoals === 2 && rng() < 0.6) return 'goalBrace';
+  if (spot && rng() < 0.5) return spot;
   if (o.closeRange && rng() < 0.5) return 'goalTapIn';
   if (us + them === 1) return 'goalOpener';
   if (us === them) return 'goalEqualiser';
@@ -252,7 +277,7 @@ export class Commentator {
         const longRange = !!w && dist > sim.length * 0.4;
         const closeRange = !!w && dist < sim.length * 0.12 && Math.abs(w.from.z) < sim.goalWidth;
         const rocket = sim.mode === 'training' && Math.hypot(sim.ball.vel.x, sim.ball.vel.z) > sim.stats.power * 0.95;
-        const info: GoalInfo = { score: sim.score, side: g.side, scorer: g.scorer.name, team: this.teamName(sim, g.side), ownGoal: g.ownGoal, minute: g.minute, scorerGoals: n, penalty: sim.ball.penaltyShot && sim.mode === 'match', longRange, mode: sim.mode === 'tutorial' ? 'training' : sim.mode, rocket, header: !!w?.header && !g.ownGoal, closeRange, wasDown: this.down[g.side] };
+        const info: GoalInfo = { score: sim.score, side: g.side, scorer: g.scorer.name, team: this.teamName(sim, g.side), ownGoal: g.ownGoal, minute: g.minute, scorerGoals: n, penalty: sim.ball.penaltyShot && sim.mode === 'match', longRange, mode: sim.mode === 'tutorial' ? 'training' : sim.mode, rocket, header: !!w?.header && !g.ownGoal, closeRange, wasDown: this.down[g.side], placement: g.at ? placement(g.at, { goalWidth: sim.goalWidth, goalHeight: sim.goalHeight, radius: sim.ball.radius }) : undefined };
         for (const s of [0, 1] as const) this.down[s] = Math.max(this.down[s], sim.score[1 - s] - sim.score[s]);
         const scoreCall = info.mode === 'match' ? sim.score : undefined;
         return this.say(goalKey(info, rng), { score: scoreText(info.score), scorer: info.scorer, team: info.team }, scoreCall);
