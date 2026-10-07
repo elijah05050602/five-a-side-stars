@@ -281,7 +281,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     const two = s.config.humanSide2 != null;
     const tile = (pl: Player, where: string, coming: '' | 'on' | 'off', gloves: boolean) => {
       const energy = Math.round(s.energyOf(pl.id) * 100);
-      return `<button class="subs-player ${c.picked === pl.id ? 'is-picked' : ''} ${coming ? `is-${coming}` : ''}" data-swap="${esc(pl.id)}" data-pick="${esc(pl.id)}" data-swap-label="${pl.number} ${esc(pl.name)}" aria-pressed="${c.picked === pl.id}"
+      return `<button class="subs-player ${c.picked === pl.id ? 'is-picked' : ''} ${coming ? `is-${coming}` : ''}" data-swap="${esc(pl.id)}" data-swap-instant data-pick="${esc(pl.id)}" data-swap-label="${pl.number} ${esc(pl.name)}" aria-pressed="${c.picked === pl.id}"
         aria-label="${pl.number} ${esc(pl.name)}, ${where}, energy ${energy}%${coming === 'on' ? ', coming on' : coming === 'off' ? ', coming off' : ''}">
         <span class="subs-num" style="background:${esc(team.kit.shirt)}">${pl.number}</span>
         <span class="subs-name">${esc(pl.name)}</span>
@@ -290,7 +290,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         ${coming ? `<span class="chip subs-chip">${coming === 'on' ? 'Coming on' : 'Coming off'}</span>` : ''}
       </button>`;
     };
-    const status = changes === 0 ? 'Drag a sub onto a player on the pitch, or tap one and then the other.'
+    const status = changes === 0 ? 'Drag a sub from the bench onto a player on the pitch to swap them.'
       : s.ballDead() ? `${changes === 1 ? 'The change happens' : 'The changes happen'} as soon as you press Done.`
         : `The ball is in play, so ${changes === 1 ? 'the sub comes' : 'the subs come'} on when it next goes out.`;
     overlay.hidden = false;
@@ -303,6 +303,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
           const p = onPitch[i];
           return tile(byId.get(id)!, POSITION_LABELS[p.isKeeper ? 'GK' : p.role], id !== p.id ? 'on' : '', p.isKeeper);
         }).join('')}</div>
+        <div class="subs-hint" aria-hidden="true">⬆️ Drag a sub up onto a player, or tap one and then the other ⬆️</div>
         <div class="subs-label">On the bench</div>
         <div class="subs-row subs-bench">${benchNow.map((pl) => tile(pl, 'Sub', onPitch.some((p) => p.id === pl.id) ? 'off' : '', false)).join('')}</div>
         <div class="row">
