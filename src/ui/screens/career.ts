@@ -12,6 +12,7 @@ import { topBar, wire, ordinal, growthList, stickerBanner } from './shared';
 import type { SkillKey, Team } from '../../data/types';
 import type { CareerState } from '../../game/career';
 import type { Router } from '../screens';
+import { askConfirm } from '../dialog';
 
 /** Everyone in the squad as a button, to pick (or re-pick) the career's Star. */
 function starPicker(c: CareerState, you: Team): string {
@@ -178,7 +179,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
   });
   root.querySelector('#k-edit')?.addEventListener('click', () => router.go({ name: 'builder', teamId: you.id }));
   root.querySelector('#k-new')?.addEventListener('click', () => router.go({ name: 'setup', homeId: you.id, mode: 'career' }));
-  root.querySelector('#k-quit')?.addEventListener('click', () => {
-    if (confirm('Leave this career? Your seasons and stats will be deleted. The team stays in My Teams.')) { setCareer(null); router.go({ name: 'menu' }); }
+  root.querySelector('#k-quit')?.addEventListener('click', async () => {
+    if (await askConfirm({ title: 'Leave this career?', body: 'Your seasons and stats will be deleted.\n\nThe team stays in My Teams.', yes: 'Leave career', no: 'Keep playing' })) { setCareer(null); router.go({ name: 'menu' }); }
   });
 }

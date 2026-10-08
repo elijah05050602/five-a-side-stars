@@ -18,6 +18,8 @@ export default tseslint.config(
       eqeqeq: ['error', 'smart'],
       'prefer-const': 'error',
       'no-var': 'error',
+      // Ask with the game's own boxes (src/ui/dialog.ts), never the browser's plain ones.
+      'no-alert': 'error',
     },
   },
   { files: ['tools/**/*.mjs', '*.config.{js,ts}', 'e2e/**/*.ts'], languageOptions: { globals: { ...globals.node } } },

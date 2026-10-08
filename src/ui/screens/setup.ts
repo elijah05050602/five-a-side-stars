@@ -12,6 +12,7 @@ import { logoControls, wireLogoControls } from '../logoUpload';
 import { controlsSentence } from '../../data/controls';
 import { topBar, wire, pressed, focusKey, restoreFocus } from './shared';
 import type { Router, SetupMode } from '../screens';
+import { askConfirm, openPop } from '../dialog';
 
 const MODE_INFO: Record<SetupMode, { title: string; go: string; blurb: string }> = {
   match: { title: 'Match Setup', go: '⚽ Kick Off!', blurb: '' },
@@ -49,7 +50,10 @@ export function renderSetup(root: HTMLElement, router: Router, homeId?: string, 
     if (other) { opponentId = other.id; return; }
     twoPlayer = false;
     opponentId = 'cpu';
-    alert('Make a second team of the same age group first, then you can both play in the cup.');
+    void openPop<boolean>({
+      icon: '👕', tone: 'oops', title: 'You need two teams', body: 'Make a second team of the same age group first, then you can both play in the cup.',
+      buttons: [{ label: 'OK', value: false, kind: 'ghost' }, { label: 'Make a team', value: true, kind: 'primary' }], focus: 1, cancel: false,
+    }).then((make) => { if (make) router.go({ name: 'builder' }); });
   };
 
   const render = () => {
@@ -127,19 +131,19 @@ export function renderSetup(root: HTMLElement, router: Router, homeId?: string, 
     }));
     root.querySelectorAll<HTMLElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { halfSeconds = Number(b.dataset.len); render(); }));
     root.querySelectorAll<HTMLElement>('[data-weather]').forEach((b) => b.addEventListener('click', () => { weather = b.dataset.weather as WeatherChoice; render(); }));
-    root.querySelector('#s-go')!.addEventListener('click', () => {
+    root.querySelector('#s-go')!.addEventListener('click', async () => {
       updateSettings({ beginnerHelp: help });
       if (mode !== 'training') updateSettings({ difficulty, halfLengthSeconds: halfSeconds });
       const awayTeam = opponentId === 'cpu' ? cpu : getTeam(opponentId) ?? cpu;
       if (mode === 'tournament') {
-        if (cupInProgress() && !confirm('Start a new cup? The cup you are playing now will end.')) return;
+        if (cupInProgress() && !(await askConfirm({ tone: 'warn', title: 'Start a new cup?', body: 'The cup you are playing now will end.', yes: 'Start new cup', no: 'Keep my cup' }))) return;
         const state = createTournament(home, difficulty, halfSeconds, twoPlayer, twoPlayer ? awayTeam : undefined);
         setTournament(state);
         router.go({ name: 'tournament', state });
         return;
       }
       if (mode === 'league') {
-        if (getLeague() && !confirm('Start a new league career? Your current league will be deleted.')) return;
+        if (getLeague() && !(await askConfirm({ tone: 'warn', title: 'Start a new league?', body: 'Your current league will be deleted.', yes: 'Start new league', no: 'Keep my league' }))) return;
         setLeague(createLeague(home, halfSeconds));
         router.go({ name: 'league' });
         return;

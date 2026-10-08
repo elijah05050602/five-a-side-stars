@@ -319,6 +319,39 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 .overlay[hidden] { display: none; }
 .overlay-card { border: var(--stroke); box-shadow: 0 8px 0 var(--navy); text-align: center; min-width: min(420px, 90vw); display: flex; flex-direction: column; gap: 12px; align-items: center; }
 .overlay-card h2 { font-size: 40px; }
+/* Pop-up boxes (src/ui/dialog.ts): the game's own "are you sure?" and "oops" cards in place of the browser's plain ones. */
+.btn-danger { background-color: var(--red); color: var(--white); }
+.pop { border: 0; padding: 0; background: transparent; max-width: min(460px, calc(100vw - 32px)); width: 100%; overflow: visible; color: var(--ink); font-family: var(--font); }
+.pop::backdrop { background: rgba(13, 28, 45, 0.62); }
+.pop-card {
+  background: var(--white); border: var(--stroke); border-radius: var(--radius); box-shadow: 0 8px 0 var(--navy);
+  padding: 44px 22px 22px; margin-top: 34px; text-align: center; display: flex; flex-direction: column; gap: 10px; align-items: center;
+  max-height: calc(100dvh - 76px); overflow-y: auto;
+}
+.pop[open] { animation: pop-in 0.32s cubic-bezier(.2, 1.6, .4, 1) both; }
+.pop[open][data-tone="grown-up"] { animation: none; }
+@keyframes pop-in { 0% { transform: scale(0.6, 0.5); opacity: 0; } 60% { transform: scale(1.05, 0.96); opacity: 1; } 100% { transform: none; } }
+.pop-badge {
+  position: absolute; top: 0; left: 50%; margin-left: -34px; z-index: 1; width: 68px; height: 68px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 34px; border: var(--stroke); box-shadow: var(--drop); background: var(--yellow);
+}
+.pop[data-tone="danger"] .pop-badge { background: #ffd0d8; }
+.pop[data-tone="oops"] .pop-badge { background: #e3f0ff; }
+.pop[data-tone="grown-up"] .pop-badge { background: var(--surface-low); }
+.pop h2 { margin: 0; font-size: 26px; line-height: 1.15; color: var(--navy); overflow-wrap: anywhere; }
+.pop-body p { margin: 0 0 6px; font-size: 17px; font-weight: 600; color: var(--muted); line-height: 1.35; }
+.pop-body p:last-child { margin-bottom: 0; }
+.pop-preview { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 8px 14px; background: var(--surface-low); border-radius: var(--radius-sm); max-width: 100%; }
+.pop-preview strong { color: var(--navy); font-size: 18px; overflow-wrap: anywhere; }
+.pop-preview .pop-num { display: grid; place-items: center; min-width: 40px; height: 40px; border-radius: 50%; border: var(--stroke); font-weight: 700; font-size: 18px; }
+.pop-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; width: 100%; margin-top: 6px; }
+.pop-actions .btn { flex: 1 1 0; min-width: 130px; }
+/* On a phone the buttons stack, the safe one on top (it comes last in the markup). */
+@media (max-width: 480px) {
+  .pop-actions { flex-direction: column-reverse; }
+  .pop-actions .btn { flex: none; width: 100%; }
+  .pop h2 { font-size: 22px; }
+}
 /* Full time: both badges and full names either side of the score; a long name wraps rather than squeezing the score. */
 .ft-score { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 14px; width: 100%; }
 .ft-team { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; font-weight: 700; font-size: 17px; line-height: 1.15; overflow-wrap: anywhere; }

@@ -7,10 +7,10 @@ import { pageHead, shellBar, wireShell, type ShellTab } from '../shell';
 import type { Router } from '../screens';
 
 /** What the current screen left behind: its window listeners, its back action, its unsaved-changes check, and the router. */
-export const state: { cleanup: (() => void) | null; onEscape: (() => void) | null; leaveGuard: (() => boolean) | null; router: Router } = {
+export const state: { cleanup: (() => void) | null; onEscape: (() => void) | null; leaveGuard: (() => boolean | Promise<boolean>) | null; router: Router } = {
   cleanup: null,
   onEscape: null,
-  /** Set by a screen with unsaved changes: returns false to stay put. */
+  /** Set by a screen with unsaved changes: returns (or resolves to) false to stay put. */
   leaveGuard: null,
   router: null as unknown as Router,
 };

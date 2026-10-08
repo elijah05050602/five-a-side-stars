@@ -8,6 +8,7 @@ import { applyMotionSetting } from '../motion';
 import { resetControls } from '../../data/controls';
 import { state, topBar, wire, pressed } from './shared';
 import type { Router } from '../screens';
+import { askConfirm, showNotice } from '../dialog';
 
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
 /** Wrong answers in a row at the Parents gate, and when it opens again after too many. */
@@ -146,10 +147,10 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
     const f = file.files?.[0];
     file.value = '';
     if (!f) return;
-    if (f.size > 20 * 1024 * 1024) { alert('That file is too big to be a Goal Rush! save.'); return; }
-    if (!confirm('Load this backup? It replaces the save on this device now (which goes to the backup slot, so it can be put back).')) return;
+    if (f.size > 20 * 1024 * 1024) { void showNotice({ tone: 'grown-up', title: 'File too big', body: 'That file is too big to be a Goal Rush! save.' }); return; }
+    if (!(await askConfirm({ tone: 'grown-up', title: 'Load this backup?', body: 'It replaces the save on this device now. That save goes to the backup slot, so it can be put back.', yes: 'Load backup', no: 'Cancel' }))) return;
     const result = importSave(await f.text());
-    if (!result.ok) { alert(result.reason); return; }
+    if (!result.ok) { void showNotice({ tone: 'grown-up', title: 'Could not load that file', body: result.reason }); return; }
     applySavedSettings();
     router.go({ name: 'menu' });
   });
@@ -158,9 +159,9 @@ function renderParentSettings(root: HTMLElement, router: Router): void {
       ? 'This browser will keep the save, even when space runs low.'
       : 'This browser decides for itself when to clear saves. A backup file is the safest way to keep it.';
   });
-  root.querySelector('#pa-undo')?.addEventListener('click', () => {
-    if (!confirm('Put back the save from before the last reset, repair or loaded file? The save on this device now goes to the backup slot.')) return;
-    if (!restoreBackup()) { alert('There is no backup to put back.'); return; }
+  root.querySelector('#pa-undo')?.addEventListener('click', async () => {
+    if (!(await askConfirm({ tone: 'grown-up', title: 'Put back the backup?', body: 'This puts back the save from before the last reset, repair or loaded file. The save on this device now goes to the backup slot.', yes: 'Put it back', no: 'Cancel' }))) return;
+    if (!restoreBackup()) { void showNotice({ tone: 'grown-up', title: 'No backup yet', body: 'There is no backup to put back.' }); return; }
     applySavedSettings();
     router.go({ name: 'menu' });
   });

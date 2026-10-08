@@ -1,6 +1,7 @@
 import { deleteTeam, getCareer, getLeague, getTeam, getTeams, setCareer, setLeague } from '../../data/storage';
 import { esc } from '../hud';
 import { badgeSvg, kitChip } from '../kitPreview';
+import { askConfirm } from '../dialog';
 import { topBar, wire } from './shared';
 import type { Router } from '../screens';
 
@@ -28,13 +29,17 @@ export function renderTeams(root: HTMLElement, router: Router): void {
   root.querySelectorAll<HTMLElement>('[data-edit]').forEach((b) => b.addEventListener('click', () => router.go({ name: 'builder', teamId: b.dataset.edit })));
   root.querySelectorAll<HTMLElement>('[data-play]').forEach((b) => b.addEventListener('click', () => router.go({ name: 'setup', homeId: b.dataset.play })));
   root.querySelector('#t-new')!.addEventListener('click', () => router.go({ name: 'builder' }));
-  root.querySelectorAll<HTMLElement>('[data-delete]').forEach((b) => b.addEventListener('click', () => {
+  root.querySelectorAll<HTMLElement>('[data-delete]').forEach((b) => b.addEventListener('click', async () => {
     const t = getTeam(b.dataset.delete!);
     if (!t) return;
     const inLeague = getLeague()?.teamId === t.id;
     const inCareer = getCareer()?.teamId === t.id;
-    const extra = inLeague ? ' Your league with this team will end too.' : inCareer ? ' Your career with this team will end too.' : '';
-    if (!confirm(`Delete ${t.name}? This cannot be undone.${extra}`)) return;
+    const extra = inLeague ? '\n\nYour league with this team will end too.' : inCareer ? '\n\nYour career with this team will end too.' : '';
+    const sure = await askConfirm({
+      title: `Delete ${t.name}?`, body: `This team will be gone for good.${extra}`, yes: 'Yes, delete', no: 'Keep it',
+      preview: `${badgeSvg(t.badge, 44)}${kitChip(t.kit, 36)}<strong>${esc(t.name)}</strong>`,
+    });
+    if (!sure || !getTeam(t.id)) return;
     if (inLeague) setLeague(null);
     if (inCareer) setCareer(null);
     deleteTeam(t.id);

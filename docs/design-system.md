@@ -175,6 +175,7 @@ The design system commits to organic, pillow-like geometry for a non-threatening
 - **Primary (`.btn-primary`):** yellow fill, navy text.
 - **Blue (`.btn-blue`):** sky blue fill with navy text.
 - **Ghost (`.btn-ghost`):** white fill.
+- **Danger (`.btn-danger`):** `--red` fill with white text (4.97:1). Only for the button that deletes or ends something, in a pop-up box.
 - **Big (`.btn-big`):** 22px text, 64px tall; **Kick Off (`.btn-kickoff`):** 26px, 72px tall, up to 520px wide, `--drop-lg`.
 - **Icon (`.btn-icon`):** at least 48px square (44px for the star -/+ buttons).
 - **Back (`.btn-back`):** uppercase 15px, 44px tall, white with the ink stroke.
@@ -193,6 +194,7 @@ The design system commits to organic, pillow-like geometry for a non-threatening
 ### Cards & dialogs
 - **Card (`.card`):** `--card` fill, 20px radius, 20px padding, faint border and `--shadow`.
 - **Overlay card:** a card with the 3px ink stroke and an 8px navy drop, centred over a 45% navy scrim; it scrolls inside itself when the screen is short.
+- **Pop-up box (`.pop`, `src/ui/dialog.ts`):** every "are you sure?" and "oops" message, never the browser's `confirm()` or `alert()` (lint rejects them). A white card with the ink stroke and an 8px navy drop over a 62% navy backdrop, at most 460px wide. A 68px round icon badge sits on its top edge: pink `#FFD0D8` for deleting (🗑️), yellow for losing changes (⚠️), pale blue `#E3F0FF` for something to fix (🙈), `--surface-low` in the Parents Zone. Then a 26px title, an optional preview strip on `--surface-low` (the team's badge and kit, or the player's number, name and position), one or two short lines in `--muted`, and the buttons. The safe button always has focus first; Esc, a tap on the backdrop and the phone's Back button all choose it. Buttons sit side by side, and stack on phones (480px and below) with the safe one on top. It pops in with a squash-and-stretch bounce (none in the Parents Zone, and none with calmer motion) and a soft sound-effects pop.
 
 ### Form inputs & selectors
 - Text, number and select: white, `3px solid` navy, 14px radius, at least 50px tall, 19px/600 navy text. An invalid number turns the border red (`#E63946`) on pale pink.

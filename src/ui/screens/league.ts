@@ -6,6 +6,7 @@ import { wireLogoControls } from '../logoUpload';
 import { nextMatchHtml, playNextMatch, tableCard } from './leagueParts';
 import { topBar, wire, ordinal, stickerBanner } from './shared';
 import type { Router } from '../screens';
+import { askConfirm } from '../dialog';
 
 export function renderLeague(root: HTMLElement, router: Router): void {
   const ls = getLeague();
@@ -51,7 +52,7 @@ export function renderLeague(root: HTMLElement, router: Router): void {
   wireLogoControls(root, (key) => ls.teams.find((t) => t.id === key)?.badge, () => { setLeague(ls); renderLeague(root, router); });
   root.querySelector('#l-play')?.addEventListener('click', () => playNextMatch(router, next!, { halfSeconds: ls.halfSeconds, league: true, cpuLevel: info.level }));
   root.querySelector('#l-next')?.addEventListener('click', () => { setLeague(nextSeason(ls, you)); renderLeague(root, router); });
-  root.querySelector('#l-quit')?.addEventListener('click', () => {
-    if (confirm('Leave this league? Your table and tier will be deleted.')) { setLeague(null); router.go({ name: 'menu' }); }
+  root.querySelector('#l-quit')?.addEventListener('click', async () => {
+    if (await askConfirm({ title: 'Leave this league?', body: 'Your table and tier will be deleted.', yes: 'Leave league', no: 'Stay in it' })) { setLeague(null); router.go({ name: 'menu' }); }
   });
 }

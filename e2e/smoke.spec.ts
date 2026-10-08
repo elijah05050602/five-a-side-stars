@@ -44,6 +44,7 @@ test('the lobby, the tutorial and the Back button', async ({ page }) => {
 
 test('the team builder keeps changes safe and does not use up WebGL', async ({ page }) => {
   const errors: string[] = [];
+  // The game asks with its own boxes, never the browser's.
   const dialogs: string[] = [];
   page.on('dialog', async (d) => { dialogs.push(d.message()); await d.dismiss(); });
   await toLobby(page, errors);
@@ -56,7 +57,10 @@ test('the team builder keeps changes safe and does not use up WebGL', async ({ p
   await page.keyboard.press('Escape');
   await expect(heading(page)).toHaveText('Edit Team');
   await page.locator('[data-back]').first().click();
-  expect(dialogs.some((d) => d.startsWith('Leave without saving'))).toBe(true);
+  await expect(page.locator('.pop[open] h2')).toHaveText('Leave without saving?');
+  await expect(page.getByRole('button', { name: 'Stay' })).toBeFocused();
+  await page.getByRole('button', { name: 'Stay' }).click();
+  await expect(page.locator('.pop[open]')).toHaveCount(0);
   await expect(heading(page)).toHaveText('Edit Team');
   // Every step change redraws the 3D preview; 24 of them used to cost the game its own WebGL context.
   for (let i = 0; i < 24; i++) await page.locator(`[data-step="${i % 2 ? 0 : 1}"]`).click();
@@ -69,6 +73,62 @@ test('the team builder keeps changes safe and does not use up WebGL', async ({ p
   await expect.poll(() => page.evaluate(() => !!(window as DebugWindow).__match)).toBe(true);
   const lost = await page.evaluate(() => (document.getElementById('game-canvas') as HTMLCanvasElement).getContext('webgl2')?.isContextLost() ?? true);
   expect(lost).toBe(false);
+  expect(dialogs).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('deleting a team or a player asks with the game\'s own box first', async ({ page }) => {
+  const errors: string[] = [];
+  const dialogs: string[] = [];
+  page.on('dialog', async (d) => { dialogs.push(d.message()); await d.dismiss(); });
+  await toLobby(page, errors);
+  await page.locator('#m-teams').click();
+  const teams = page.locator('[data-delete]');
+  const count = await teams.count();
+  // Keep it, Esc and the phone's Back button all keep the team.
+  await teams.first().click();
+  const pop = page.locator('.pop[open]');
+  await expect(pop.locator('h2')).toHaveText(/^Delete .+\?$/);
+  await expect(pop.getByRole('button', { name: 'Keep it' })).toBeFocused();
+  await pop.getByRole('button', { name: 'Keep it' }).click();
+  await expect(pop).toHaveCount(0);
+  await teams.first().click();
+  await page.keyboard.press('Escape');
+  await expect(pop).toHaveCount(0);
+  await expect(heading(page)).toHaveText('My Squad');
+  await teams.first().click();
+  await page.goBack();
+  await expect(pop).toHaveCount(0);
+  await expect(heading(page)).toHaveText('My Squad');
+  await expect(teams).toHaveCount(count);
+  // Yes, delete does.
+  await teams.first().click();
+  await pop.getByRole('button', { name: 'Yes, delete' }).click();
+  await expect(teams).toHaveCount(count - 1);
+
+  // Remove player asks too.
+  await page.locator('[data-edit]').first().click();
+  await page.locator('[data-step="2"]').click();
+  await page.locator('#p-add').click();
+  const players = page.locator('.player-card:not(.player-card-add)');
+  const squad = await players.count();
+  await page.locator('#p-remove').click();
+  await expect(pop.locator('h2')).toHaveText(/^Remove .+\?$/);
+  await pop.getByRole('button', { name: 'Keep them' }).click();
+  await expect(players).toHaveCount(squad);
+  await page.locator('#p-remove').click();
+  await pop.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(players).toHaveCount(squad - 1);
+
+  // A name that is not allowed goes back to the first step and says so.
+  await page.locator('[data-step="0"]').click();
+  await page.locator('#f-name').fill('Dick FC');
+  await page.locator('#b-next').click();
+  await expect(pop.locator('h2')).toHaveText('Pick another team name');
+  await pop.getByRole('button', { name: "OK, I'll fix it" }).click();
+  await expect(pop).toHaveCount(0);
+  await expect(page.locator('#f-name')).toBeVisible();
+  expect(dialogs).toEqual([]);
   expect(errors).toEqual([]);
 });
 

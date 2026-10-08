@@ -1,5 +1,6 @@
 import type { Badge } from '../data/types';
 import { esc } from './hud';
+import { showNotice } from './dialog';
 
 /** Logos are shrunk to this many pixels square so a save file stays small. */
 const LOGO_PX = 160;
@@ -56,7 +57,7 @@ export function wireLogoControls(root: HTMLElement, resolve: (key: string) => Ba
       input.value = '';
       const badge = resolve(key);
       if (!file || !badge) return;
-      if (file.size > 12 * 1024 * 1024) { alert('That picture is very big. Please pick one under 12 MB.'); return; }
+      if (file.size > 12 * 1024 * 1024) { void showNotice({ icon: '🖼️', title: 'Picture too big', body: 'That picture is very big. Please pick one under 12 MB.' }); return; }
       try {
         const image = await fileToLogo(file);
         // Left the screen while the picture was being shrunk: drop it rather than redraw a screen that has gone.
@@ -64,7 +65,7 @@ export function wireLogoControls(root: HTMLElement, resolve: (key: string) => Ba
         badge.image = image;
         onChange(key);
       } catch (e) {
-        alert((e as Error).message || 'Sorry, that picture could not be used.');
+        void showNotice({ icon: '😕', title: 'That picture did not work', body: (e as Error).message || 'Sorry, that picture could not be used.' });
       }
     });
   });
