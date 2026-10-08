@@ -9,7 +9,7 @@
 //   1. the first visit installs the service worker once every file in dist/sw.js is in its cache, and
 //      clears an older goalrush- cache but leaves another game's cache on the same site alone;
 //   2. offline (Playwright's switch, and the server stopped too) a reload and a fresh launch both boot
-//      the game in Fredoka, and fetch('audio/commentary.mp3') is answered from the cache;
+//      the game in Fredoka, and the commentary recording (at its ?v= URL) is answered from the cache;
 //   3. with a server that never answers, the page still opens from the cache after about 3 s;
 //   4. a new deploy (a changed commentary.json, so a new version) replaces the old cache.
 // Any page error, failed request, or (offline) answer that did not come from the service worker fails it.
@@ -31,7 +31,7 @@ if (!existsSync(join(DIST, 'sw.js'))) throw new Error('No dist/sw.js: run npm ru
 const sw = readFileSync(join(DIST, 'sw.js'), 'utf8');
 const VERSION = JSON.parse(sw.match(/const VERSION = (".*?");/)[1]);
 const FILES = JSON.parse(sw.match(/const FILES = (\[[\s\S]*?\]);/)[1]);
-const BYTES = FILES.reduce((sum, url) => sum + statSync(join(DIST, decodeURIComponent(url))).size, 0);
+const BYTES = FILES.reduce((sum, url) => sum + statSync(join(DIST, decodeURIComponent(url.split('?')[0]))).size, 0);
 
 const root = mkdtempSync(join(tmpdir(), 'goalrush-offline-'));
 cpSync(DIST, join(root, SUB), { recursive: true });
@@ -73,7 +73,9 @@ try {
   await booted(page, true);
   const fonts = await page.evaluate(async () => { await document.fonts.ready; return [...document.fonts].filter((f) => f.family.replace(/["']/g, '') === 'Fredoka' && f.status === 'loaded').map((f) => f.weight).sort(); });
   check(fonts.includes('700'), `Fredoka faces loaded offline: ${fonts.join(', ') || 'none'}`);
-  const mp3 = await page.evaluate(async () => { const r = await fetch('audio/commentary.mp3'); return { ok: r.ok, bytes: (await r.arrayBuffer()).byteLength }; });
+  // The game asks for the recording with its ?v=, as sw.js lists it.
+  const mp3Url = FILES.find((url) => url.includes('commentary.mp3'));
+  const mp3 = await page.evaluate(async (url) => { const r = await fetch(url); return { ok: r.ok, bytes: (await r.arrayBuffer()).byteLength }; }, mp3Url);
   const mp3Size = statSync(join(DIST, 'audio/commentary.mp3')).size;
   check(mp3.ok && mp3.bytes === mp3Size, `offline commentary.mp3: ok ${mp3.ok}, ${mp3.bytes} of ${mp3Size} bytes`);
   // A fresh launch, as from the home screen: a new tab (and the old one closed, so one match renders at a time).

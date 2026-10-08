@@ -10,10 +10,23 @@ export interface BuiltFile {
   bytes: Uint8Array<ArrayBuffer>;
 }
 
+/**
+ * The commentary's index and recording have fixed names but must change together, so the game asks
+ * for them with ?v= and a hash of the index, and the service worker keeps them under those URLs. An
+ * older service worker still looking after the page when a new deploy loads then has no copy under
+ * the new URL and fetches the new pair, instead of handing the new game the old recording.
+ */
+export const VERSIONED = ['audio/commentary.json', 'audio/commentary.mp3'];
+
+/** The ?v= value for the commentary: the first ten hex digits of the index's SHA-256. */
+export async function commentaryVersion(index: Uint8Array<ArrayBuffer>): Promise<string> {
+  return (await sha256(index)).slice(0, 10);
+}
+
 export interface Precache {
   /** The cache name: 'goalrush-' and a hash of every listed file's path and contents. */
   version: string;
-  /** Paths inside dist, sorted. */
+  /** Paths inside dist, sorted, the commentary's with its ?v= query. */
   files: string[];
   /** Total size of the listed files in bytes. */
   bytes: number;
@@ -33,13 +46,18 @@ export async function precacheList(built: readonly BuiltFile[]): Promise<Precach
   // One "path hash" line per file, then a hash of those lines.
   const lines = await Promise.all(files.map(async (f) => `${f.path} ${await sha256(f.bytes)}\n`));
   const version = `goalrush-${(await sha256(new TextEncoder().encode(lines.join('')))).slice(0, 12)}`;
-  return { version, files: files.map((f) => f.path), bytes: files.reduce((sum, f) => sum + f.bytes.byteLength, 0) };
+  const index = files.find((f) => f.path === VERSIONED[0]);
+  const v = index ? `?v=${await commentaryVersion(index.bytes)}` : '';
+  return { version, files: files.map((f) => (VERSIONED.includes(f.path) ? f.path + v : f.path)), bytes: files.reduce((sum, f) => sum + f.bytes.byteLength, 0) };
 }
 
 /** The template with its version and file list filled in. Each placeholder must be there exactly once. */
 export function renderServiceWorker(template: string, precache: Precache): string {
   // URLs relative to sw.js, which sits at the top of dist, so the game works from any sub-folder.
-  const urls = precache.files.map((path) => `./${path.split('/').map(encodeURIComponent).join('/')}`);
+  const urls = precache.files.map((file) => {
+    const [path, query] = file.split('?');
+    return `./${path.split('/').map(encodeURIComponent).join('/')}${query ? `?${query}` : ''}`;
+  });
   const values: Record<string, string> = { __VERSION__: JSON.stringify(precache.version), __FILES__: JSON.stringify(urls, null, 2) };
   let out = template;
   for (const [token, value] of Object.entries(values)) {
