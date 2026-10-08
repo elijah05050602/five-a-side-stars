@@ -19,9 +19,13 @@ test('one visit is enough to play offline, sound included', async ({ page, conte
   await page.getByText('Skip tutorial').click();
   await expect(page.locator('#ui h1').first()).toContainText('GOAL');
   const sound = await page.evaluate(async () => {
-    const res = await fetch('audio/commentary.mp3');
-    return { ok: res.ok, bytes: (await res.arrayBuffer()).byteLength };
+    // The recording is kept under the game's own ?v= URL for it.
+    const name = (await caches.keys()).find((k) => k.startsWith('goalrush-'))!;
+    const url = (await (await caches.open(name)).keys()).map((r) => r.url).find((u) => u.includes('commentary.mp3'))!;
+    const res = await fetch(url);
+    return { url, ok: res.ok, bytes: (await res.arrayBuffer()).byteLength };
   });
+  expect(sound.url).toMatch(/commentary\.mp3\?v=[0-9a-f]{10}$/);
   expect(sound.ok).toBe(true);
   expect(sound.bytes).toBeGreaterThan(1_000_000);
   // Nothing comes from another site: the font is part of the game.

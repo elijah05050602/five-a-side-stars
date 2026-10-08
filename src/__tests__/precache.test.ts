@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPrecached, precacheList, renderServiceWorker, type BuiltFile } from '../../tools/sw-manifest';
+import { commentaryVersion, isPrecached, precacheList, renderServiceWorker, type BuiltFile } from '../../tools/sw-manifest';
 import template from '../sw-template.js?raw';
 
 const text = (s: string) => new TextEncoder().encode(s);
@@ -19,11 +19,18 @@ function dist(): BuiltFile[] {
 describe('service worker precache list', () => {
   it('keeps every built file but the worker itself and source maps, sorted', async () => {
     const p = await precacheList(dist());
-    expect(p.files).toEqual(['assets/index-BjjME8yp.js', 'audio/commentary.json', 'audio/commentary.mp3', 'index.html']);
+    // The commentary pair carries a hash of its index, the same ?v= the game asks for (see VERSIONED).
+    expect(p.files).toEqual(['assets/index-BjjME8yp.js', 'audio/commentary.json?v=3153ccdf68', 'audio/commentary.mp3?v=3153ccdf68', 'index.html']);
     expect(p.bytes).toBe(23 + 28 + 6 + 40);
     expect(isPrecached('sw.js')).toBe(false);
     expect(isPrecached('assets/index-BjjME8yp.css.map')).toBe(false);
     expect(isPrecached('models/sw.js')).toBe(true);
+  });
+
+  it('gives the commentary a new ?v= whenever its index changes', async () => {
+    const v = await commentaryVersion(text('{"clips":{"goal":[[0,1.5]]}}'));
+    expect(v).toBe('3153ccdf68');
+    expect(await commentaryVersion(text('{"clips":{"goal":[[0,1.6]]}}'))).not.toBe(v);
   });
 
   it('gives the same version for the same files, in any order', async () => {
@@ -71,7 +78,7 @@ describe('service worker template', () => {
     const run = new Function(`${sw}; return { VERSION, FILES };`) as () => { VERSION: string; FILES: string[] };
     expect(run()).toEqual({
       VERSION: p.version,
-      FILES: ['./art/club%20crest%231.jpg', './assets/index-BjjME8yp.js', './audio/commentary.json', './audio/commentary.mp3', './index.html'],
+      FILES: ['./art/club%20crest%231.jpg', './assets/index-BjjME8yp.js', './audio/commentary.json?v=3153ccdf68', './audio/commentary.mp3?v=3153ccdf68', './index.html'],
     });
   });
 

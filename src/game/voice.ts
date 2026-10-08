@@ -56,6 +56,16 @@ const RETRY_MS = 10000;
 /** How far (s) a decoded recording's length may stray from the one its index was built for: MP3 decoders differ by a few frames. */
 const LENGTH_SLACK = 0.5;
 
+/** A hash of commentary.json from the build (vite.config.ts); not defined in the unit tests. */
+declare const __COMMENTARY_V__: string;
+/**
+ * The commentary's URLs carry the build's ?v=, so a service worker left over from an older deploy,
+ * which keeps the old pair under the plain names, cannot give this game the old recording.
+ */
+const V = typeof __COMMENTARY_V__ === 'string' ? `?v=${__COMMENTARY_V__}` : '';
+const SPRITE_INDEX = `audio/commentary.json${V}`;
+const SPRITE_AUDIO = `audio/commentary.mp3${V}`;
+
 interface Loaded { sprite: Sprite; buffer: AudioBuffer }
 let spritePromise: Promise<Loaded | null> | null = null;
 /** The clips once they have arrived, for a Commentary to pick up straight away. */
@@ -91,13 +101,13 @@ export function preloadCommentary(now = false): Promise<Loaded | null> {
   if (!spritePromise) {
     if (performance.now() < retryAt) return Promise.resolve(null);
     spritePromise = afterPlayerModel().then(() => Promise.all([
-      fetch(`${import.meta.env.BASE_URL}audio/commentary.json`).then((r) => (r.ok ? (r.json() as Promise<Sprite>) : null)).catch(() => null),
-      loadAudio('audio/commentary.mp3', SPRITE_RATE),
+      fetch(`${import.meta.env.BASE_URL}${SPRITE_INDEX}`).then((r) => (r.ok ? (r.json() as Promise<Sprite>) : null)).catch(() => null),
+      loadAudio(SPRITE_AUDIO, SPRITE_RATE),
     ])).then(([sprite, buffer]) => {
       if (!sprite || !buffer) return null;
       if (spriteMatches(sprite, buffer.duration)) return { sprite, buffer };
       mismatched = true;
-      releaseAudio('audio/commentary.mp3');
+      releaseAudio(SPRITE_AUDIO);
       return null;
     });
     void spritePromise.then((got) => {
