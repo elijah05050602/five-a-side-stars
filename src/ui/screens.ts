@@ -73,8 +73,8 @@ export function leaveScreen(): void {
   state.leaveGuard = null;
 }
 
-/** False when the current screen has unsaved changes and the player chose to stay. */
-export function canLeaveScreen(): boolean {
+/** False when the current screen has unsaved changes and the player chose to stay. A screen that asks first answers with a Promise. */
+export function canLeaveScreen(): boolean | Promise<boolean> {
   return !state.leaveGuard || state.leaveGuard();
 }
 

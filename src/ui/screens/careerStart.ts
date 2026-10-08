@@ -9,6 +9,7 @@ import { esc } from '../hud';
 import { badgeSvg, kitChip } from '../kitPreview';
 import { topBar, wire, pressed, focusKey, restoreFocus } from './shared';
 import type { Router } from '../screens';
+import { askConfirm } from '../dialog';
 
 type StarChoice = 'existing' | 'create';
 type TeamChoice = 'random' | 'club' | 'mine';
@@ -113,10 +114,10 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
     root.querySelector<HTMLSelectElement>('#c-mine')?.addEventListener('change', (e) => { mineId = (e.target as HTMLSelectElement).value; render(); });
     root.querySelectorAll<HTMLElement>('[data-help]').forEach((b) => b.addEventListener('click', () => { help = b.dataset.help === '1'; render(); }));
     root.querySelectorAll<HTMLElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { halfSeconds = Number(b.dataset.len); render(); }));
-    root.querySelector('#c-go')!.addEventListener('click', () => {
+    root.querySelector('#c-go')!.addEventListener('click', async () => {
       const chosen = star();
       if (!chosen || !chosen.name.trim() || !isNameOk(chosen.name)) return;
-      if (getCareer() && !confirm('Start a new career? Your current career will be deleted (the team stays in My Teams).')) return;
+      if (getCareer() && !(await askConfirm({ tone: 'warn', title: 'Start a new career?', body: 'Your current career will be deleted.\n\nThe team stays in My Teams.', yes: 'Start new career', no: 'Keep my career' }))) return;
       updateSettings({ beginnerHelp: help, halfLengthSeconds: halfSeconds });
       const { career, team: you } = createCareer(team(), halfSeconds, { ...chosen, name: chosen.name.trim() });
       saveTeam(you);

@@ -14,6 +14,7 @@ import { KitPreview3D } from '../preview3d';
 import { downloadTeamSheet } from '../teamSheet';
 import { logoControls, wireLogoControls } from '../logoUpload';
 import { isNameOk } from '../../data/wordFilter';
+import { askConfirm, openPop, showNotice } from '../dialog';
 import { colourName } from '../colourNames';
 import { state, topBar, wire, pressed, focusKey, restoreFocus } from './shared';
 import type { Router } from '../screens';
@@ -26,7 +27,16 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
   for (const p of team.players) p.skills = fitSkills(p, team.ageGroup, !team.career);
   // Leaving with unsaved changes asks first (the back pill, Esc, the phone's Back button and the top tabs all come here).
   const saved = JSON.stringify(team);
-  state.leaveGuard = () => JSON.stringify(team) === saved || confirm('Leave without saving? Your changes to this team will be lost.');
+  state.leaveGuard = async () => {
+    if (JSON.stringify(team) === saved) return true;
+    const choice = await openPop<'leave' | 'save' | 'stay'>({
+      icon: '⚠️', tone: 'warn', title: 'Leave without saving?', body: 'Your changes to this team will be lost.',
+      buttons: [{ label: 'Leave without saving', value: 'leave', kind: 'ghost' }, { label: 'Save and leave', value: 'save', kind: 'primary' }, { label: 'Stay', value: 'stay', kind: 'ghost' }],
+      focus: 2, cancel: 'stay',
+    });
+    if (choice === 'save') return save();
+    return choice === 'leave';
+  };
   // A career team grows up one age group a year, and a league team plays in its league's age group.
   const ageLock = team.career ? 'Career teams move up an age group by themselves at the end of each year.'
     : existing && getLeague()?.teamId === team.id ? 'This team is playing in a league. Leave the league to change its age group.' : '';
@@ -79,16 +89,10 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
       if (!validate()) return;
       const btn = e.currentTarget as HTMLButtonElement;
       btn.disabled = true; btn.textContent = 'Drawing…';
-      try { await downloadTeamSheet({ ...team, short: shortCode(team.name) }); } catch { alert('Sorry, the team sheet could not be made on this device.'); }
+      try { await downloadTeamSheet({ ...team, short: shortCode(team.name) }); } catch { void showNotice({ icon: '😕', title: 'No team sheet this time', body: 'Sorry, the team sheet could not be made on this device.' }); }
       btn.disabled = false; btn.textContent = '🖨️ Team sheet';
     });
-    root.querySelector('#b-save')?.addEventListener('click', () => {
-      if (!validate()) return;
-      team.short = shortCode(team.name);
-      saveTeam(team);
-      state.leaveGuard = null;
-      router.go({ name: 'teams' });
-    });
+    root.querySelector('#b-save')?.addEventListener('click', () => { if (save()) router.go({ name: 'teams' }); });
     const form = root.querySelector<HTMLElement>('#form')!;
     if (step === 0) renderBadgeStep(form);
     else if (step === 1) renderKits(form);
@@ -135,24 +139,45 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
     if (el) { el.outerHTML = kitStrip(); wireKitStrip(); }
   };
 
+  /** Check and save the team. False (with a box saying what to fix) when it isn't ready yet. */
+  const save = (): boolean => {
+    if (!validate()) return false;
+    team.short = shortCode(team.name);
+    saveTeam(team);
+    state.leaveGuard = null;
+    return true;
+  };
+
+  /** Go to the step (and player) to fix, then say what is wrong. */
+  const oops = (title: string, body: string, at: 0 | 2, player?: number): false => {
+    step = at;
+    if (player !== undefined && player >= 0) selectedPlayer = player;
+    render();
+    void showNotice({ title, body, ok: "OK, I'll fix it" });
+    return false;
+  };
+
   const validate = (): boolean => {
     team.name = team.name.trim() || randomTeamName(team.kit.shirt);
-    if (!isNameOk(team.name)) { alert("Let's pick a different team name, that one is not allowed."); step = 0; render(); return false; }
-    const rude = team.players.find((p) => !isNameOk(p.name));
-    if (rude) { alert(`Let's pick a different name for player #${rude.number}, that one is not allowed.`); step = 2; render(); return false; }
+    if (!isNameOk(team.name)) return oops('Pick another team name', "Let's pick a different team name, that one is not allowed.", 0);
+    const rude = team.players.findIndex((p) => !isNameOk(p.name));
+    if (rude >= 0) return oops('Pick another name', `Let's pick a different name for player #${team.players[rude].number}, that one is not allowed.`, 2, rude);
     const starters = team.players.filter((p) => p.starter);
-    if (starters.length !== 5) { alert(`Pick exactly 5 starters (you have ${starters.length}). The rest are subs.`); step = 2; render(); return false; }
+    if (starters.length !== 5) return oops('Pick 5 starters', `Pick exactly 5 starters (you have ${starters.length}). The rest are subs.`, 2);
     const keepers = starters.filter((p) => p.position === 'GK').length;
-    if (!keepers) { alert('One of your starters must be the keeper.'); step = 2; render(); return false; }
-    if (keepers > 1) { alert('Only one keeper can start. Make the other keeper a sub.'); step = 2; render(); return false; }
+    if (!keepers) return oops('Who is in goal?', 'One of your starters must be the keeper.', 2);
+    if (keepers > 1) return oops('Too many keepers', 'Only one keeper can start. Make the other keeper a sub.', 2, team.players.findIndex((p) => p.starter && p.position === 'GK'));
     if (!team.career) {
-      const greedy = team.players.find((p) => starsLeft(p.skills, team.ageGroup, p.position) < 0);
-      if (greedy) { alert(`${greedy.name} has ${-starsLeft(greedy.skills, team.ageGroup, greedy.position)} too many stars for the ${AGE_STATS[team.ageGroup].label}. Take some off.`); step = 2; render(); return false; }
+      const greedy = team.players.findIndex((p) => starsLeft(p.skills, team.ageGroup, p.position) < 0);
+      if (greedy >= 0) {
+        const g = team.players[greedy];
+        return oops('Too many stars', `${g.name} has ${-starsLeft(g.skills, team.ageGroup, g.position)} too many stars for the ${AGE_STATS[team.ageGroup].label}. Take some off.`, 2, greedy);
+      }
     }
     const nums = new Set<number>();
-    for (const p of team.players) {
+    for (const [i, p] of team.players.entries()) {
       p.name = p.name.trim() || randomPlayerName(p.gender);
-      if (nums.has(p.number)) { alert(`Two players have number ${p.number}. Give each player their own number.`); step = 2; render(); return false; }
+      if (nums.has(p.number)) return oops('Same shirt number', `Two players have number ${p.number}. Give each player their own number.`, 2, i);
       nums.add(p.number);
     }
     return true;
@@ -310,7 +335,15 @@ export function renderBuilder(root: HTMLElement, router: Router, teamId?: string
       selectedPlayer = team.players.length - 1;
       render();
     });
-    form.querySelector('#p-remove')?.addEventListener('click', () => {
+    form.querySelector('#p-remove')?.addEventListener('click', async () => {
+      const shirt = contrastColour(team.kit.shirt);
+      const sure = await askConfirm({
+        title: `Remove ${p.name}?`, body: 'They will leave your squad.', yes: 'Remove', no: 'Keep them',
+        preview: `<span class="pop-num" style="background:${esc(team.kit.shirt)};color:${esc(shirt)}">${p.number}</span><strong>${esc(p.name)}</strong><span class="chip chip-pos chip-${p.position.toLowerCase()}">${POSITION_LABELS[p.position]}</span>`,
+      });
+      const at = team.players.indexOf(p);
+      if (!sure || at < 0 || team.players.length <= 5) return;
+      selectedPlayer = at;
       team.players.splice(selectedPlayer, 1);
       selectedPlayer = Math.max(0, selectedPlayer - 1);
       render();

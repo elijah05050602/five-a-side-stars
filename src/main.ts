@@ -11,6 +11,7 @@ import { loadPlayerAsset } from './game/playerAsset';
 import { gameRenderer, showDrawError } from './game/renderer';
 import { canLeaveScreen, finishMatch, goBack, leaveScreen, playAhead, renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
 import { armBack, initBackButton } from './ui/backButton';
+import { closePop } from './ui/dialog';
 import type { Occasion } from './game/grounds';
 
 // Straight away rather than on 'load': the service worker then stores every file of the game while
@@ -67,7 +68,10 @@ function occasionFor(o: StartOptions, mode: string): Occasion {
 const router: Router = {
   go(screen: Screen) {
     // A screen with unsaved changes (the team builder) asks first, and may keep the player there.
-    if (!canLeaveScreen()) return;
+    const ok = canLeaveScreen();
+    if (ok === false) return;
+    // Once they choose to leave, drop the screen (and its check) and go on as usual.
+    if (ok !== true) { void ok.then((yes) => { if (yes) { leaveScreen(); router.go(screen); } }); return; }
     if (match) { match.dispose(); match = null; }
     canvas().classList.remove('is-live');
     document.body.classList.remove('in-match');
@@ -115,6 +119,8 @@ const router: Router = {
 // The phone's Back button pauses (or resumes) a match and otherwise goes back a screen, like the screen's own back pill.
 const onLobby = () => current === 'menu';
 initBackButton(() => {
+  // A pop-up box is up: Back picks its safe answer and stays on the screen.
+  if (closePop()) return true;
   if (match) { match.sim.togglePause(); return true; }
   if (onLobby()) return false;
   goBack();

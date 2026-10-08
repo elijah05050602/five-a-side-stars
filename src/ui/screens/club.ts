@@ -6,6 +6,7 @@ import { kitChip } from '../kitPreview';
 import '../club.css';
 import { topBar, wire } from './shared';
 import type { Router, SetupMode } from '../screens';
+import { askConfirm } from '../dialog';
 
 /** The club page: play as Davao Strikers FC U7 in any mode. The team is an ordinary saved team, so all of it stays editable. */
 export function renderClub(root: HTMLElement, router: Router): void {
@@ -46,8 +47,8 @@ export function renderClub(root: HTMLElement, router: Router): void {
     router.go({ name: 'setup', homeId: CLUB_TEAM_ID, mode });
   }));
   root.querySelector('#c-edit')!.addEventListener('click', () => router.go({ name: 'builder', teamId: CLUB_TEAM_ID }));
-  root.querySelector('#c-reset')!.addEventListener('click', () => {
-    if (!confirm(`Put ${CLUB_NAME}'s squad, kits and badge back the way the club made them? Your changes to this team will be lost.`)) return;
+  root.querySelector('#c-reset')!.addEventListener('click', async () => {
+    if (!(await askConfirm({ tone: 'warn', icon: '🔄', title: `Put ${CLUB_NAME} back?`, body: "The squad, kits and badge go back the way the club made them.\n\nYour changes to this team will be lost.", yes: 'Put it back', no: 'Keep my changes' }))) return;
     resetClubTeam();
     renderClub(root, router);
   });

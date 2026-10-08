@@ -30,6 +30,8 @@ npm run typecheck && npm run lint && npm test && npm run build && npm run e2e
 - `src/ui/screens.ts` routes between screens. Each screen is `src/ui/screens/<name>.ts`, with
   shared helpers in `screens/shared.ts`. The console bar and dock are in `src/ui/shell.ts`, and
   the in-match overlay is in `src/ui/hud.ts`.
+- `src/ui/dialog.ts`: the game's own pop-up boxes (`askConfirm`, `showNotice`, `openPop`). Use them instead of
+  `confirm()` and `alert()`, which lint rejects.
 - `src/data/`: the save (`storage.ts`), defaults, the name filter (`wordFilter.ts`), progress
   and stickers.
 - `tools/`: the player model builder, the audio tools and the service worker plugin.
