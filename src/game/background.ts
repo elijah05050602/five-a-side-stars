@@ -18,7 +18,15 @@ export interface SimJob {
   pens?: boolean;
 }
 
-export interface SimOutcome { score: [number, number]; pens: [number, number] | null }
+/** One player's match in a computer-vs-computer game: goals, assists and saves. */
+export interface SimLine { g: number; a: number; sv: number }
+
+export interface SimOutcome {
+  score: [number, number];
+  pens: [number, number] | null;
+  /** Everyone who played, by player id, for the league's stats pages. */
+  players?: Record<string, SimLine>;
+}
 
 /** The other semi-final, and the final the side that knocks you out would play, in case they do. */
 export interface CupAhead { semi2: SimOutcome; finalIfOut: SimOutcome }
@@ -40,11 +48,12 @@ export function playOut(job: SimJob): SimOutcome {
   let guard = 0;
   while (sim.phase !== 'fulltime' && guard++ < 60 * 60 * 20) { sim.step(1 / 60, IDLE_INPUT); sim.events.length = 0; }
   const score = [...sim.score] as [number, number];
-  if (!job.pens || score[0] !== score[1]) return { score, pens: null };
+  const players = Object.fromEntries(Object.entries(sim.playerStats()).map(([id, m]) => [id, { g: m.goals, a: m.assists, sv: m.saves }]));
+  if (!job.pens || score[0] !== score[1]) return { score, pens: null, players };
   const so = new MatchSim({ home: job.home, away: job.away, difficulty: job.difficulty, halfSeconds: 60, humanSide: null, mode: 'shootout', cpuLevel: job.cpuLevel });
   guard = 0;
   while (so.phase !== 'fulltime' && guard++ < 60 * 60 * 5) { so.step(1 / 60, IDLE_INPUT); so.events.length = 0; }
-  return { score, pens: [...so.score] as [number, number] };
+  return { score, pens: [...so.score] as [number, number], players };
 }
 
 /** Which side won a played-out tie (a shoot-out that somehow never settled goes to the home side). */

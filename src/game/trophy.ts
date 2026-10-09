@@ -67,3 +67,17 @@ export function cupTrophy(t: TournamentState, r: MatchResult): TrophyWin | null 
   const winner = side === 0 ? r.home : r.away;
   return humans.includes(winner.id) ? win(5, 'Cup winners', side) : null;
 }
+
+/**
+ * Does this match win a promotion play-off? Only the play-off that takes you up a tier counts (staying
+ * up is a relief, not a trophy). `up` and `played` describe the play-off before this match is recorded:
+ * `played` is null before the match, and has `won: null` while the shoot-out that settles a draw waits.
+ */
+export function playoffTrophy(tier: number, up: boolean, played: { won: boolean | null } | null, you: Team, r: MatchResult): TrophyWin | null {
+  if (!up) return null;
+  if (r.mode === 'match' ? played !== null : r.mode !== 'shootout' || played?.won !== null) return null;
+  const side: Side = r.home.id === you.id ? 0 : 1;
+  const [h, a] = r.score;
+  if (h === a || (h > a) !== (side === 0)) return null;
+  return win(levelForTier(tier), 'Play-off winners', side);
+}

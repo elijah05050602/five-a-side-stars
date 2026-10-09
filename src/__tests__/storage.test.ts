@@ -108,6 +108,53 @@ describe('save file', () => {
     expect(getCareer()!.teamId).toBe(you.id);
   });
 
+  it('builds a world for a career saved before the living league, keeping the clubs it is playing now', () => {
+    resetAll();
+    const { career, team: you } = createCareer(team('src', 'Old World', 'U8'), 60);
+    saveTeam(you);
+    const old = structuredClone(career) as unknown as Record<string, unknown>;
+    delete old.world;
+    delete (old.league as Record<string, unknown>).tally;
+    (old.league as { tier: number }).tier = 3;
+    const opponents = career.league.teams.map((t) => t.id);
+    const save = JSON.parse(localStorage.getItem(KEY)!);
+    save.career = old;
+    delete save.progress?.counts;
+    localStorage.setItem(KEY, JSON.stringify(save));
+    reloadSave();
+    const c = getCareer()!;
+    expect(c.world.clubs).toHaveLength(30);
+    expect(c.league.tally).toEqual({});
+    const yours = c.world.tiers[2];
+    expect(yours.members).toContain(you.id);
+    for (const id of opponents) expect(yours.members).toContain(id);
+    // The one extra club in your tier sits this mini season out, so the fixtures still add up.
+    expect(yours.members).toHaveLength(7);
+    expect(opponents).not.toContain(yours.resting);
+    expect(getProgress().counts).toEqual({});
+  });
+
+  it('keeps a saved world, and rebuilds one that does not add up without losing the career', () => {
+    resetAll();
+    const { career, team: you } = createCareer(team('src', 'World Keeper', 'U8'), 60);
+    saveTeam(you);
+    setCareer(career);
+    reloadSave();
+    expect(getCareer()!.world.clubs.map((c) => c.team.id)).toEqual(career.world.clubs.map((c) => c.team.id));
+    expect(getCareer()!.world.rivalId).toBe(career.world.rivalId);
+    const save = JSON.parse(localStorage.getItem(KEY)!);
+    // A club in two tiers at once.
+    save.career.world.tiers[0].members.push(save.career.world.tiers[1].members[0]);
+    save.career.world.tally.someone = { club: 'x', name: 'Bad', p: 'lots' };
+    localStorage.setItem(KEY, JSON.stringify(save));
+    reloadSave();
+    const c = getCareer()!;
+    expect(c.teamId).toBe(you.id);
+    expect(c.world.tiers.flatMap((t) => t.members)).toHaveLength(31);
+    expect(c.world.clubs.map((x) => x.team.id)).not.toEqual(career.world.clubs.map((x) => x.team.id));
+    for (const t of career.league.teams) expect(c.world.tiers[4].members).toContain(t.id);
+  });
+
   it('keeps settings and the league in the same save', () => {
     resetAll();
     updateSettings({ difficulty: 'hard', halfLengthSeconds: 300 });

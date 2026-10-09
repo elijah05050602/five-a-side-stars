@@ -600,6 +600,40 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
 .league-table tr.is-you { background: #fff8dc; font-weight: 700; }
 .league-table tr.is-up td:first-child { box-shadow: inset 4px 0 0 var(--green); }
 .league-table tr.is-down td:first-child { box-shadow: inset 4px 0 0 #e63946; }
+.league-table tr.is-playoff td:first-child { box-shadow: inset 4px 0 0 var(--yellow); }
+/* Team names that open the club's page: they look like the name, with a dotted underline. */
+.t-link { font: inherit; color: inherit; background: none; border: 0; padding: 4px 0; min-height: 32px; cursor: pointer; text-align: left; display: inline-flex; align-items: center; gap: 4px; text-decoration: underline dotted rgba(27,42,65,.4); text-underline-offset: 4px; }
+.t-link svg { vertical-align: middle; }
+.table-tabs { margin-bottom: 10px; }
+.table-area { flex: 2 1 420px; min-width: 0; display: flex; }
+.table-area > .table-card { flex: 1 1 auto; }
+.chip-rival { background: #ffe1cc; color: #a33a00; font-weight: 800; align-self: center; }
+.rival-line { margin: 4px auto 0; justify-content: center; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px 18px; margin: 8px 0; }
+.stats-grid h4, .table-card h4 { margin: 10px 0 4px; }
+.leader-list { margin: 0; padding-left: 22px; }
+.leader-list li { padding: 3px 0; }
+.leader-list li > .leader-who { display: inline; }
+.leader-list li.is-you { font-weight: 800; }
+.leader-val { display: block; text-align: right; font-weight: 700; color: var(--navy); font-size: .9rem; }
+.table-scroll { overflow-x: auto; }
+.team-stats .form { white-space: nowrap; font-size: .8rem; }
+.ladder { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 18px; }
+.ladder-tier h4 { margin: 8px 0 4px; }
+.ladder-tier ol { margin: 0; padding-left: 22px; }
+.ladder-tier li { display: flex; justify-content: space-between; align-items: center; gap: 6px; border-left: 4px solid transparent; padding-left: 4px; }
+.ladder-tier li.is-up { border-left-color: var(--green); }
+.ladder-tier li.is-playoff { border-left-color: var(--yellow); }
+.ladder-tier li.is-down { border-left-color: #e63946; }
+.ladder-tier li.is-you { font-weight: 800; background: #fff8dc; }
+.ladder-tier.is-yours h4 { color: var(--navy); text-decoration: underline; }
+.news-card { max-width: 900px; margin: 0 auto 14px; }
+.news-card li { padding: 3px 0; }
+.pop-preview .club-page { display: block; width: 100%; text-align: left; max-height: 52vh; overflow-y: auto; }
+.club-page .club-head { gap: 10px; align-items: center; }
+.club-page h4 { margin: 10px 0 4px; }
+.squad-list li { padding: 2px 0; }
+.sticker-count { font-size: 14px; font-weight: 800; background: var(--navy); color: var(--white); border-radius: 999px; padding: 0 6px; margin-left: 4px; vertical-align: top; }
 .outcome-card { max-width: 900px; margin: 0 auto 14px; text-align: center; }
 .outcome-promoted, .outcome-champion { border: 3px solid var(--yellow); background: linear-gradient(160deg, #fff8dc, #fff); }
 .outcome-relegated { border: 3px solid #e63946; }

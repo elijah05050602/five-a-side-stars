@@ -2,12 +2,14 @@ import { AGE_STATS } from '../../data/ageGroups';
 import { getCareer, getTeam, saveTeam, setCareer } from '../../data/storage';
 import { POSITION_LABELS } from '../../data/types';
 import { STAR_CAP, skillKeys, skillLabel, starsText } from '../../data/skills';
-import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, signTriallist, careerAge, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, seasonName, statRows, trainStar, type GrowthEvent } from '../../game/career';
+import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, signTriallist, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
 import { recordCareer } from '../../data/progress';
 import { computeTable, nextFixture, tierInfo } from '../../game/league';
+import { clubById, seasonIndex, tierOf } from '../../game/careerWorld';
 import { esc } from '../hud';
-import { kitChip } from '../kitPreview';
-import { nextMatchHtml, playNextMatch, tableCard } from './leagueParts';
+import { badgeSvg, kitChip } from '../kitPreview';
+import { careerTableNote, nextMatchHtml, playNextMatch, tableCard } from './leagueParts';
+import { ladderHtml, openClubPage, statsHtml, teamStatsHtml, worldLookup } from './worldParts';
 import { topBar, wire, ordinal, growthList, stickerBanner } from './shared';
 import type { SkillKey, Team } from '../../data/types';
 import type { CareerState } from '../../game/career';
@@ -88,12 +90,40 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
   const lastYear = c.year === CAREER_AGES.length;
   const pending = c.pendingGrowth;
   if (pending.length) { c.pendingGrowth = []; setCareer(c); }
+  const w = c.world;
+  const po = over ? careerPlayoff(c, you) : null;
+  const poWaiting = over && playoffWaiting(c, you);
+  const rival = careerRival(c);
   const outcomeText = outcome
     ? (outcome.position === 1 ? `🥇 Champions of the ${tier.name}! ` : `You finished ${ordinal(outcome.position)} in the ${tier.name}. `)
+      + (po && poWaiting ? (po.up ? `That means a play-off against ${po.opponent.team.name} for a place in the ${tierInfo(c.league.tier - 1).name}! ` : `That means a play-off against ${po.opponent.team.name} to stay in the ${tier.name}! `) : '')
+      + (outcome.playoff === 'won' ? (po?.up ? 'You won the play-off! ' : 'You won the play-off and stay up! ') : outcome.playoff === 'lost' ? 'The play-off did not go your way. ' : '')
       + (outcome.outcome === 'promoted' ? `Up to Tier ${c.league.tier - 1} next season! ` : outcome.outcome === 'relegated' ? `Down to Tier ${c.league.tier + 1} next season, you will bounce back. ` : '')
       + (outcome.topScorer ? `Top scorer: ${outcome.topScorer.name} with ${outcome.topScorer.goals}. ` : '')
       + (lastSeason ? (lastYear ? 'That was the last season of the Under 10s: the career is complete!' : `That was the last season of the year: next up, the ${AGE_STATS[CAREER_AGES[c.year]].label}!`) : '')
     : '';
+  const si = seasonIndex(c.year, c.season);
+  const freshSeason = !c.done && c.league.round === 0 && c.history.length > 0;
+  const summer = freshSeason && c.season === 1;
+  const news = freshSeason ? w.news.filter((n) => n.at === si - 1) : [];
+  const yourIds = computeTable(c.league, you).map((row) => row.team.id);
+  const clubs = worldLookup(w, you);
+  const h2h = rival ? w.h2h[rival.team.id] : undefined;
+  const rivalNext = !!next && !!rival && (next.home.id === rival.team.id || next.away.id === rival.team.id);
+  const opponentId = next ? (next.youAreHome ? next.away.id : next.home.id) : '';
+  let tab: 'table' | 'stats' | 'tiers' = 'table';
+  let statScope: 'season' | 'career' = 'season';
+  const tabs = () => `<div class="pills table-tabs">${(['table', 'stats', 'tiers'] as const).map((t) => `<button class="pill ${t === tab ? 'is-active' : ''}" data-tab="${t}">${t === 'table' ? '📋 Table' : t === 'stats' ? '📊 Stats' : '🪜 All leagues'}</button>`).join('')}</div>`;
+  const tableArea = () => {
+    if (tab === 'table') return tableCard(table, c.league.tier, careerTableNote(c.league.tier), false, { tap: true, playoffs: true, rivalId: rival?.team.id, tabs: tabs() });
+    if (tab === 'tiers') return `<div class="card table-card">${tabs()}${ladderHtml(c, you, table.map((row) => ({ id: row.team.id, pts: row.points })))}<p class="muted small">Tap a club to see its page.</p></div>`;
+    const season = statScope === 'season';
+    return `<div class="card table-card">${tabs()}
+      <div class="pills"><button class="pill ${season ? 'is-active' : ''}" data-stat="season">This season</button><button class="pill ${season ? '' : 'is-active'}" data-stat="career">Whole career</button></div>
+      ${statsHtml(season ? c.league.tally : w.tally, season ? yourTierIds(c, you) : null, clubs, you)}
+      <h4>Teams</h4>${teamStatsHtml(yourIds, c.league.rounds, clubs, you, (id) => (id === you.id ? w.you : clubById(w, id)?.rec))}
+    </div>`;
+  };
   const sum = Object.values(c.careerStats);
   const totals = { played: Math.max(0, ...sum.map((x) => x.played)), goals: sum.reduce((n, x) => n + x.goals, 0) };
   let scope: 'season' | 'career' = 'season';
@@ -116,21 +146,29 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
         <span class="tier-num">Year ${c.year} · ${esc(AGE_STATS[age].label)}</span>
         <h2>${esc(you.name)}</h2>
         <p>${c.done ? 'Career complete! 🎓' : `${esc(seasonName(c))} season (${c.season} of ${SEASONS_PER_YEAR}) · ${esc(tier.name)} (Tier ${c.league.tier})`}</p>
+        ${rival ? `<button class="t-link rival-line" data-club="${esc(rival.team.id)}">🔥 Rival: ${badgeSvg(rival.team.badge, 18)} <strong>${esc(rival.team.name)}</strong> <span class="small">(Tier ${tierOf(w, rival.team.id)}${h2h ? ` · won ${h2h.w}, drawn ${h2h.d}, lost ${h2h.l}` : ''})</span></button>` : ''}
         <div class="tier-ladder">${CAREER_AGES.map((a, i) => `<span class="rung rung-wide ${a === age && !c.done ? 'is-here' : ''} ${i < c.year - 1 || c.done ? 'is-reached' : ''}">${a}</span>`).join('')}</div>
       </div>
       ${pending.length ? `<div class="card outcome-card"><h3>🎒 Moving up to the ${esc(AGE_STATS[age].label)}!</h3><p class="muted">Bigger pitch, longer matches and a higher star cap. Saved-up progress turns into stars:</p>${growthList(pending)}</div>` : ''}
       ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p></div>` : ''}
+      ${news.length ? `<div class="card news-card"><h3>${summer ? '☀️ Summer News' : '📰 League news'}</h3><ul class="plain-list">${news.map((n) => `<li>${n.emoji} ${esc(n.text)}</li>`).join('')}</ul>${summer && w.ladder ? `<details><summary>Last season's final tables</summary><div class="ladder">${w.ladder.map((ids, i) => `<div class="ladder-tier"><h4>Tier ${i + 1} · ${esc(tierInfo(i + 1).name)}</h4><ol>${ids.map((id) => `<li class="${id === you.id ? 'is-you' : ''}">${esc(clubs(id)?.name ?? '')}</li>`).join('')}</ol></div>`).join('')}</div></details>` : ''}</div>` : ''}
       ${choosing && !c.done ? starPicker(c, you) : ''}
       ${trial ? trialCard(c, you) : ''}
       ${star && !choosing ? starCard(c, you, justGrew) : ''}
       ${c.done ? `<div class="card trophy-card"><div class="trophy">🎓</div><h2>All grown up!</h2><p class="muted">${esc(you.name)} played ${totals.played} matches from the Under 5s to the Under 10s, scored ${totals.goals} goals and won ${c.titles} mini-season title${c.titles === 1 ? '' : 's'}. What a journey.</p></div>` : ''}
       <div class="league-body">
-        ${c.done ? '' : tableCard(table, c.league.tier, 'Top two go up a tier.')}
+        ${c.done ? '' : `<div class="table-area">${tableArea()}</div>`}
         <div class="card next-card">
-          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : trial ? '<p class="muted">Sign a new player to kick off.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play') : c.done ? '<button class="btn btn-primary btn-big" id="k-new">🌱 Start a new career</button>' : `
+          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : trial ? '<p class="muted">Sign a new player to kick off.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play', rivalNext ? '<span class="chip chip-rival">🔥 Rival match!</span>' : '') : po && poWaiting ? `
+            <span class="muted">${po.up ? '🎟️ Play-off to go up' : '🛟 Play-off to stay up'}</span>
+            <div class="fx-team is-you">${badgeSvg(you.badge, 40)}<span class="fx-name">${esc(you.name)}</span></div>
+            <div class="vs-mid">VS</div>
+            <div class="fx-team">${badgeSvg(po.opponent.team.badge, 40)}<span class="fx-name">${esc(po.opponent.team.name)}</span></div>
+            <p class="muted small">${esc(po.opponent.team.name)} finished ${po.up ? '5th in the' : '2nd in the'} ${esc(tierInfo(po.opponent.tier).name)}. One match: win it and ${po.up ? 'you go up' : 'you stay up'}! A draw goes to penalties.</p>
+            ${w.playoff && w.playoff.won === null ? '<button class="btn btn-primary btn-big" id="k-pens">🥅 Penalty shoot-out!</button>' : '<button class="btn btn-primary btn-big" id="k-playoff">⚽ Play the play-off</button>'}` : c.done ? '<button class="btn btn-primary btn-big" id="k-new">🌱 Start a new career</button>' : `
             <button class="btn btn-primary btn-big" id="k-next">${lastSeason ? (lastYear ? '🎓 Finish the career' : `🎒 Move up to ${CAREER_AGES[c.year]}`) : '▶️ Next mini season'}</button>`}
           <button class="btn btn-blue" id="k-edit">👕 Team looks</button>
-          ${c.history.length ? `<details class="history"><summary>Past seasons</summary><ul class="plain-list muted">${c.history.map((h) => `<li>${esc(h.age)} ${esc(SEASON_NAMES[(h.miniSeason - 1) % SEASONS_PER_YEAR])}: ${ordinal(h.position)} in ${esc(tierInfo(h.tier).name)}${h.topScorer ? ` · top scorer ${esc(h.topScorer.name)} (${h.topScorer.goals})` : ''}</li>`).join('')}</ul></details>` : ''}
+          ${c.history.length ? `<details class="history"><summary>Past seasons</summary><ul class="plain-list muted">${c.history.map((h) => `<li>${esc(h.age)} ${esc(SEASON_NAMES[(h.miniSeason - 1) % SEASONS_PER_YEAR])}: ${ordinal(h.position)} in ${esc(tierInfo(h.tier).name)}${h.playoff ? ` (play-off ${h.playoff})` : ''}${h.topScorer ? ` · top scorer ${esc(h.topScorer.name)} (${h.topScorer.goals})` : ''}</li>`).join('')}</ul></details>` : ''}
           <button class="btn btn-ghost" id="k-quit">Leave this career</button>
         </div>
       </div>
@@ -143,12 +181,32 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
+  const area = root.querySelector<HTMLElement>('.table-area');
+  const redrawTable = () => { if (area) area.innerHTML = tableArea(); };
+  area?.addEventListener('click', (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-tab], [data-stat]');
+    if (!el) return;
+    if (el.dataset.tab) tab = el.dataset.tab as typeof tab;
+    if (el.dataset.stat) statScope = el.dataset.stat as typeof statScope;
+    redrawTable();
+    root.querySelector<HTMLElement>(el.dataset.tab ? `[data-tab="${tab}"]` : `[data-stat="${statScope}"]`)?.focus();
+  });
+  root.querySelector('.screen')?.addEventListener('click', (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-club]');
+    if (el) openClubPage(c, you, el.dataset.club!);
+  });
+  const playoffStart = (mode: 'match' | 'shootout') => {
+    if (!po) return;
+    playNextMatch(router, { home: you, away: po.opponent.team, youAreHome: true }, { halfSeconds: mode === 'shootout' ? 60 : c.halfSeconds, career: true, cpuLevel: po.cpuLevel, starId: c.starId, big: 'playoff', mode });
+  };
+  root.querySelector('#k-playoff')?.addEventListener('click', () => playoffStart('match'));
+  root.querySelector('#k-pens')?.addEventListener('click', () => playoffStart('shootout'));
   root.querySelectorAll<HTMLElement>('[data-scope]').forEach((b) => b.addEventListener('click', () => {
     scope = b.dataset.scope as 'season' | 'career';
     root.querySelectorAll('[data-scope]').forEach((x) => x.classList.toggle('is-active', x === b));
     root.querySelector('#k-cards')!.innerHTML = cards();
   }));
-  root.querySelector('#k-play')?.addEventListener('click', () => playNextMatch(router, next!, { halfSeconds: c.halfSeconds, career: true, cpuLevel: tier.level, starId: c.starId }));
+  root.querySelector('#k-play')?.addEventListener('click', () => playNextMatch(router, next!, { halfSeconds: c.halfSeconds, career: true, cpuLevel: tier.level + careerNudge(c, opponentId), starId: c.starId, ...(rivalNext ? { big: 'rival' as const } : {}) }));
   root.querySelectorAll<HTMLElement>('[data-star]').forEach((b) => b.addEventListener('click', () => {
     if (!pickStar(c, you, b.dataset.star!)) return;
     setCareer(c);
@@ -174,7 +232,8 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     const adv = advanceCareer(c, you);
     saveTeam(you);
     setCareer(c);
-    recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0 });
+    const playoff = adv.record.playoff === 'won' ? (adv.record.outcome === 'promoted' ? 'up' : 'stayed') : null;
+    recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0, tierTitle: adv.titleTier, allTheWayUp: adv.allTheWayUp, everyYear: adv.everyYear, playoff });
     renderCareer(root, router);
   });
   root.querySelector('#k-edit')?.addEventListener('click', () => router.go({ name: 'builder', teamId: you.id }));

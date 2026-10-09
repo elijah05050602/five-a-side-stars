@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createLeague, nextFixture, type LeagueState } from '../game/league';
 import { applyResult, createTournament } from '../game/tournament';
-import { cupTrophy, leagueTrophy, levelForTier, trophyLook } from '../game/trophy';
+import { cupTrophy, leagueTrophy, levelForTier, playoffTrophy, trophyLook } from '../game/trophy';
 import { SHOWS } from '../game/ceremony';
 import type { MatchResult } from '../game/MatchScene';
 import type { Team } from '../data/types';
@@ -124,5 +124,23 @@ describe('winning the cup', () => {
     expect(s.final?.home.id).toBe('p2');
     const fin = s.final!;
     expect(cupTrophy(s, result(fin.home, fin.away, [2, 1]))).toMatchObject({ side: 0 });
+  });
+});
+
+describe('winning a play-off', () => {
+  const them = team('them', 'Them');
+
+  it('winning the play-off that takes you up lifts the trophy, in the match or its shoot-out', () => {
+    expect(playoffTrophy(3, true, null, you, result(you, them, [2, 1]))).toMatchObject({ level: 3, title: 'Play-off winners', side: 0 });
+    expect(playoffTrophy(2, true, null, you, result(them, you, [0, 1]))).toMatchObject({ level: 4, side: 1 });
+    expect(playoffTrophy(3, true, { won: null }, you, result(you, them, [5, 4], 'shootout'))).toMatchObject({ side: 0 });
+  });
+
+  it('no trophy for staying up, losing, a draw, or a play-off already settled', () => {
+    expect(playoffTrophy(3, false, null, you, result(you, them, [2, 1]))).toBeNull();
+    expect(playoffTrophy(3, true, null, you, result(you, them, [0, 1]))).toBeNull();
+    expect(playoffTrophy(3, true, null, you, result(you, them, [1, 1]))).toBeNull();
+    expect(playoffTrophy(3, true, { won: true }, you, result(you, them, [2, 1]))).toBeNull();
+    expect(playoffTrophy(3, true, { won: true }, you, result(you, them, [5, 4], 'shootout'))).toBeNull();
   });
 });

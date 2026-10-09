@@ -1,6 +1,6 @@
 import { generateOpponent } from '../data/defaults';
 import type { Team } from '../data/types';
-import { playOut, type SimJob, type SimOutcome } from './background';
+import { playOut, type SimJob, type SimLine, type SimOutcome } from './background';
 import type { MatchResult } from './MatchScene';
 
 export interface LeagueTier {
@@ -52,7 +52,56 @@ export interface LeagueState {
   round: number;
   history: SeasonRecord[];
   bestTier: number;
+  /** Everyone's goals, saves and awards this season, by player id, for the Stats tab. */
+  tally: Record<string, Tally>;
 }
+
+/** One player's numbers over a season (or a whole career), kept by player id. */
+export interface Tally {
+  /** The club they played for, by team id. */
+  club: string;
+  name: string;
+  gk: boolean;
+  /** Matches played. */
+  p: number;
+  g: number;
+  a: number;
+  sv: number;
+  /** Clean sheets (keepers). */
+  cs: number;
+  /** Player of the Match awards. */
+  motm: number;
+}
+
+/** How much a match line counts towards Player of the Match. */
+const motmScore = (l: SimLine): number => l.g * 3 + l.a * 2 + l.sv * 1.2;
+
+/**
+ * Add one match to the tallies: everyone who played gets an appearance and their goals, assists
+ * and saves, a keeper whose side let nothing in gets a clean sheet, and the best player gets
+ * Player of the Match (or `motmId`, when the match already picked one).
+ */
+export function tallyMatch(tallies: Record<string, Tally>[], home: Team, away: Team, score: [number, number], lines: Record<string, SimLine>, motmId?: string | null): void {
+  let best: string | null = motmId ?? null, bs = 0;
+  ([[0, home], [1, away]] as const).forEach(([side, team]) => {
+    for (const p of team.players) {
+      const l = lines[p.id];
+      if (!l) continue;
+      for (const t of tallies) {
+        const row = t[p.id] ??= { club: team.id, name: p.name, gk: p.position === 'GK', p: 0, g: 0, a: 0, sv: 0, cs: 0, motm: 0 };
+        row.club = team.id; row.name = p.name; row.gk = p.position === 'GK';
+        row.p++; row.g += l.g; row.a += l.a; row.sv += l.sv;
+        if (p.position === 'GK' && score[1 - side] === 0) row.cs++;
+      }
+      if (motmId === undefined && motmScore(l) > bs) { bs = motmScore(l); best = p.id; }
+    }
+  });
+  if (best) for (const t of tallies) if (t[best]) t[best].motm++;
+}
+
+/** A finished match's player stats in the background matches' shape. */
+export const resultLines = (r: MatchResult): Record<string, SimLine> =>
+  Object.fromEntries(Object.entries(r.players ?? {}).map(([id, m]) => [id, { g: m.goals, a: m.assists, sv: m.saves }]));
 
 export interface TableRow {
   team: Team;
@@ -67,7 +116,7 @@ export interface TableRow {
 }
 
 /** Round robin for an even number of teams (circle method). */
-function roundRobin(ids: string[]): LeagueFixture[][] {
+export function roundRobin(ids: string[]): LeagueFixture[][] {
   const n = ids.length;
   const list = [...ids];
   const rounds: LeagueFixture[][] = [];
@@ -84,9 +133,9 @@ function roundRobin(ids: string[]): LeagueFixture[][] {
   return rounds;
 }
 
-/** A brand-new league career (or a fresh season when `previous` is given). */
-export function createLeague(human: Team, halfSeconds: number, tier = 5, previous?: LeagueState): LeagueState {
-  const teams: Team[] = [];
+/** A brand-new league career (or a fresh season when `previous` is given). Pass `opponents` to play set teams (the career's clubs) instead of new ones. */
+export function createLeague(human: Team, halfSeconds: number, tier = 5, previous?: LeagueState, opponents?: Team[]): LeagueState {
+  const teams: Team[] = opponents ? [...opponents] : [];
   while (teams.length < TEAMS_PER_LEAGUE - 1) {
     const t = generateOpponent(human.ageGroup, human.kit);
     if (t.name !== human.name && !teams.some((o) => o.name === t.name)) teams.push(t);
@@ -104,6 +153,7 @@ export function createLeague(human: Team, halfSeconds: number, tier = 5, previou
     round: 0,
     history: previous ? previous.history : [],
     bestTier: Math.min(tier, previous?.bestTier ?? 5),
+    tally: {},
   };
 }
 
@@ -132,16 +182,22 @@ export function roundJobs(s: LeagueState, human: Team): (SimJob | null)[] {
  * Record the player's finished match, fill in the rest of the round and move the league on.
  * `others` are the round's other results already played in the background (see roundJobs);
  * any that are missing are played here. The result's home side is whoever the player was at
- * home or away against, so scores are turned round when the player was away.
+ * home or away against, so scores are turned round when the player was away. Everyone's stats
+ * go into the season's tally and any `extra` tallies (the career's), with `motmId` as the player's
+ * match's Player of the Match.
  */
-export function applyLeagueResult(s: LeagueState, human: Team, r: MatchResult, others?: (SimOutcome | null)[]): void {
+export function applyLeagueResult(s: LeagueState, human: Team, r: MatchResult, others?: (SimOutcome | null)[], extra: Record<string, Tally>[] = [], motmId?: string | null): void {
   const nf = nextFixture(s, human);
   if (!nf || nf.fixture.score) return;
   nf.fixture.score = r.home.id === nf.fixture.homeId ? [...r.score] as [number, number] : [r.score[1], r.score[0]];
+  const tallies = [s.tally ??= {}, ...extra];
+  tallyMatch(tallies, r.home, r.away, r.score, resultLines(r), motmId);
   const jobs = roundJobs(s, human);
   s.rounds[s.round].forEach((f, i) => {
     if (f.score) return;
-    f.score = others?.[i]?.score ?? playOut(jobs[i]!).score;
+    const o = others?.[i] ?? playOut(jobs[i]!);
+    f.score = o.score;
+    if (o.players) tallyMatch(tallies, leagueTeam(s, human, f.homeId), leagueTeam(s, human, f.awayId), o.score, o.players);
   });
   s.round++;
 }
