@@ -36,6 +36,8 @@ export interface StartOptions {
   /** Career match: the Star's player id, marked with a gold star on the pitch. */
   starId?: string;
   cpuLevel?: number;
+  /** A big career match: your rival (a cup-sized crowd) or a play-off (a final-sized one), recorded as the play-off. */
+  big?: 'rival' | 'playoff';
   /** Weather and time of day for the match; 'random' or missing picks for you. */
   weather?: WeatherChoice;
 }

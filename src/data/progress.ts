@@ -16,10 +16,12 @@ export interface Progress {
   trainingBest: number;
   agesPlayed: AgeGroup[];
   stickers: string[];
+  /** How many times a sticker that can be won again (a tier title) has been won, by sticker id. */
+  counts: Record<string, number>;
 }
 
 export function freshProgress(): Progress {
-  return { played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0, trophies: 0, shootoutsWon: 0, trainingBest: 0, agesPlayed: [], stickers: [] };
+  return { played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0, trophies: 0, shootoutsWon: 0, trainingBest: 0, agesPlayed: [], stickers: [], counts: {} };
 }
 
 export interface Sticker {
@@ -56,7 +58,21 @@ export const STICKERS: Sticker[] = [
   { id: 'career-done', emoji: '🎓', name: 'All Grown Up', how: 'Finish the Under 10s year of a career.', unlocks: '🎓' },
   { id: 'star-moment', emoji: '🌟', name: 'Star Moment', how: 'Your career Star reaches a milestone.' },
   { id: 'star-legend', emoji: '🌠', name: 'Legend in the Making', how: 'Your career Star reaches eight milestones.', unlocks: '🌠' },
+  { id: 'tier5-champ', emoji: '🌰', name: 'Acorn Champions', how: 'Win the Acorn League (Tier 5) in a career.' },
+  { id: 'tier4-champ', emoji: '💧', name: 'Puddle Champions', how: 'Win the Puddle League (Tier 4) in a career.' },
+  { id: 'tier3-champ', emoji: '⛈️', name: 'Thunder Champions', how: 'Win the Thunder League (Tier 3) in a career.' },
+  { id: 'tier2-champ', emoji: '⚡', name: 'Lightning Champions', how: 'Win the Lightning League (Tier 2) in a career.' },
+  { id: 'tier1-champ', emoji: '👑', name: 'Star Premier Champions', how: 'Win the Star Premier League (Tier 1) in a career.', unlocks: '👑' },
+  { id: 'all-the-way-up', emoji: '🪜', name: 'All the Way Up', how: 'Win all five tiers in one career.', unlocks: '🪜' },
+  { id: 'every-year', emoji: '📆', name: 'Champions Every Year', how: 'Win a title at every age from the Under 5s to the Under 10s in one career.' },
+  { id: 'rival-beaten', emoji: '🔥', name: 'Rival Beaten', how: 'Beat your career rival.', unlocks: '🔥' },
+  { id: 'rival-master', emoji: '☄️', name: 'Rival Master', how: 'Beat your career rival five times.' },
+  { id: 'playoff-hero', emoji: '🎟️', name: 'Play-off Hero', how: 'Win a career play-off to go up.' },
+  { id: 'great-escape', emoji: '🛟', name: 'Great Escape', how: 'Win a career play-off to stay up.' },
 ];
+
+/** Stickers that can be won again, with a count on them in the album. */
+export const COUNTED_STICKERS = ['tier5-champ', 'tier4-champ', 'tier3-champ', 'tier2-champ', 'tier1-champ', 'rival-beaten', 'playoff-hero', 'great-escape'];
 
 export function getProgress(): Progress {
   const save = loadSave();
@@ -81,6 +97,7 @@ export function lockedIcons(): { icon: string; sticker: Sticker }[] {
 }
 
 function award(p: Progress, id: string, out: Sticker[]): void {
+  if (COUNTED_STICKERS.includes(id)) { p.counts ??= {}; p.counts[id] = (p.counts[id] ?? 0) + 1; }
   if (p.stickers.includes(id)) return;
   const st = STICKERS.find((s) => s.id === id);
   if (!st) return;
@@ -151,6 +168,13 @@ export interface CareerMilestones {
   finished?: boolean;
   /** How many milestones the career's Star has reached, when one was just reached. */
   starMilestones?: number;
+  /** The tier (1 to 5) whose title was just won. */
+  tierTitle?: number | null;
+  allTheWayUp?: boolean;
+  everyYear?: boolean;
+  /** A win over the rival, and how many there have been. */
+  rivalWins?: number;
+  playoff?: 'up' | 'stayed' | null;
 }
 
 export function recordCareer(m: CareerMilestones): Sticker[] {
@@ -166,6 +190,13 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.finished) award(p, 'career-done', out);
   if (m.starMilestones && m.starMilestones >= 1) award(p, 'star-moment', out);
   if (m.starMilestones && m.starMilestones >= 8) award(p, 'star-legend', out);
+  if (m.tierTitle) award(p, `tier${m.tierTitle}-champ`, out);
+  if (m.allTheWayUp) award(p, 'all-the-way-up', out);
+  if (m.everyYear) award(p, 'every-year', out);
+  if (m.rivalWins) award(p, 'rival-beaten', out);
+  if (m.rivalWins && m.rivalWins >= 5) award(p, 'rival-master', out);
+  if (m.playoff === 'up') award(p, 'playoff-hero', out);
+  if (m.playoff === 'stayed') award(p, 'great-escape', out);
   persist();
   return out;
 }

@@ -1,10 +1,11 @@
 import { AGE_GROUPS, SKILL_KEYS, type AgeGroup, type Player, type Position, type SkillKey, type Skills, type Team } from '../data/types';
 import { STAR_CAP, randomSkills, skillKeys, skillLabel } from '../data/skills';
 import { FIRST_NAMES, makePlayer, pick, startingFive, uid } from '../data/defaults';
-import { applyLeagueResult, createLeague, seasonOutcome, seasonOver, type LeagueState, type SeasonRecord } from './league';
+import { applyLeagueResult, computeTable, createLeague, resultLines, seasonOver, tallyMatch, type LeagueState, type SeasonRecord } from './league';
 import type { MatchResult } from './MatchScene';
 import { freshMatchStats, type PlayerMatchStats } from './sim';
 import type { SimOutcome } from './background';
+import { TIER_COUNT, activeIds, ageUpWorld, allTables, buildWorld, checkRival, clubById, endSeasons, opponentNudge, playOtherTiers, playoffFor, recordFixture, seasonIndex, startSeasons, tierOf, type CareerWorld, type WorldClub } from './careerWorld';
 
 /**
  * Career mode: one team starts in the Under 5s and plays a year in each age
@@ -31,6 +32,8 @@ export interface CareerSeasonRecord extends SeasonRecord {
   miniSeason: number;
   age: AgeGroup;
   topScorer: { name: string; goals: number } | null;
+  /** The play-off this season, if you were in one. */
+  playoff?: 'won' | 'lost' | null;
 }
 
 export interface CareerState {
@@ -60,6 +63,8 @@ export interface CareerState {
   milestones: string[];
   /** After moving up an age group: who moved on, and the youngsters on trial. Null the rest of the time. */
   trialDay: TrialDay | null;
+  /** The 30 clubs you play against all career, the tiers, your rival and everyone's stats. */
+  world: CareerWorld;
 }
 
 /** Squad changes when the team moves up an age group: someone moves on, and the player signs one of three triallists. */
@@ -141,13 +146,32 @@ export function createCareer(source: Team, halfSeconds: number, star?: Player): 
     const own = source.players.findIndex((p) => p.id === star.id);
     starId = own >= 0 ? team.players[own].id : joinSquad(team, star).id;
   }
-  const league = createLeague(team, halfSeconds, 5);
+  const world = buildWorld(team, TIER_COUNT);
+  const league = createLeague(team, halfSeconds, TIER_COUNT, undefined, startSeasons(world, team.id, 1));
   const career: CareerState = {
     teamId: team.id, year: 1, season: 1, league, halfSeconds,
     seasonStats: {}, careerStats: {}, history: [], titles: 0, done: false, pendingGrowth: [],
-    starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null,
+    starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null, world,
   };
   return { career, team };
+}
+
+/**
+ * A world for a career saved before there was one: the clubs it is playing now stay in its tier
+ * (one more joins them and rests this mini season), and the other tiers catch up to the same round.
+ */
+export function worldForOldCareer(c: Pick<CareerState, 'league' | 'year' | 'season'>, team: Team): CareerWorld {
+  const keep = c.league.teams;
+  const world = buildWorld(team, c.league.tier, keep);
+  startSeasons(world, team.id, seasonIndex(c.year, c.season));
+  const yours = world.tiers[c.league.tier - 1];
+  const extra = yours.members.find((id) => id !== team.id && !keep.some((t) => t.id === id)) ?? null;
+  if (yours.members.length > 6) yours.resting = extra;
+  for (let i = 0; i < c.league.round; i++) {
+    for (const f of c.league.rounds[i] ?? []) if (f.score) recordFixture(world, team.id, f.homeId, f.awayId, f.score);
+    playOtherTiers(world, team.id, i);
+  }
+  return world;
 }
 
 /**
@@ -232,6 +256,8 @@ export function playerOfTheMatch(r: MatchResult): Player | null {
 }
 
 export interface CareerMatchSummary {
+  /** You beat your rival in this match. */
+  rivalWin?: boolean;
   growth: GrowthEvent[];
   motm: Player | null;
   /** First time a player reached five stars this match. */
@@ -328,17 +354,17 @@ function newMilestones(c: CareerState, star: Player, s: PlayerSeasonStats, m: Pl
   return STAR_MILESTONES.filter((ms) => reached[ms.id] && !c.milestones.includes(ms.id));
 }
 
-/**
- * Record the career team's finished match: league table, season and career
- * stats, and growth for everyone who played. Mutates both the career and the
- * team; the caller saves them.
- */
-export function applyCareerMatch(c: CareerState, team: Team, r: MatchResult, others?: (SimOutcome | null)[]): CareerMatchSummary {
+/** Who you played in a finished match, and the score your way round. */
+function yourSide(team: Team, r: MatchResult): { gf: number; ga: number; opponent: Team } {
   const youHome = r.home.id === team.id;
   const [gf, ga] = youHome ? r.score : [r.score[1], r.score[0]];
+  return { gf, ga, opponent: youHome ? r.away : r.home };
+}
+
+/** Season and career stats, growth for everyone who played, and the Star's training points. */
+function recordPlayers(c: CareerState, team: Team, r: MatchResult, motm: Player | null): CareerMatchSummary {
+  const { gf, ga } = yourSide(team, r);
   const won = gf > ga, drawn = gf === ga, cleanSheet = ga === 0;
-  applyLeagueResult(c.league, team, r, others);
-  const motm = playerOfTheMatch(r);
   const growth: GrowthEvent[] = [];
   let fiveStar = false;
   const age = careerAge(c);
@@ -368,21 +394,102 @@ export function applyCareerMatch(c: CareerState, team: Team, r: MatchResult, oth
   return { growth, motm, fiveStar, points, milestones };
 }
 
+/** Count a win over your rival. */
+function rivalCheck(c: CareerState, team: Team, r: MatchResult): boolean {
+  const { gf, ga, opponent } = yourSide(team, r);
+  if (opponent.id !== c.world.rivalId || gf <= ga) return false;
+  c.world.rivalWins++;
+  return true;
+}
+
+/**
+ * Record the career team's finished match: league table, every tier's round, the stats pages,
+ * season and career stats, and growth for everyone who played. Mutates both the career and the
+ * team; the caller saves them.
+ */
+export function applyCareerMatch(c: CareerState, team: Team, r: MatchResult, others?: (SimOutcome | null)[]): CareerMatchSummary {
+  const motm = playerOfTheMatch(r);
+  const index = c.league.round;
+  applyLeagueResult(c.league, team, r, others, [c.world.tally], motm?.id ?? null);
+  if (c.league.round > index) {
+    for (const f of c.league.rounds[index]) if (f.score) recordFixture(c.world, team.id, f.homeId, f.awayId, f.score);
+    playOtherTiers(c.world, team.id, index);
+  }
+  const rivalWin = rivalCheck(c, team, r);
+  return { ...recordPlayers(c, team, r, motm), rivalWin };
+}
+
+/** Your play-off, when the mini season is over and you finished 2nd (playing to go up) or 5th (playing to stay up). */
+export function careerPlayoff(c: CareerState, team: Team): { opponent: WorldClub; up: boolean; cpuLevel: number } | null {
+  if (!seasonOver(c.league) || c.done) return null;
+  const table = computeTable(c.league, team);
+  const pos = table.findIndex((row) => row.isYou) + 1;
+  return playoffFor(c.world, c.league.tier, pos, allTables(c.world, team.id, table.map((row) => row.team.id), team.name));
+}
+
+/** The play-off still to be played (or its shoot-out), or null when there is none or it is done. */
+export const playoffWaiting = (c: CareerState, team: Team): boolean => !!careerPlayoff(c, team) && (c.world.playoff?.won ?? null) === null;
+
+/**
+ * Record a play-off match or its shoot-out. A draw waits for the shoot-out (`won` stays null).
+ * The match counts for stats and growth like any other; the shoot-out only settles it.
+ */
+export function applyPlayoffMatch(c: CareerState, team: Team, r: MatchResult): CareerMatchSummary | null {
+  const po = careerPlayoff(c, team);
+  if (!po) return null;
+  const { gf, ga } = yourSide(team, r);
+  if (r.mode === 'shootout') {
+    const p = c.world.playoff;
+    if (!p || p.won !== null) return null;
+    p.pens = [gf, ga];
+    p.won = gf > ga;
+    return null;
+  }
+  if (c.world.playoff) return null;
+  const motm = playerOfTheMatch(r);
+  c.world.playoff = { opponentId: po.opponent.team.id, up: po.up, score: [gf, ga], pens: null, won: gf === ga ? null : gf > ga };
+  recordFixture(c.world, team.id, r.home.id, r.away.id, r.score);
+  tallyMatch([c.world.tally], r.home, r.away, r.score, resultLines(r), motm?.id ?? null);
+  const rivalWin = rivalCheck(c, team, r);
+  return { ...recordPlayers(c, team, r, motm), rivalWin };
+}
+
 export const careerSeasonOver = (c: CareerState): boolean => seasonOver(c.league);
 
 /** This mini season's result for the career team, once all five matches are played. */
 export function careerSeasonOutcome(c: CareerState, team: Team): CareerSeasonRecord {
-  const rec = seasonOutcome(c.league, team);
+  const position = computeTable(c.league, team).findIndex((row) => row.isYou) + 1;
+  const tier = c.league.tier;
+  const po = c.world.playoff?.won;
+  // Champions go up and the bottom club goes down; 2nd and 5th go through a play-off.
+  let outcome: SeasonRecord['outcome'] = 'stayed';
+  let playoff: CareerSeasonRecord['playoff'] = null;
+  if (position === 1) outcome = tier === 1 ? 'champion' : 'promoted';
+  else if (position === TEAMS_PER_TABLE && tier < TIER_COUNT) outcome = 'relegated';
+  else if (careerPlayoff(c, team)) {
+    playoff = po === true ? 'won' : po === false ? 'lost' : null;
+    if (position === 2 && po === true) outcome = 'promoted';
+    if (position === 5 && po === false) outcome = 'relegated';
+  }
+  const rec: SeasonRecord = { season: c.league.season, tier, position, outcome };
   let top: CareerSeasonRecord['topScorer'] = null;
   for (const p of team.players) {
     const g = c.seasonStats[p.id]?.goals ?? 0;
     if (g > 0 && (!top || g > top.goals)) top = { name: p.name, goals: g };
   }
-  return { ...rec, year: c.year, miniSeason: c.season, age: careerAge(c), topScorer: top };
+  return { ...rec, year: c.year, miniSeason: c.season, age: careerAge(c), topScorer: top, playoff };
 }
+
+const TEAMS_PER_TABLE = 6;
 
 export interface SeasonAdvance {
   record: CareerSeasonRecord;
+  /** The tier you won this mini season (1 to 5), if you won it. */
+  titleTier: number | null;
+  /** You won a title in every age group, from the Under 5s to now. */
+  everyYear: boolean;
+  /** You have won all five tiers in this career. */
+  allTheWayUp: boolean;
   /** The team moved up an age group. */
   movedUp: boolean;
   /** The whole career (Under 10s, season 4) is finished. */
@@ -397,10 +504,19 @@ export interface SeasonAdvance {
 export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
   const record = careerSeasonOutcome(c, team);
   c.history.push(record);
-  if (record.position === 1) c.titles++;
-  const tier = record.outcome === 'promoted' ? c.league.tier - 1 : record.outcome === 'relegated' ? c.league.tier + 1 : c.league.tier;
+  const w = c.world;
+  const si = seasonIndex(c.year, c.season);
+  const titleTier = record.position === 1 ? c.league.tier : null;
+  if (titleTier) {
+    c.titles++;
+    if (!w.titleAges.includes(careerAge(c))) w.titleAges.push(careerAge(c));
+  }
+  const end = endSeasons(w, team.id, team.name, computeTable(c.league, team).map((row) => row.team.id), si);
+  const tier = end.tier;
   let movedUp = false, finished = false;
-  if (c.season >= SEASONS_PER_YEAR) {
+  const yearEnd = c.season >= SEASONS_PER_YEAR;
+  checkRival(w, team.id, si, yearEnd);
+  if (yearEnd) {
     if (c.year >= CAREER_YEARS) {
       finished = true;
       c.done = true;
@@ -409,6 +525,7 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
       c.season = 1;
       team.ageGroup = careerAge(c);
       movedUp = true;
+      ageUpWorld(w, team.ageGroup, si);
       // Someone moves on first, so the growth spurt below is only for the players who stay.
       c.trialDay = startTrialDay(c, team);
       // Banked progress turns into stars now that the cap has risen.
@@ -419,12 +536,22 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
   }
   c.seasonStats = {};
   if (!finished) {
-    const league = createLeague(team, c.halfSeconds, tier, c.league);
+    const league = createLeague(team, c.halfSeconds, tier, c.league, startSeasons(w, team.id, seasonIndex(c.year, c.season)));
     league.history = [...c.league.history, record];
     c.league = league;
   }
-  return { record, movedUp, finished };
+  const everyYear = !!titleTier && CAREER_AGES.every((a) => w.titleAges.includes(a));
+  return { record, movedUp, finished, titleTier, everyYear, allTheWayUp: w.tierTitles.every((n) => n > 0) };
 }
+
+/** Your rival club, if there is one. */
+export const careerRival = (c: CareerState): WorldClub | undefined => clubById(c.world, c.world.rivalId);
+
+/** How much stronger (or weaker) a club plays you than its tier's usual level. */
+export const careerNudge = (c: CareerState, clubId: string): number => opponentNudge(c.world, clubId);
+
+/** The clubs in your tier this mini season, resting one included, for the Stats tab. */
+export const yourTierIds = (c: CareerState, team: Team): string[] => activeIds(c.world.tiers[tierOf(c.world, team.id) - 1]);
 
 /**
  * Who moves on when the team moves up: whoever has played least (never the Star, never

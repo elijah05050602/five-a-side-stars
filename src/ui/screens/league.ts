@@ -4,6 +4,7 @@ import { TIERS, computeTable, nextFixture, nextSeason, seasonOutcome, seasonOver
 import { esc } from '../hud';
 import { wireLogoControls } from '../logoUpload';
 import { nextMatchHtml, playNextMatch, tableCard } from './leagueParts';
+import { leagueLookup, openLeagueTeamPage, statsHtml, teamStatsHtml } from './worldParts';
 import { topBar, wire, ordinal, stickerBanner } from './shared';
 import type { Router } from '../screens';
 import { askConfirm } from '../dialog';
@@ -28,6 +29,12 @@ export function renderLeague(root: HTMLElement, router: Router): void {
         : outcome.outcome === 'relegated' ? `⬇️ You finished ${ordinal(outcome.position)}: down to Tier ${ls.tier + 1}, the ${tierInfo(ls.tier + 1).name}. You will bounce back!`
           : outcome.position === 1 ? `🥇 You won the ${info.name}! Already at the top, so one more season to defend it.` : `You finished ${ordinal(outcome.position)}: staying in the ${info.name} for another season.`
     : '';
+  let tab: 'table' | 'stats' = 'table';
+  const tabs = () => `<div class="pills table-tabs"><button class="pill ${tab === 'table' ? 'is-active' : ''}" data-tab="table">📋 Table</button><button class="pill ${tab === 'stats' ? 'is-active' : ''}" data-tab="stats">📊 Stats</button></div>`;
+  const ids = table.map((row) => row.team.id);
+  const tableArea = () => (tab === 'table'
+    ? tableCard(table, ls.tier, 'Top two go up.', true, { tap: true, tabs: tabs() })
+    : `<div class="card table-card">${tabs()}${statsHtml(ls.tally ?? {}, ids, leagueLookup(ls, you), you)}<h4>Teams</h4>${teamStatsHtml(ids, ls.rounds, leagueLookup(ls, you), you)}</div>`);
   root.innerHTML = `
     <div class="screen league">
       ${topBar('League', 'league')}
@@ -39,7 +46,7 @@ export function renderLeague(root: HTMLElement, router: Router): void {
       </div>
       ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p>${stickerBanner(stickers)}</div>` : ''}
       <div class="league-body">
-        ${tableCard(table, ls.tier, 'Top two go up.', true)}
+        <div class="table-area">${tableArea()}</div>
         <div class="card next-card">
           ${next ? nextMatchHtml(next, `Round ${ls.round + 1} of ${ls.rounds.length}`, 'l-play') : `
             <button class="btn btn-primary btn-big" id="l-next">${outcome?.outcome === 'promoted' ? '⬆️ Start next season' : outcome?.outcome === 'relegated' ? '🔁 Start next season' : '▶️ Start next season'}</button>`}
@@ -49,7 +56,16 @@ export function renderLeague(root: HTMLElement, router: Router): void {
       </div>
     </div>`;
   wire(root, () => router.go({ name: 'menu' }));
-  wireLogoControls(root, (key) => ls.teams.find((t) => t.id === key)?.badge, () => { setLeague(ls); renderLeague(root, router); });
+  const area = root.querySelector<HTMLElement>('.table-area')!;
+  area.addEventListener('click', (e) => {
+    const el = e.target as HTMLElement;
+    const t = el.closest<HTMLElement>('[data-tab]');
+    if (t) { tab = t.dataset.tab as typeof tab; area.innerHTML = tableArea(); wireLogos(); area.querySelector<HTMLElement>(`[data-tab="${tab}"]`)?.focus(); return; }
+    const club = el.closest<HTMLElement>('[data-club]');
+    if (club) openLeagueTeamPage(ls, you, club.dataset.club!);
+  });
+  const wireLogos = () => wireLogoControls(area, (key) => ls.teams.find((t) => t.id === key)?.badge, () => { setLeague(ls); renderLeague(root, router); });
+  wireLogos();
   root.querySelector('#l-play')?.addEventListener('click', () => playNextMatch(router, next!, { halfSeconds: ls.halfSeconds, league: true, cpuLevel: info.level }));
   root.querySelector('#l-next')?.addEventListener('click', () => { setLeague(nextSeason(ls, you)); renderLeague(root, router); });
   root.querySelector('#l-quit')?.addEventListener('click', async () => {

@@ -20,7 +20,7 @@ export function renderAlbum(root: HTMLElement, router: Router): void {
         ${STICKERS.map((s) => {
           const got = p.stickers.includes(s.id);
           return `<div class="sticker ${got ? 'is-got' : 'is-missing'}${got && s.unlocks ? ' is-shiny' : ''}">
-            <span class="sticker-emoji">${got ? s.emoji : '❔'}</span>
+            <span class="sticker-emoji">${got ? s.emoji : '❔'}${got && (p.counts?.[s.id] ?? 0) > 1 ? `<span class="sticker-count">×${p.counts[s.id]}</span>` : ''}</span>
             <strong>${esc(s.name)}</strong>
             <small>${esc(s.how)}</small>
             ${s.unlocks ? `<span class="sticker-unlock">${got ? 'Unlocked badge' : 'Unlocks badge'} ${s.unlocks}</span>` : ''}

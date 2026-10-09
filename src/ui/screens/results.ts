@@ -1,5 +1,5 @@
 import { getCareer, getLeague, getTeam, saveTeam, setCareer, setLeague, setTournament } from '../../data/storage';
-import { applyCareerMatch, careerAge, careerStar, playerOfTheMatch, seasonName, type GrowthEvent, type StarMilestone } from '../../game/career';
+import { applyCareerMatch, applyPlayoffMatch, careerAge, careerStar, playerOfTheMatch, seasonName, type CareerMatchSummary, type GrowthEvent, type StarMilestone } from '../../game/career';
 import type { MatchResult } from '../../game/MatchScene';
 import { getProgress, recordCareer, type Sticker } from '../../data/progress';
 import { applyLeagueResult, roundJobs, tierInfo, yourPosition } from '../../game/league';
@@ -23,6 +23,8 @@ export interface ResultSummary {
   growth?: GrowthEvent[];
   /** What the career's Star earned in this match. */
   star?: { name: string; points: number; milestones: StarMilestone[] };
+  /** A drawn play-off: the shoot-out to play next. */
+  shootout?: StartOptions;
 }
 
 /** Computer matches played in the background during the player's own (see playAhead). */
@@ -60,17 +62,24 @@ export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[]
     const c = getCareer();
     const you = c && getTeam(c.teamId);
     if (c && you && !c.done) {
+      const playoff = o.big === 'playoff';
       const others = ahead.round?.index === c.league.round ? ahead.round.outcomes : undefined;
-      const s = applyCareerMatch(c, you, r, others);
+      const s: CareerMatchSummary | null = playoff ? applyPlayoffMatch(c, you, r) : applyCareerMatch(c, you, r, others);
       saveTeam(you);
       setCareer(c);
-      const motm3 = Object.values(c.careerStats).some((st) => st.motm >= 3);
-      const boot = Object.values(c.seasonStats).some((st) => st.goals >= 8);
-      summary.stickers.push(...recordCareer({ starUp: s.growth.length > 0, fiveStar: s.fiveStar, motm3, goldenBoot: boot, starMilestones: s.milestones.length ? c.milestones.length : 0 }));
-      summary.tableNote = `${careerAge(c)} · ${seasonName(c)} season · match ${Math.min(c.league.round, c.league.rounds.length)} of ${c.league.rounds.length} · you are ${ordinal(yourPosition(c.league, you))}`;
-      summary.growth = s.growth;
-      const star = careerStar(c, you);
-      if (star && s.points > 0) summary.star = { name: star.name, points: s.points, milestones: s.milestones };
+      if (s) {
+        const motm3 = Object.values(c.careerStats).some((st) => st.motm >= 3);
+        const boot = Object.values(c.seasonStats).some((st) => st.goals >= 8);
+        summary.stickers.push(...recordCareer({ starUp: s.growth.length > 0, fiveStar: s.fiveStar, motm3, goldenBoot: boot, starMilestones: s.milestones.length ? c.milestones.length : 0, rivalWins: s.rivalWin ? c.world.rivalWins : 0 }));
+        summary.growth = s.growth;
+        const star = careerStar(c, you);
+        if (star && s.points > 0) summary.star = { name: star.name, points: s.points, milestones: s.milestones };
+      }
+      const po = c.world.playoff;
+      if (playoff && po) {
+        summary.tableNote = po.won === null ? 'All square in the play-off! Penalties decide it.' : po.won ? (po.up ? '🎟️ Play-off won: you are going up!' : '🛟 Play-off won: you are staying up!') : (po.up ? 'Play-off lost. Next season you go again!' : 'Play-off lost: down a tier next season. You will bounce back!');
+        if (po.won === null && r.mode === 'match') summary.shootout = { ...o, mode: 'shootout', halfSeconds: 60 };
+      } else summary.tableNote = `${careerAge(c)} · ${seasonName(c)} season · match ${Math.min(c.league.round, c.league.rounds.length)} of ${c.league.rounds.length} · you are ${ordinal(yourPosition(c.league, you))}`;
     }
   }
   if (o.league) {
@@ -124,7 +133,7 @@ export function renderResults(root: HTMLElement, router: Router, r: MatchResult,
         ${growthNote}
         ${stickerBanner(stickers)}
         <div class="row">
-          ${tournament ? `<button class="btn btn-primary btn-big" id="r-cup">${tournament.needsShootout ? '🥅 Penalty shoot-out!' : '🏆 Back to the cup'}</button>` : league ? '<button class="btn btn-primary btn-big" id="r-league">📋 Back to the league</button>' : career ? '<button class="btn btn-primary btn-big" id="r-career">🌱 Back to the career</button>' : `<button class="btn btn-primary btn-big" id="r-again">Play again</button>`}
+          ${summary.shootout ? '<button class="btn btn-primary btn-big" id="r-pens">🥅 Penalty shoot-out!</button>' : tournament ? `<button class="btn btn-primary btn-big" id="r-cup">${tournament.needsShootout ? '🥅 Penalty shoot-out!' : '🏆 Back to the cup'}</button>` : league ? '<button class="btn btn-primary btn-big" id="r-league">📋 Back to the league</button>' : career ? '<button class="btn btn-primary btn-big" id="r-career">🌱 Back to the career</button>' : `<button class="btn btn-primary btn-big" id="r-again">Play again</button>`}
           <button class="btn btn-ghost btn-big" id="r-menu">Main menu</button>
         </div>
       </div>
@@ -137,6 +146,7 @@ export function renderResults(root: HTMLElement, router: Router, r: MatchResult,
       router.startMatch({ home: f.home, away: f.away, difficulty: tournament!.difficulty, halfSeconds: 60, twoPlayer: tournament!.twoPlayer, mode: 'shootout', tournament });
     } else router.go({ name: 'tournament', state: tournament! });
   });
+  root.querySelector('#r-pens')?.addEventListener('click', () => router.startMatch(summary.shootout!));
   root.querySelector('#r-league')?.addEventListener('click', () => router.go({ name: 'league' }));
   root.querySelector('#r-career')?.addEventListener('click', () => router.go({ name: 'career' }));
   root.querySelector('#r-menu')!.addEventListener('click', () => router.go({ name: 'menu' }));

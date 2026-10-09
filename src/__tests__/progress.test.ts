@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getProgress, recordResult, recordSeason, recordTrophy } from '../data/progress';
+import { getProgress, recordCareer, recordResult, recordSeason, recordTrophy } from '../data/progress';
 import { resetAll } from '../data/storage';
 import type { GoalEvent } from '../game/sim';
 import type { MatchResult } from '../game/MatchScene';
@@ -58,5 +58,14 @@ describe('progress and stickers', () => {
     expect(recordTrophy().map((s) => s.id)).toEqual(['trophy']);
     expect(recordTrophy()).toEqual([]);
     expect(getProgress().trophies).toBe(2);
+  });
+
+  it('gives a tier champions badge once and counts every time it is won again', () => {
+    resetAll();
+    expect(recordCareer({ tierTitle: 5 }).map((s) => s.id)).toEqual(['tier5-champ']);
+    expect(recordCareer({ tierTitle: 5 })).toEqual([]);
+    expect(recordCareer({ tierTitle: 4, allTheWayUp: false, playoff: 'up', rivalWins: 1 }).map((s) => s.id)).toEqual(['tier4-champ', 'rival-beaten', 'playoff-hero']);
+    expect(recordCareer({ rivalWins: 5 }).map((s) => s.id)).toEqual(['rival-master']);
+    expect(getProgress().counts).toMatchObject({ 'tier5-champ': 2, 'tier4-champ': 1, 'rival-beaten': 2, 'playoff-hero': 1 });
   });
 });
