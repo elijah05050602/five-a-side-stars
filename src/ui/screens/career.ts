@@ -3,7 +3,7 @@ import { getCareer, getHall, getTeam, retireCareer, saveTeam, setCareer } from '
 import { scrapbookHtml } from './hallOfFame';
 import { POSITION_LABELS } from '../../data/types';
 import { STAR_CAP, skillKeys, skillLabel, starsText } from '../../data/skills';
-import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, signTriallist, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
+import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, joinClub, signTriallist, stayAtClub, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
 import { recordCareer } from '../../data/progress';
 import { computeTable, nextFixture, tierInfo } from '../../game/league';
 import { clubById, seasonIndex, tierOf } from '../../game/careerWorld';
@@ -46,6 +46,26 @@ function trialCard(c: CareerState, you: Team): string {
   </div>`;
 }
 
+/** Transfer offers after moving up an age group: join one of the clubs, or stay and be captain. */
+function offersCard(c: CareerState, you: Team): string {
+  const star = careerStar(c, you)!;
+  const w = c.world;
+  return `<div class="card star-pick offers-card">
+    <h3>✈️ Transfer window!</h3>
+    <p>Other clubs have seen what <strong>${esc(star.name)}</strong> can do. ${esc(star.name)} can join one of them (on their own: the team-mates stay at ${esc(you.name)}), or stay and be made captain.</p>
+    <div class="stat-cards">${c.offers!.map((o) => {
+      const club = clubById(w, o.clubId);
+      if (!club) return '';
+      return `<div class="card player-stat-card offer">
+        <div class="psc-top">${badgeSvg(club.team.badge, 40)}<div><strong>${esc(club.team.name)}</strong><br/><span class="muted small">Tier ${club.tier} · ${esc(tierInfo(club.tier).name)}</span>${o.clubId === w.rivalId ? '<br/><span class="chip chip-rival">🔥 Your rival</span>' : ''}</div></div>
+        <p class="small">${esc(o.why)}</p>
+        <div class="row"><button class="btn btn-ghost" data-club="${esc(o.clubId)}">📋 Club page</button><button class="btn btn-primary" data-join="${esc(o.clubId)}">✈️ Join</button></div>
+      </div>`;
+    }).join('')}</div>
+    <button class="btn btn-blue btn-big" id="k-stay">🛡️ Stay at ${esc(you.name)} and be captain</button>
+  </div>`;
+}
+
 /** The Star's card: training points to spend, ratings with progress to the next star, and milestones. */
 function starCard(c: CareerState, you: Team, justGrew: GrowthEvent[]): string {
   const star = careerStar(c, you)!;
@@ -84,7 +104,8 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
   const age = careerAge(c);
   const star = careerStar(c, you);
   const choosing = !star || !c.starPicked;
-  const trial = !c.done && !choosing && !!c.trialDay;
+  const offering = !c.done && !choosing && !!c.offers?.length;
+  const trial = !c.done && !choosing && !offering && !!c.trialDay;
   const tier = tierInfo(c.league.tier);
   const table = computeTable(c.league, you);
   const over = !c.done && careerSeasonOver(c);
@@ -176,6 +197,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p></div>` : ''}
       ${news.length ? `<div class="card news-card"><h3>${summer ? '☀️ Summer News' : '📰 League news'}</h3><ul class="plain-list">${news.map((n) => `<li>${n.emoji} ${esc(n.text)}</li>`).join('')}</ul>${summer && w.ladder ? `<details><summary>Last season's final tables</summary><div class="ladder">${w.ladder.map((ids, i) => `<div class="ladder-tier"><h4>Tier ${i + 1} · ${esc(tierInfo(i + 1).name)}</h4><ol>${ids.map((id) => `<li class="${id === you.id ? 'is-you' : ''}">${esc(clubs(id)?.name ?? '')}</li>`).join('')}</ol></div>`).join('')}</div></details>` : ''}</div>` : ''}
       ${choosing && !c.done ? starPicker(c, you) : ''}
+      ${offering ? offersCard(c, you) : ''}
       ${trial ? trialCard(c, you) : ''}
       ${star && !choosing ? starCard(c, you, justGrew) : ''}
       ${preview}
@@ -184,7 +206,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       <div class="league-body">
         ${c.done ? '' : `<div class="table-area">${tableArea()}</div>`}
         <div class="card next-card">
-          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : trial ? '<p class="muted">Sign a new player to kick off.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play', (rivalNext ? '<span class="chip chip-rival">🔥 Rival match!</span>' : '') + (c.goals.length ? `<span class="muted small">🎯 ${goalsDone} of ${c.goals.length} season goals done</span>` : '')) : po && poWaiting ? `
+          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : offering ? '<p class="muted">Choose: join a new club, or stay and be captain.</p>' : trial ? '<p class="muted">Sign a new player to kick off.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play', (rivalNext ? '<span class="chip chip-rival">🔥 Rival match!</span>' : '') + (c.goals.length ? `<span class="muted small">🎯 ${goalsDone} of ${c.goals.length} season goals done</span>` : '')) : po && poWaiting ? `
             <span class="muted">${po.up ? '🎟️ Play-off to go up' : '🛟 Play-off to stay up'}</span>
             <div class="fx-team is-you">${badgeSvg(you.badge, 40)}<span class="fx-name">${esc(you.name)}</span></div>
             <div class="vs-mid">VS</div>
@@ -239,6 +261,29 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     setCareer(c);
     renderCareer(root, router);
   }));
+  root.querySelector('#k-stay')?.addEventListener('click', () => {
+    const milestones = stayAtClub(c, you);
+    setCareer(c);
+    const stickers = recordCareer({ starMilestones: c.milestones.length });
+    renderCareer(root, router);
+    const note = (milestones.length ? `<div class="star-note"><h3>©️ Captain!</h3><p>${esc(careerStar(c, you)?.name ?? '')} is the new captain of ${esc(you.name)}. <span class="muted">(+1 point)</span></p></div>` : '') + stickerBanner(stickers);
+    if (note) root.querySelector('.career-banner')?.insertAdjacentHTML('afterend', `<div class="card outcome-card">${note}</div>`);
+  });
+  root.querySelectorAll<HTMLElement>('[data-join]').forEach((b) => b.addEventListener('click', async () => {
+    const club = clubById(c.world, b.dataset.join!);
+    const star = careerStar(c, you);
+    if (!club || !star) return;
+    const rivals = club.team.id === c.world.rivalId;
+    if (!(await askConfirm({ title: `Join ${club.team.name}?`, body: `${star.name} moves to ${club.team.name} and plays for them from now on. ${you.name} stay in My Teams${rivals ? ', and become your new rivals' : ''}.`, yes: 'Join', no: 'Not yet' }))) return;
+    const fresh = joinClub(c, you, club.team.id);
+    if (!fresh) return;
+    saveTeam(you);
+    saveTeam(fresh);
+    setCareer(c);
+    const stickers = recordCareer({ joined: true });
+    renderCareer(root, router);
+    root.querySelector('.career-banner')?.insertAdjacentHTML('afterend', `<div class="card outcome-card"><h3>✈️ Welcome to ${esc(fresh.name)}!</h3><p>${esc(star.name)} pulls on a new shirt. A new club, a new tier, a new adventure.</p>${stickerBanner(stickers)}</div>`);
+  }));
   root.querySelectorAll<HTMLElement>('[data-sign]').forEach((b) => b.addEventListener('click', () => {
     if (!signTriallist(c, you, b.dataset.sign!)) return;
     saveTeam(you);
@@ -260,7 +305,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     saveTeam(you);
     setCareer(c);
     const playoff = adv.record.playoff === 'won' ? (adv.record.outcome === 'promoted' ? 'up' : 'stayed') : null;
-    const stickers = recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0, tierTitle: adv.titleTier, allTheWayUp: adv.allTheWayUp, everyYear: adv.everyYear, playoff, starMilestones: adv.milestones.length ? c.milestones.length : 0 });
+    const stickers = recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0, tierTitle: adv.titleTier, allTheWayUp: adv.allTheWayUp, everyYear: adv.everyYear, playoff, loyal: adv.finished && c.starPicked && c.moves === 0, starMilestones: adv.milestones.length ? c.milestones.length : 0 });
     renderCareer(root, router);
     const note = (adv.milestones.length ? `<div class="star-note"><h3>🌟 Milestone!</h3><ul class="plain-list">${adv.milestones.map((m) => `<li>${m.emoji} <strong>${esc(m.name)}</strong>: ${esc(m.how)} <span class="muted">(+1 point)</span></li>`).join('')}</ul></div>` : '') + stickerBanner(stickers);
     if (note) root.querySelector('.career-banner')?.insertAdjacentHTML('afterend', `<div class="card outcome-card">${note}</div>`);

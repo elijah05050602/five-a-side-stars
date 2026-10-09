@@ -8,7 +8,7 @@ import type { MatchResult } from './MatchScene';
 import { freshMatchStats, type PlayerMatchStats } from './sim';
 import type { SimOutcome } from './background';
 import { matchFacts, pickGoals, teamSeason, updateGoals, type SeasonGoal } from './seasonGoals';
-import { TIER_COUNT, activeIds, addNews, ageUpWorld, allTables, buildWorld, checkRival, clubById, endSeasons, opponentNudge, playOtherTiers, playoffFor, recordFixture, seasonIndex, startSeasons, tierOf, type CareerWorld, type WorldClub } from './careerWorld';
+import { TIER_COUNT, activeIds, addNews, ageUpWorld, allTables, buildWorld, checkRival, clubById, endSeasons, isDavao, opponentNudge, playOtherTiers, playoffFor, recordFixture, seasonIndex, startSeasons, swapClub, tierOf, type CareerWorld, type WorldClub } from './careerWorld';
 
 /**
  * Career mode: one team starts in the Under 5s and plays a year in each age
@@ -68,6 +68,10 @@ export interface CareerState {
   milestones: string[];
   /** After moving up an age group: who moved on, and the youngsters on trial. Null the rest of the time. */
   trialDay: TrialDay | null;
+  /** After moving up an age group: clubs that want the Star, until the player stays or joins one. Null the rest of the time. */
+  offers: TransferOffer[] | null;
+  /** Times the Star has joined another club. */
+  moves: number;
   /** The 30 clubs you play against all career, the tiers, your rival and everyone's stats. */
   world: CareerWorld;
   /** This mini season's three goals. */
@@ -77,6 +81,9 @@ export interface CareerState {
   /** The career's story so far, a line for each big moment, for the career screen and the Hall of Fame. */
   scrapbook: ScrapLine[];
 }
+
+/** A club in the world that wants the Star to join them, and why, in words for a 7-year-old. */
+export interface TransferOffer { clubId: string; why: string }
 
 /** Squad changes when the team moves up an age group: someone moves on, and the player signs one of three triallists. */
 export interface TrialDay {
@@ -174,7 +181,7 @@ export function createCareer(source: Team, halfSeconds: number, star?: Player): 
   const career: CareerState = {
     teamId: team.id, year: 1, season: 1, league, halfSeconds,
     seasonStats: {}, careerStats: {}, history: [], titles: 0, done: false, pendingGrowth: [],
-    starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null, world,
+    starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null, offers: null, moves: 0, world,
     goals: [], sweeps: 0, scrapbook: [],
   };
   career.goals = newGoals(career, team);
@@ -613,6 +620,7 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
       }
       // Banked progress turns into stars now that the cap has risen.
       c.pendingGrowth = team.players.flatMap((p) => levelUp(p, team.ageGroup));
+      c.offers = transferOffers(c, team);
     }
   } else {
     c.season++;
@@ -755,4 +763,86 @@ export function statRows(c: CareerState, team: Team, scope: 'season' | 'career')
   return team.players
     .map((player) => ({ player, stats: src[player.id] ?? freshSeasonStats() }))
     .sort((a, b) => (b.stats.goals + b.stats.assists + b.stats.saves) - (a.stats.goals + a.stats.assists + a.stats.saves));
+}
+
+/**
+ * Clubs that want the Star after a year: one to three from your tier or higher, more after a good
+ * year (a top-two finish, plenty of milestones). Your rival and clubs you keep beating are keener,
+ * and Davao Strikers may ask at the step up to the Under 7s, whatever their tier.
+ */
+export function transferOffers(c: CareerState, team: Team): TransferOffer[] {
+  const w = c.world;
+  const star = careerStar(c, team);
+  if (!star || !c.starPicked) return [];
+  const mine = tierOf(w, team.id);
+  const goodYear = c.history.slice(-SEASONS_PER_YEAR).some((h) => h.position <= 2);
+  const want = Math.min(3, 1 + (goodYear ? 1 : 0) + (c.milestones.length >= 6 ? 1 : 0));
+  const weight = (cl: WorldClub) => (cl.team.id === w.rivalId ? 3 : (w.h2h[cl.team.id]?.w ?? 0) >= 2 ? 2 : cl.tier < mine ? 1.5 : 1);
+  const pool = w.clubs.filter((cl) => cl.tier <= mine && !isDavao(cl));
+  const picked: WorldClub[] = [];
+  while (picked.length < want && pool.length) {
+    let r = Math.random() * pool.reduce((n, cl) => n + weight(cl), 0);
+    const i = Math.max(0, pool.findIndex((cl) => (r -= weight(cl)) <= 0));
+    picked.push(...pool.splice(i, 1));
+  }
+  const davao = w.clubs.find(isDavao);
+  if (davao && careerAge(c) === 'U7' && Math.random() < 0.5) {
+    if (picked.length >= 3) picked.pop();
+    picked.unshift(davao);
+  }
+  return picked.map((cl) => {
+    const h = w.h2h[cl.team.id];
+    const why = isDavao(cl) ? `${cl.team.name} want ${star.name} in their ${AGE_STATS[team.ageGroup].label}!`
+      : cl.team.id === w.rivalId ? `Your rivals want ${star.name}! Join them and ${team.name} become your new rivals.`
+      : h && h.w >= 2 ? `You have beaten them ${h.w} times, so now they want ${star.name} on their side.`
+      : cl.tier < mine ? `A ${tierInfo(cl.tier).name} club, higher up the ladder.`
+      : `They have been watching ${star.name} all year.`;
+    return { clubId: cl.team.id, why };
+  });
+}
+
+/**
+ * The Star stays: no transfer, and the club makes them captain (the Captain milestone and its
+ * training point). Returns the milestones reached.
+ */
+export function stayAtClub(c: CareerState, team: Team): StarMilestone[] {
+  if (!c.offers) return [];
+  c.offers = null;
+  const star = careerStar(c, team);
+  const si = seasonIndex(c.year, c.season);
+  if (star) {
+    addNews(c.world, si - 1, '🛡️', `${star.name} turned down other clubs to stay at ${team.name}, and is the new captain!`);
+    addScrap(c.scrapbook, si, '🛡️', `${star.name} stayed loyal to ${team.name} and was made captain.`);
+  }
+  return markMilestones(c, ['captain']);
+}
+
+/**
+ * The Star joins one of the clubs that asked: the career carries on with that club (see
+ * swapClub), in its tier, with a fresh mini season. There is no Trial Day at the new club.
+ * Returns the new team for the caller to save, or null when the offer is not there.
+ */
+export function joinClub(c: CareerState, team: Team, clubId: string): Team | null {
+  const offer = c.offers?.find((o) => o.clubId === clubId);
+  const star = careerStar(c, team);
+  const club = clubById(c.world, clubId);
+  if (!offer || !star || !club) return null;
+  const w = c.world;
+  const si = seasonIndex(c.year, c.season);
+  const wasRival = w.rivalId === clubId;
+  const fresh = swapClub(w, team, clubId, star, MAX_SQUAD);
+  fresh.ageGroup = careerAge(c);
+  c.teamId = fresh.id;
+  c.offers = null;
+  c.moves++;
+  c.trialDay = null;
+  c.pendingGrowth = c.pendingGrowth.filter((g) => g.playerId === star.id);
+  const season = c.league.season;
+  c.league = createLeague(fresh, c.halfSeconds, tierOf(w, fresh.id), c.league, startSeasons(w, fresh.id, si));
+  c.league.season = season;
+  c.goals = newGoals(c, fresh);
+  addNews(w, si - 1, '✈️', `Big news! ${star.name} has joined ${fresh.name} from ${team.name}.`);
+  addScrap(c.scrapbook, si, '✈️', `${star.name} joined ${fresh.name}${wasRival ? ', your old rivals' : ''}!`);
+  if (wasRival) addScrap(c.scrapbook, si, '🔥', `${team.name} are your rivals now.`);
+  return fresh;
 }
