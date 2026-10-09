@@ -492,3 +492,61 @@ export function ageUpWorld(w: CareerWorld, age: AgeGroup, si: number): void {
     if (signed.length && (club.tier <= 2 || club.team.id === w.rivalId)) addNews(w, si, '✍️', `${team.name} signed ${signed.join(' and ')}.`);
   }
 }
+
+/** A Davao Strikers club in the world (they have no crest image there, so the name tells them apart). */
+export const isDavao = (club: WorldClub): boolean => club.team.name === CLUB_NAME;
+
+/**
+ * The Star joins another club in the world. That club becomes yours (its squad, kit and place in
+ * the tiers), with the Star taking the place of their weakest player in the same position, who
+ * drops to the bench (or moves on when the squad is full). Your old club stays in the world as a
+ * computer club in its tier without the Star, under a new id (the Star leaves its squad in My
+ * Teams too). Your rival stays your rival, unless you joined them: then your old club is.
+ * Returns your new team.
+ */
+export function swapClub(w: CareerWorld, oldYou: Team, newId: string, star: Player, maxSquad: number): Team {
+  const club = clubById(w, newId);
+  if (!club) return oldYou;
+  // The Star leaves your old club (its squad in My Teams too), and a team-mate takes their place.
+  const joined = structuredClone(oldYou.players.find((p) => p.id === star.id) ?? star);
+  const wasStarter = joined.starter;
+  oldYou.players = oldYou.players.filter((p) => p.id !== star.id);
+  if (wasStarter) {
+    const sub = oldYou.players.find((p) => !p.starter && p.position === star.position) ?? (star.position === 'GK' ? undefined : oldYou.players.find((p) => !p.starter && p.position !== 'GK'));
+    if (sub) { sub.starter = true; if (sub.position !== star.position) { sub.positions = [sub.position]; sub.position = star.position; } }
+    else oldYou.players.push(makePlayer(star.position, star.number, pick(FIRST_NAMES), true, oldYou.ageGroup));
+  }
+  // Your old club as one of the world's clubs.
+  const old = structuredClone(oldYou);
+  old.id = `world-${uid()}`;
+  delete old.career;
+  const oldClub = newClub(old, tierOf(w, oldYou.id), 1);
+  oldClub.rec = w.you;
+  w.clubs = w.clubs.filter((c) => c !== club);
+  w.clubs.push(oldClub);
+  for (const t of w.tiers) {
+    t.members = t.members.map((id) => (id === oldYou.id ? old.id : id));
+    if (t.resting === oldYou.id) t.resting = old.id;
+  }
+  w.you = club.rec;
+  delete w.h2h[newId];
+  if (w.rivalId === newId) { w.rivalId = old.id; w.rivalFar = 0; }
+  // The Star in the new squad.
+  const team = club.team;
+  team.career = true;
+  const total = (p: Player) => skillKeys(p.position).reduce((n, k) => n + p.skills[k], 0);
+  const same = team.players.filter((p) => p.starter && p.position === star.position).sort((a, b) => total(a) - total(b))[0]
+    ?? team.players.filter((p) => p.starter && (star.position === 'GK') === (p.position === 'GK')).sort((a, b) => total(a) - total(b))[0];
+  joined.starter = true;
+  if (same) {
+    if (same.position !== joined.position) { joined.positions = [joined.position, ...(joined.positions ?? []).filter((p) => p !== joined.position)]; joined.position = same.position; }
+    same.starter = false;
+    if (team.players.length >= maxSquad) team.players = team.players.filter((p) => p !== same);
+  } else if (team.players.length >= maxSquad) team.players.pop();
+  if (team.players.some((p) => p.number === joined.number)) {
+    const free = Array.from({ length: 99 }, (_, i) => i + 1).find((n) => !team.players.some((p) => p.number === n));
+    if (free) joined.number = free;
+  }
+  team.players.push(joined);
+  return team;
+}

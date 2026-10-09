@@ -1,6 +1,6 @@
 import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, uid } from './defaults';
 import type { LeagueFixture, LeagueState, Tally } from '../game/league';
-import { defaultStar, newGoals, worldForOldCareer, type CareerState, type TrialDay } from '../game/career';
+import { defaultStar, newGoals, worldForOldCareer, type CareerState, type TransferOffer, type TrialDay } from '../game/career';
 import { goalDef, type SeasonGoal } from '../game/seasonGoals';
 import { HALL_KEEP, SCRAPBOOK_KEEP, addToHall, hallEntry, scrapsFromHistory, worthKeeping, type HallEntry, type ScrapLine } from '../game/hallOfFame';
 import { tierInfo } from '../game/league';
@@ -108,7 +108,7 @@ function readSave(raw: string): { save: SaveFile; repaired: boolean } {
   if (parsed.progress !== undefined && !progress) repaired = true;
   const league = readOptional(parsed.league, isLeague);
   const career = readOptional(parsed.career, isCareer);
-  if (career && career !== 'broken') { mendStar(career, teams); mendWorld(career, teams); mendGoals(career, teams); mendScrapbook(career); }
+  if (career && career !== 'broken') { mendStar(career, teams); mendWorld(career, teams); mendGoals(career, teams); mendScrapbook(career); mendOffers(career); }
   const tournament = readOptional(parsed.tournament, isTournament);
   if ([league, career, tournament].some((x) => x === 'broken')) repaired = true;
   const hall = readHall(parsed.hall);
@@ -359,6 +359,14 @@ const readScraps = (v: unknown): ScrapLine[] => (Array.isArray(v) ? v : [])
   .filter((x): x is ScrapLine => isObj(x) && typeof x.at === 'number' && Number.isFinite(x.at) && typeof x.emoji === 'string' && typeof x.text === 'string')
   .slice(-SCRAPBOOK_KEEP)
   .map((x) => ({ at: Math.max(1, Math.floor(x.at)), emoji: Array.from(x.emoji).slice(0, 4).join(''), text: Array.from(x.text).slice(0, 200).join('') }));
+
+/** Transfer offers (added with transfers): kept only for clubs still in the world; none in an older save. */
+function mendOffers(c: CareerState): void {
+  const raw = (c as Partial<CareerState>).offers;
+  const list = Array.isArray(raw) ? raw.filter((o): o is TransferOffer => isObj(o) && typeof o.clubId === 'string' && typeof o.why === 'string' && !!c.world?.clubs.some((cl) => cl.team.id === o.clubId)).slice(0, 4) : [];
+  c.moves = count((c as Partial<CareerState>).moves);
+  c.offers = list.length ? list.map((o) => ({ clubId: o.clubId, why: Array.from(o.why).slice(0, 200).join('') })) : null;
+}
 
 /** The scrapbook (added with the Hall of Fame): a career saved before it starts one from its past seasons. */
 function mendScrapbook(c: CareerState): void {

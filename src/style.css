@@ -1048,3 +1048,9 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .sb-emoji { flex: none; width: 1.4em; text-align: center; }
 .hof-book { max-height: 60vh; overflow-y: auto; text-align: left; }
 .hof-book .milestones { margin-bottom: 8px; }
+
+/* Transfer window */
+.offers-card .offer { display: flex; flex-direction: column; gap: 8px; }
+.offers-card .offer p { margin: 0; }
+.offers-card .offer .row { flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.offers-card #k-stay { margin-top: 12px; }
