@@ -995,3 +995,17 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .team-choice.is-active { border-color: var(--navy); background: #fff3c4; box-shadow: var(--drop); }
 .career-start .btn-kickoff { display: block; margin: 16px auto 0; }
 .career-start .btn-kickoff:disabled { opacity: .5; cursor: default; }
+
+/* ---------- The Goal Rush Gazette ---------- */
+.gazette { max-width: 900px; margin: 0 auto 14px; background: #fffdf5; border: 2.5px solid var(--navy); font-family: var(--font); }
+.gazette.is-rival { border-color: #e36414; box-shadow: 0 4px 0 #e36414; }
+.gazette-front { padding: 12px 14px; border-radius: var(--radius-sm); margin: 12px 0; text-align: left; }
+.gazette-mast { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; border-bottom: 3px double var(--navy); padding-bottom: 4px; margin-bottom: 6px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; font-size: .85rem; flex-wrap: wrap; }
+.gz-head { margin: 4px 0 6px; font-size: 1.35rem; line-height: 1.2; color: var(--navy); }
+.gz-stand { margin: 0 0 6px; font-weight: 600; }
+.gz-sides { display: flex; align-items: flex-start; justify-content: center; gap: 12px; }
+.gz-side { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.gz-vs { align-self: center; font-weight: 900; color: var(--navy); }
+.gz-form { letter-spacing: 1px; font-size: .85rem; }
+.gz-h2h { text-align: center; margin: 8px 0 0; }
+.gz-around h4 { margin: 8px 0 2px; }

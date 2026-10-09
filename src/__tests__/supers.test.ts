@@ -86,6 +86,22 @@ describe('super skills', () => {
     expect(rocket).toBeLessThan(1);
   });
 
+  it('count the super and its goal in the scorer match stats, and mark the goal as a super goal', () => {
+    for (let i = 0; i < 20; i++) {
+      const s = sim('hard');
+      const p = onTheBall(s, 'ATT', 8, ((i % 5) - 2) * 0.8);
+      s.superMeter[0] = 1;
+      s.step(1 / 60, TRICK);
+      run(s, 200);
+      expect(s.playerStats()[p.info.id].supers).toBe(1);
+      if (!s.score[0]) continue;
+      expect(s.goals[0].super).toBe(true);
+      expect(s.playerStats()[p.info.id].superGoals).toBe(1);
+      return;
+    }
+    throw new Error('no Rocket Shot went in');
+  });
+
   it('let a Super Slide win the ball from a dribbler', () => {
     const s = sim();
     const them = s.players.find((q) => q.side === 1 && !q.isKeeper)!;

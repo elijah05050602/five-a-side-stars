@@ -4,6 +4,8 @@ import { TIERS, computeTable, nextFixture, nextSeason, seasonOutcome, seasonOver
 import { esc } from '../hud';
 import { wireLogoControls } from '../logoUpload';
 import { nextMatchHtml, playNextMatch, tableCard } from './leagueParts';
+import { formFrom, matchPreview } from '../../game/news';
+import { previewHtml } from './newsParts';
 import { leagueLookup, openLeagueTeamPage, statsHtml, teamStatsHtml } from './worldParts';
 import { topBar, wire, ordinal, stickerBanner } from './shared';
 import type { Router } from '../screens';
@@ -29,6 +31,10 @@ export function renderLeague(root: HTMLElement, router: Router): void {
         : outcome.outcome === 'relegated' ? `⬇️ You finished ${ordinal(outcome.position)}: down to Tier ${ls.tier + 1}, the ${tierInfo(ls.tier + 1).name}. You will bounce back!`
           : outcome.position === 1 ? `🥇 You won the ${info.name}! Already at the top, so one more season to defend it.` : `You finished ${ordinal(outcome.position)}: staying in the ${info.name} for another season.`
     : '';
+  const preview = next ? (() => {
+    const opp = next.youAreHome ? next.away : next.home;
+    return previewHtml(matchPreview({ you, opponent: opp, youAreHome: next.youAreHome, table: table.map((r) => r.team.id), forms: { you: formFrom(ls.rounds, you.id), opponent: formFrom(ls.rounds, opp.id) }, tally: ls.tally ?? {}, round: ls.round + 1, rounds: ls.rounds.length }));
+  })() : '';
   let tab: 'table' | 'stats' = 'table';
   const tabs = () => `<div class="pills table-tabs"><button class="pill ${tab === 'table' ? 'is-active' : ''}" data-tab="table">📋 Table</button><button class="pill ${tab === 'stats' ? 'is-active' : ''}" data-tab="stats">📊 Stats</button></div>`;
   const ids = table.map((row) => row.team.id);
@@ -45,6 +51,7 @@ export function renderLeague(root: HTMLElement, router: Router): void {
         <div class="tier-ladder">${TIERS.map((t) => `<span class="rung ${t.tier === ls.tier ? 'is-here' : ''} ${t.tier >= ls.bestTier && t.tier !== ls.tier ? 'is-reached' : ''}" title="${esc(t.name)}">${t.tier}</span>`).join('')}</div>
       </div>
       ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p>${stickerBanner(stickers)}</div>` : ''}
+      ${preview}
       <div class="league-body">
         <div class="table-area">${tableArea()}</div>
         <div class="card next-card">

@@ -66,7 +66,10 @@ describe('skill moves', () => {
       const { p } = setUp(s, ahead);
       if (aim) p.facing = Math.atan2(aim.z, aim.x);
       s.trick(p, aim);
-      expect(s.events.some((e) => e.type === 'trick' && e.kind === p.trickKind)).toBe(true);
+      const ev = s.events.find((e) => e.type === 'trick' && e.kind === p.trickKind);
+      expect(ev).toBeDefined();
+      // A move that beats the defender counts in the player's match stats.
+      expect(p.match.tricks).toBe(ev!.ok ? 1 : 0);
       if (p.trickKind !== 'nutmeg' && p.trickKind !== 'rainbow') expect(s.ball.owner).toBe(p);
     }
   });
