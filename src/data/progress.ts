@@ -69,10 +69,11 @@ export const STICKERS: Sticker[] = [
   { id: 'rival-master', emoji: '☄️', name: 'Rival Master', how: 'Beat your career rival five times.' },
   { id: 'playoff-hero', emoji: '🎟️', name: 'Play-off Hero', how: 'Win a career play-off to go up.' },
   { id: 'great-escape', emoji: '🛟', name: 'Great Escape', how: 'Win a career play-off to stay up.' },
+  { id: 'clean-sweep', emoji: '🧹', name: 'Clean Sweep', how: 'Do all three season goals in a career mini season.', unlocks: '🧹' },
 ];
 
 /** Stickers that can be won again, with a count on them in the album. */
-export const COUNTED_STICKERS = ['tier5-champ', 'tier4-champ', 'tier3-champ', 'tier2-champ', 'tier1-champ', 'rival-beaten', 'playoff-hero', 'great-escape'];
+export const COUNTED_STICKERS = ['clean-sweep', 'tier5-champ', 'tier4-champ', 'tier3-champ', 'tier2-champ', 'tier1-champ', 'rival-beaten', 'playoff-hero', 'great-escape'];
 
 export function getProgress(): Progress {
   const save = loadSave();
@@ -175,6 +176,8 @@ export interface CareerMilestones {
   /** A win over the rival, and how many there have been. */
   rivalWins?: number;
   playoff?: 'up' | 'stayed' | null;
+  /** All three season goals done. */
+  sweep?: boolean;
 }
 
 export function recordCareer(m: CareerMilestones): Sticker[] {
@@ -197,6 +200,7 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.rivalWins && m.rivalWins >= 5) award(p, 'rival-master', out);
   if (m.playoff === 'up') award(p, 'playoff-hero', out);
   if (m.playoff === 'stayed') award(p, 'great-escape', out);
+  if (m.sweep) award(p, 'clean-sweep', out);
   persist();
   return out;
 }

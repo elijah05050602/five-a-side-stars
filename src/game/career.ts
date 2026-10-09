@@ -5,6 +5,7 @@ import { applyLeagueResult, computeTable, createLeague, resultLines, seasonOver,
 import type { MatchResult } from './MatchScene';
 import { freshMatchStats, type PlayerMatchStats } from './sim';
 import type { SimOutcome } from './background';
+import { matchFacts, pickGoals, teamSeason, updateGoals, type SeasonGoal } from './seasonGoals';
 import { TIER_COUNT, activeIds, addNews, ageUpWorld, allTables, buildWorld, checkRival, clubById, endSeasons, opponentNudge, playOtherTiers, playoffFor, recordFixture, seasonIndex, startSeasons, tierOf, type CareerWorld, type WorldClub } from './careerWorld';
 
 /**
@@ -34,6 +35,8 @@ export interface CareerSeasonRecord extends SeasonRecord {
   topScorer: { name: string; goals: number } | null;
   /** The play-off this season, if you were in one. */
   playoff?: 'won' | 'lost' | null;
+  /** Season goals done (of three). */
+  goals?: number;
 }
 
 export interface CareerState {
@@ -65,6 +68,10 @@ export interface CareerState {
   trialDay: TrialDay | null;
   /** The 30 clubs you play against all career, the tiers, your rival and everyone's stats. */
   world: CareerWorld;
+  /** This mini season's three goals. */
+  goals: SeasonGoal[];
+  /** Mini seasons with all three goals done. */
+  sweeps: number;
 }
 
 /** Squad changes when the team moves up an age group: someone moves on, and the player signs one of three triallists. */
@@ -106,7 +113,7 @@ export const STAR_MILESTONES: StarMilestone[] = [
 ];
 
 /** Training points after a match: one for playing, one for a win, one for Player of the Match. */
-export const TRAINING = { played: 1, win: 1, motm: 1, milestone: 1 };
+export const TRAINING = { played: 1, win: 1, motm: 1, milestone: 1, goal: 1 };
 /** Each training point is this much of a star, so about four points make a new star. */
 export const TRAINING_STEP = 0.25;
 
@@ -152,7 +159,9 @@ export function createCareer(source: Team, halfSeconds: number, star?: Player): 
     teamId: team.id, year: 1, season: 1, league, halfSeconds,
     seasonStats: {}, careerStats: {}, history: [], titles: 0, done: false, pendingGrowth: [],
     starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null, world,
+    goals: [], sweeps: 0,
   };
+  career.goals = newGoals(career, team);
   return { career, team };
 }
 
@@ -258,6 +267,10 @@ export function playerOfTheMatch(r: MatchResult): Player | null {
 export interface CareerMatchSummary {
   /** You beat your rival in this match. */
   rivalWin?: boolean;
+  /** Season goals done in this match. */
+  goalsDone?: SeasonGoal[];
+  /** That finished all three. */
+  sweep?: boolean;
   growth: GrowthEvent[];
   motm: Player | null;
   /** First time a player reached five stars this match. */
@@ -354,6 +367,29 @@ function newMilestones(c: CareerState, star: Player, s: PlayerSeasonStats, m: Pl
   return STAR_MILESTONES.filter((ms) => reached[ms.id] && !c.milestones.includes(ms.id));
 }
 
+/** Three season goals for the coming mini season, to suit the Star and whether your rival is in your tier. */
+export function newGoals(c: CareerState, team: Team): SeasonGoal[] {
+  const star = careerStar(c, team);
+  const rivalHere = c.league.teams.some((t) => t.id === c.world.rivalId);
+  return pickGoals(star?.position ?? null, rivalHere);
+}
+
+/** Move the season goals on after a match. Each one done is a training point. */
+function goalsAfter(c: CareerState, team: Team, r: MatchResult | null): SeasonGoal[] {
+  const star = careerStar(c, team);
+  const line = star ? c.seasonStats[star.id] : undefined;
+  const position = computeTable(c.league, team).findIndex((row) => row.isYou) + 1;
+  const done = updateGoals(c.goals, {
+    star: star && line ? { position: star.position, season: line } : undefined,
+    team: teamSeason(c.league, team.id, position),
+    match: r ? matchFacts(r, team, c.world.rivalId) : undefined,
+    rivalHere: c.league.teams.some((t) => t.id === c.world.rivalId),
+  });
+  c.trainingPoints += done.length * TRAINING.goal;
+  if (done.length && c.goals.length && c.goals.every((g) => g.done)) c.sweeps++;
+  return done;
+}
+
 /** Who you played in a finished match, and the score your way round. */
 function yourSide(team: Team, r: MatchResult): { gf: number; ga: number; opponent: Team } {
   const youHome = r.home.id === team.id;
@@ -373,6 +409,8 @@ function recordPlayers(c: CareerState, team: Team, r: MatchResult, motm: Player 
     for (const bucket of [c.seasonStats, c.careerStats]) {
       const s = bucket[p.id] ?? (bucket[p.id] = freshSeasonStats());
       s.played++; s.goals += m.goals; s.assists += m.assists; s.shots += m.shots; s.passes += m.passes; s.tackles += m.tackles; s.saves += m.saves;
+      // Counted since season goals (a save from before has none yet).
+      s.tricks = (s.tricks ?? 0) + (m.tricks ?? 0); s.supers = (s.supers ?? 0) + (m.supers ?? 0); s.superGoals = (s.superGoals ?? 0) + (m.superGoals ?? 0);
       if (cleanSheet) s.cleanSheets++;
       if (motm?.id === p.id) s.motm++;
     }
@@ -416,7 +454,9 @@ export function applyCareerMatch(c: CareerState, team: Team, r: MatchResult, oth
     playOtherTiers(c.world, team.id, index);
   }
   const rivalWin = rivalCheck(c, team, r);
-  return { ...recordPlayers(c, team, r, motm), rivalWin };
+  const summary = recordPlayers(c, team, r, motm);
+  const goalsDone = goalsAfter(c, team, r);
+  return { ...summary, points: summary.points + goalsDone.length * TRAINING.goal, rivalWin, goalsDone, sweep: goalsDone.length > 0 && c.goals.every((g) => g.done) };
 }
 
 /** Your play-off, when the mini season is over and you finished 2nd (playing to go up) or 5th (playing to stay up). */
@@ -477,7 +517,7 @@ export function careerSeasonOutcome(c: CareerState, team: Team): CareerSeasonRec
     const g = c.seasonStats[p.id]?.goals ?? 0;
     if (g > 0 && (!top || g > top.goals)) top = { name: p.name, goals: g };
   }
-  return { ...rec, year: c.year, miniSeason: c.season, age: careerAge(c), topScorer: top, playoff };
+  return { ...rec, year: c.year, miniSeason: c.season, age: careerAge(c), topScorer: top, playoff, goals: c.goals.filter((g) => g.done).length };
 }
 
 const TEAMS_PER_TABLE = 6;
@@ -540,6 +580,7 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
     const league = createLeague(team, c.halfSeconds, tier, c.league, startSeasons(w, team.id, seasonIndex(c.year, c.season)));
     league.history = [...c.league.history, record];
     c.league = league;
+    c.goals = newGoals(c, team);
   }
   const everyYear = !!titleTier && CAREER_AGES.every((a) => w.titleAges.includes(a));
   return { record, movedUp, finished, titleTier, everyYear, allTheWayUp: w.tierTitles.every((n) => n > 0) };

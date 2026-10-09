@@ -10,6 +10,7 @@ import { esc } from '../hud';
 import { badgeSvg, kitChip } from '../kitPreview';
 import { careerTableNote, nextMatchHtml, playNextMatch, tableCard } from './leagueParts';
 import { matchPreview } from '../../game/news';
+import { goalText } from '../../game/seasonGoals';
 import { previewHtml } from './newsParts';
 import { ladderHtml, openClubPage, statsHtml, teamStatsHtml, worldLookup } from './worldParts';
 import { topBar, wire, ordinal, growthList, stickerBanner } from './shared';
@@ -122,6 +123,15 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     }));
   };
   const preview = choosing || trial || c.done ? '' : next ? previewFor(next.youAreHome ? next.away : next.home, next.youAreHome) : po && poWaiting ? previewFor(po.opponent.team, true, po.up ? 'up' : 'stay') : '';
+  const goalsDone = c.goals.filter((g) => g.done).length;
+  const goalsCard = c.done || !c.goals.length ? '' : `<div class="card goals-card">
+    <h3>🎯 Season goals <span class="muted small">${goalsDone} of ${c.goals.length} done · 1 training point each</span></h3>
+    <ul class="plain-list season-goals">${c.goals.map((g) => {
+      const t = goalText(g, star?.name ?? '');
+      return `<li class="${g.done ? 'is-done' : ''}"><span class="sg-level sg-${g.level}">${['Easy', 'Medium', 'Hard'][g.level]}</span><span class="sg-text">${t.emoji} ${esc(t.text)}</span>${g.done ? '<span class="sg-tick">✅</span>' : g.target > 1 ? `<span class="sg-count">${g.progress}/${g.target}</span>` : ''}${g.target > 1 && !g.done ? `<span class="xp-bar"><i style="width:${Math.round((g.progress / g.target) * 100)}%"></i></span>` : ''}</li>`;
+    }).join('')}</ul>
+    ${goalsDone === c.goals.length ? '<p><strong>🧹 Clean sweep!</strong> Every goal done this season.</p>' : ''}
+  </div>`;
   let tab: 'table' | 'stats' | 'tiers' = 'table';
   let statScope: 'season' | 'career' = 'season';
   const tabs = () => `<div class="pills table-tabs">${(['table', 'stats', 'tiers'] as const).map((t) => `<button class="pill ${t === tab ? 'is-active' : ''}" data-tab="${t}">${t === 'table' ? '📋 Table' : t === 'stats' ? '📊 Stats' : '🪜 All leagues'}</button>`).join('')}</div>`;
@@ -167,11 +177,12 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       ${trial ? trialCard(c, you) : ''}
       ${star && !choosing ? starCard(c, you, justGrew) : ''}
       ${preview}
+      ${choosing ? '' : goalsCard}
       ${c.done ? `<div class="card trophy-card"><div class="trophy">🎓</div><h2>All grown up!</h2><p class="muted">${esc(you.name)} played ${totals.played} matches from the Under 5s to the Under 10s, scored ${totals.goals} goals and won ${c.titles} mini-season title${c.titles === 1 ? '' : 's'}. What a journey.</p></div>` : ''}
       <div class="league-body">
         ${c.done ? '' : `<div class="table-area">${tableArea()}</div>`}
         <div class="card next-card">
-          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : trial ? '<p class="muted">Sign a new player to kick off.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play', rivalNext ? '<span class="chip chip-rival">🔥 Rival match!</span>' : '') : po && poWaiting ? `
+          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : trial ? '<p class="muted">Sign a new player to kick off.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play', (rivalNext ? '<span class="chip chip-rival">🔥 Rival match!</span>' : '') + (c.goals.length ? `<span class="muted small">🎯 ${goalsDone} of ${c.goals.length} season goals done</span>` : '')) : po && poWaiting ? `
             <span class="muted">${po.up ? '🎟️ Play-off to go up' : '🛟 Play-off to stay up'}</span>
             <div class="fx-team is-you">${badgeSvg(you.badge, 40)}<span class="fx-name">${esc(you.name)}</span></div>
             <div class="vs-mid">VS</div>
