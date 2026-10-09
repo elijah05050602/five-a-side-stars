@@ -17,6 +17,7 @@ import { renderCareer } from './screens/career';
 import { renderTournament } from './screens/tournament';
 import { renderAlbum } from './screens/album';
 import { renderParents } from './screens/parents';
+import { renderHallOfFame } from './screens/hallOfFame';
 
 export { finishMatch, playAhead, type Ahead, type ResultSummary } from './screens/results';
 export { resolveKits } from './screens/setup';
@@ -64,7 +65,8 @@ export type Screen =
   | { name: 'album' }
   | { name: 'parents' }
   | { name: 'controls' }
-  | { name: 'club' };
+  | { name: 'club' }
+  | { name: 'hall' };
 
 
 /** Tear down the current screen (its window listeners included). Matches call this before they start. */
@@ -121,5 +123,6 @@ function drawScreen(root: HTMLElement, screen: Screen, router: Router): void {
     case 'parents': return renderParents(root, router);
     case 'controls': state.cleanup = renderControls(root, router, wire); return;
     case 'club': return renderClub(root, router);
+    case 'hall': return renderHallOfFame(root, router);
   }
 }

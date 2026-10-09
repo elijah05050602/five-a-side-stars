@@ -1,5 +1,6 @@
 import { AGE_STATS } from '../../data/ageGroups';
-import { getCareer, getTeam, saveTeam, setCareer } from '../../data/storage';
+import { getCareer, getHall, getTeam, retireCareer, saveTeam, setCareer } from '../../data/storage';
+import { scrapbookHtml } from './hallOfFame';
 import { POSITION_LABELS } from '../../data/types';
 import { STAR_CAP, skillKeys, skillLabel, starsText } from '../../data/skills';
 import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, signTriallist, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
@@ -145,6 +146,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       <h4>Teams</h4>${teamStatsHtml(yourIds, c.league.rounds, clubs, you, (id) => (id === you.id ? w.you : clubById(w, id)?.rec))}
     </div>`;
   };
+  const hallCount = getHall().length;
   const sum = Object.values(c.careerStats);
   const totals = { played: Math.max(0, ...sum.map((x) => x.played)), goals: sum.reduce((n, x) => n + x.goals, 0) };
   let scope: 'season' | 'career' = 'season';
@@ -192,9 +194,11 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
             <button class="btn btn-primary btn-big" id="k-next">${lastSeason ? (lastYear ? '🎓 Finish the career' : `🎒 Move up to ${CAREER_AGES[c.year]}`) : '▶️ Next mini season'}</button>`}
           <button class="btn btn-blue" id="k-edit">👕 Team looks</button>
           ${c.history.length ? `<details class="history"><summary>Past seasons</summary><ul class="plain-list muted">${c.history.map((h) => `<li>${esc(h.age)} ${esc(SEASON_NAMES[(h.miniSeason - 1) % SEASONS_PER_YEAR])}: ${ordinal(h.position)} in ${esc(tierInfo(h.tier).name)}${h.playoff ? ` (play-off ${h.playoff})` : ''}${h.topScorer ? ` · top scorer ${esc(h.topScorer.name)} (${h.topScorer.goals})` : ''}</li>`).join('')}</ul></details>` : ''}
-          <button class="btn btn-ghost" id="k-quit">Leave this career</button>
+          ${hallCount ? `<button class="btn btn-ghost" id="k-hall">🏛️ Hall of Fame <span class="muted small">(${hallCount})</span></button>` : ''}
+          <button class="btn btn-ghost" id="k-quit">🏛️ Retire this career</button>
         </div>
       </div>
+      ${c.scrapbook.length ? `<details class="card scrap-card" ${c.done ? 'open' : ''}><summary><strong>📖 Scrapbook</strong> <span class="muted small">${c.scrapbook.length} big moment${c.scrapbook.length === 1 ? '' : 's'}</span></summary>${scrapbookHtml(c.scrapbook)}</details>` : ''}
       <div class="card stat-cards-wrap">
         <div class="row space-between">
           <h3>Player cards</h3>
@@ -261,9 +265,14 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     const note = (adv.milestones.length ? `<div class="star-note"><h3>🌟 Milestone!</h3><ul class="plain-list">${adv.milestones.map((m) => `<li>${m.emoji} <strong>${esc(m.name)}</strong>: ${esc(m.how)} <span class="muted">(+1 point)</span></li>`).join('')}</ul></div>` : '') + stickerBanner(stickers);
     if (note) root.querySelector('.career-banner')?.insertAdjacentHTML('afterend', `<div class="card outcome-card">${note}</div>`);
   });
+  root.querySelector('#k-hall')?.addEventListener('click', () => router.go({ name: 'hall' }));
   root.querySelector('#k-edit')?.addEventListener('click', () => router.go({ name: 'builder', teamId: you.id }));
   root.querySelector('#k-new')?.addEventListener('click', () => router.go({ name: 'setup', homeId: you.id, mode: 'career' }));
   root.querySelector('#k-quit')?.addEventListener('click', async () => {
-    if (await askConfirm({ title: 'Leave this career?', body: 'Your seasons and stats will be deleted.\n\nThe team stays in My Teams.', yes: 'Leave career', no: 'Keep playing' })) { setCareer(null); router.go({ name: 'menu' }); }
+    if (!(await askConfirm({ title: 'Retire this career?', body: 'It goes into the Hall of Fame, with its Star, trophies and scrapbook, and you can start a new one.\n\nThe team stays in My Teams.', yes: 'Retire career', no: 'Keep playing' }))) return;
+    const kept = retireCareer();
+    const stickers = kept ? recordCareer({ hall: getHall().length }) : [];
+    router.go(kept ? { name: 'hall' } : { name: 'menu' });
+    if (stickers.length) document.querySelector('.hof-banner')?.insertAdjacentHTML('afterend', `<div class="card outcome-card">${stickerBanner(stickers)}</div>`);
   });
 }

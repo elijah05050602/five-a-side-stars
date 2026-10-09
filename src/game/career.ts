@@ -1,7 +1,9 @@
 import { AGE_GROUPS, SKILL_KEYS, type AgeGroup, type Player, type Position, type SkillKey, type Skills, type Team } from '../data/types';
 import { STAR_CAP, randomSkills, skillKeys, skillLabel } from '../data/skills';
 import { FIRST_NAMES, makePlayer, pick, startingFive, uid } from '../data/defaults';
-import { applyLeagueResult, computeTable, createLeague, resultLines, seasonOver, tallyMatch, type LeagueState, type SeasonRecord } from './league';
+import { applyLeagueResult, computeTable, createLeague, resultLines, seasonOver, tallyMatch, tierInfo, type LeagueState, type SeasonRecord } from './league';
+import { addScrap, type ScrapLine } from './hallOfFame';
+import { AGE_STATS } from '../data/ageGroups';
 import type { MatchResult } from './MatchScene';
 import { freshMatchStats, type PlayerMatchStats } from './sim';
 import type { SimOutcome } from './background';
@@ -72,6 +74,8 @@ export interface CareerState {
   goals: SeasonGoal[];
   /** Mini seasons with all three goals done. */
   sweeps: number;
+  /** The career's story so far, a line for each big moment, for the career screen and the Hall of Fame. */
+  scrapbook: ScrapLine[];
 }
 
 /** Squad changes when the team moves up an age group: someone moves on, and the player signs one of three triallists. */
@@ -171,9 +175,10 @@ export function createCareer(source: Team, halfSeconds: number, star?: Player): 
     teamId: team.id, year: 1, season: 1, league, halfSeconds,
     seasonStats: {}, careerStats: {}, history: [], titles: 0, done: false, pendingGrowth: [],
     starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null, world,
-    goals: [], sweeps: 0,
+    goals: [], sweeps: 0, scrapbook: [],
   };
   career.goals = newGoals(career, team);
+  addScrap(career.scrapbook, 1, '🌱', `${team.name} kick off in the ${tierInfo(TIER_COUNT).name}.`);
   return { career, team };
 }
 
@@ -408,7 +413,10 @@ function goalsAfter(c: CareerState, team: Team, r: MatchResult | null): SeasonGo
     rivalHere: c.league.teams.some((t) => t.id === c.world.rivalId),
   });
   c.trainingPoints += done.length * TRAINING.goal;
-  if (done.length && c.goals.length && c.goals.every((g) => g.done)) c.sweeps++;
+  if (done.length && c.goals.length && c.goals.every((g) => g.done)) {
+    c.sweeps++;
+    addScrap(c.scrapbook, seasonIndex(c.year, c.season), '🧹', 'Clean sweep: all three season goals done!');
+  }
   return done;
 }
 
@@ -449,6 +457,8 @@ function recordPlayers(c: CareerState, team: Team, r: MatchResult, motm: Player 
     milestones.push(...newMilestones(c, star, c.careerStats[star.id], r.players?.[star.id] ?? freshMatchStats(), cleanSheet));
     c.milestones.push(...milestones.map((ms) => ms.id));
     points += milestones.length * TRAINING.milestone;
+    const against = yourSide(team, r).opponent.name;
+    for (const ms of milestones) addScrap(c.scrapbook, seasonIndex(c.year, c.season), ms.emoji, `${star.name}: ${ms.name}, against ${against}!`);
     c.trainingPoints += points;
   }
   return { growth, motm, fiveStar, points, milestones };
@@ -459,6 +469,7 @@ function rivalCheck(c: CareerState, team: Team, r: MatchResult): boolean {
   const { gf, ga, opponent } = yourSide(team, r);
   if (opponent.id !== c.world.rivalId || gf <= ga) return false;
   c.world.rivalWins++;
+  if (c.world.rivalWins === 1) addScrap(c.scrapbook, seasonIndex(c.year, c.season), '😤', `First ever win over your rivals, ${opponent.name}!`);
   return true;
 }
 
@@ -580,7 +591,9 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
   const tier = end.tier;
   let movedUp = false, finished = false;
   const yearEnd = c.season >= SEASONS_PER_YEAR;
+  const oldRival = w.rivalId;
   checkRival(w, team.id, si, yearEnd);
+  seasonScraps(c, team, record, milestones, si, oldRival);
   if (yearEnd) {
     if (c.year >= CAREER_YEARS) {
       finished = true;
@@ -590,10 +603,14 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
       c.season = 1;
       team.ageGroup = careerAge(c);
       movedUp = true;
+      addScrap(c.scrapbook, si + 1, '🎒', `Up to the ${AGE_STATS[team.ageGroup].label}!`);
       ageUpWorld(w, team.ageGroup, si);
       // Someone moves on first, so the growth spurt below is only for the players who stay.
       c.trialDay = startTrialDay(c, team);
-      for (const l of c.trialDay.left) addNews(w, si, '👋', `${l.name} has left ${team.name} for a new club. Good luck, ${l.name}!`);
+      for (const l of c.trialDay.left) {
+        addNews(w, si, '👋', `${l.name} has left ${team.name} for a new club. Good luck, ${l.name}!`);
+        addScrap(c.scrapbook, si, '👋', `${l.name} moved on to a new club.`);
+      }
       // Banked progress turns into stars now that the cap has risen.
       c.pendingGrowth = team.players.flatMap((p) => levelUp(p, team.ageGroup));
     }
@@ -609,6 +626,22 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
   }
   const everyYear = !!titleTier && CAREER_AGES.every((a) => w.titleAges.includes(a));
   return { record, milestones, movedUp, finished, titleTier, everyYear, allTheWayUp: w.tierTitles.every((n) => n > 0) };
+}
+
+/** Scrapbook lines for the end of a mini season: a title, going up or down, a play-off, a new rival, the end of the career. */
+function seasonScraps(c: CareerState, team: Team, rec: CareerSeasonRecord, milestones: StarMilestone[], si: number, oldRival: string): void {
+  const book = c.scrapbook;
+  const here = tierInfo(rec.tier).name;
+  const star = careerStar(c, team);
+  if (rec.position === 1) addScrap(book, si, '🥇', `Champions of the ${here}!`);
+  else if (rec.outcome === 'promoted') addScrap(book, si, '🎟️', `Won the play-off and went up to the ${tierInfo(rec.tier - 1).name}!`);
+  else if (rec.playoff === 'won') addScrap(book, si, '🛟', `Won the play-off to stay in the ${here}.`);
+  if (rec.position === 1 && rec.tier > 1) addScrap(book, si, '⬆️', `Up to the ${tierInfo(rec.tier - 1).name}!`);
+  if (rec.outcome === 'relegated') addScrap(book, si, '⬇️', `Down to the ${tierInfo(rec.tier + 1).name}. Time to bounce back!`);
+  for (const ms of milestones) addScrap(book, si, ms.emoji, `${star?.name ?? 'Your Star'}: ${ms.name}!`);
+  const rival = clubById(c.world, c.world.rivalId);
+  if (rival && c.world.rivalId !== oldRival) addScrap(book, si, '🔥', `${rival.team.name} became your rivals.`);
+  if (c.season >= SEASONS_PER_YEAR && c.year >= CAREER_YEARS) addScrap(book, si, '🎓', `${team.name} finished the Under 10s. Career complete!`);
 }
 
 /** Milestones from a whole mini season: the Star scored the most goals in the league. Each is a training point. */
@@ -712,6 +745,7 @@ export function signTriallist(c: CareerState, team: Team, playerId: string): Pla
   team.players.push(p);
   c.trialDay = null;
   addNews(c.world, seasonIndex(c.year, c.season) - 1, '✍️', `${team.name} signed ${p.name} at the Trial Day!`);
+  addScrap(c.scrapbook, seasonIndex(c.year, c.season), '✍️', `Signed ${p.name} at the Trial Day.`);
   return p;
 }
 

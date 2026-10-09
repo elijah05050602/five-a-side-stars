@@ -72,6 +72,7 @@ export const STICKERS: Sticker[] = [
   { id: 'living-legend', emoji: '🌌', name: 'Living Legend', how: 'Your career Star reaches 16 milestones.', unlocks: '🌌' },
   { id: 'goat', emoji: '🪐', name: 'Greatest of All Time', how: 'Your career Star reaches all 24 milestones.', unlocks: '🪐' },
   { id: 'front-page', emoji: '📰', name: 'Front Page', how: 'One of your players makes the Gazette headline 10 times.' },
+  { id: 'hall-of-famer', emoji: '🏛️', name: 'Hall of Famer', how: 'Put three careers in the Hall of Fame.', unlocks: '🏛️' },
   { id: 'clean-sweep', emoji: '🧹', name: 'Clean Sweep', how: 'Do all three season goals in a career mini season.', unlocks: '🧹' },
 ];
 
@@ -183,6 +184,8 @@ export interface CareerMilestones {
   sweep?: boolean;
   /** One of your players made the Gazette headline. */
   headline?: boolean;
+  /** Careers in the Hall of Fame, after one was added. */
+  hall?: number;
 }
 
 export function recordCareer(m: CareerMilestones): Sticker[] {
@@ -200,6 +203,7 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.starMilestones && m.starMilestones >= 8) award(p, 'star-legend', out);
   if (m.starMilestones && m.starMilestones >= 16) award(p, 'living-legend', out);
   if (m.starMilestones && m.starMilestones >= 24) award(p, 'goat', out);
+  if (m.hall && m.hall >= 3) award(p, 'hall-of-famer', out);
   if (m.headline) {
     p.counts ??= {};
     p.counts.headlines = (p.counts.headlines ?? 0) + 1;
