@@ -3,6 +3,7 @@ import { STICKERS } from '../../data/progress';
 import { SEASON_NAMES, SEASONS_PER_YEAR, type CareerState } from '../../game/career';
 import { CUP_ROUNDS } from '../../game/careerCup';
 import { tierInfo } from '../../game/league';
+import { SEASON_AWARDS, awardsFor } from '../../game/seasonAwards';
 import { esc } from '../hud';
 
 const tierEmoji = (tier: number): string => STICKERS.find((s) => s.id === `tier${tier}-champ`)?.emoji ?? '🏆';
@@ -22,7 +23,11 @@ export function cabinetHtml(c: CareerState): string {
   const cups: Item[] = c.cupRuns.filter((r) => r.reached === 3).map((r) => ({ emoji: '🏵️', label: `${r.age} Cup` }));
   const bestRun = Math.max(-1, ...c.cupRuns.map((r) => r.reached));
   const playoffs: Item[] = c.history.filter((h) => h.playoff === 'won').map((h) => (h.outcome === 'promoted' ? { emoji: '🎟️', label: `Up, ${when(h.age, h.miniSeason)}` } : { emoji: '🛟', label: `Stayed up, ${when(h.age, h.miniSeason)}` }));
-  const awards: Item[] = c.awards.flatMap((n) => n.awards.map((a) => ({ emoji: a.emoji, label: `${a.title}: ${a.name} (${n.age})`, star: a.playerId === c.starId })));
+  const awards: Item[] = [
+    ...c.awards.flatMap((n) => n.awards.map((a) => ({ emoji: a.emoji, label: `${a.title}: ${a.name} (${n.age})`, star: a.playerId === c.starId }))),
+    // The league's end-of-season awards your players won.
+    ...c.history.flatMap((h) => awardsFor(h.awards, c.teamId).map((a) => ({ emoji: SEASON_AWARDS[a.id].emoji, label: `League ${SEASON_AWARDS[a.id].title}: ${a.name}, ${when(h.age, h.miniSeason)}`, star: a.playerId === c.starId }))),
+  ];
   const count = titles.length + cups.length + playoffs.length + awards.length;
   return `<details class="card cabinet-card" ${count ? 'open' : ''}>
     <summary><strong>🏆 Trophy cabinet</strong> <span class="muted small">${count} ${count === 1 ? 'trophy' : 'trophies'}</span></summary>

@@ -1,3 +1,4 @@
+import { SEASON_AWARD_IDS, type SeasonAward, type SeasonAwardId } from '../game/seasonAwards';
 import { SIGNATURE_IDS, type SignatureId } from '../game/supers';
 import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, uid } from './defaults';
 import type { LeagueFixture, LeagueState, Tally } from '../game/league';
@@ -269,7 +270,19 @@ function isLeague(v: unknown): v is LeagueState {
   if (!(isObj(v) && typeof v.teamId === 'string' && typeof v.tier === 'number' && v.tier >= 1 && v.tier <= 5 && Array.isArray(v.rounds) && typeof v.round === 'number' && Array.isArray(v.history) && mendTeams(v.teams))) return false;
   // Stats pages (added with the living league): a league saved before them starts its tally now.
   v.tally = readTallies(v.tally);
+  mendSeasonAwards(v.history);
   return true;
+}
+
+/** End-of-season awards in past seasons (added with them): an award that cannot be read is left out. */
+function mendSeasonAwards(history: unknown[]): void {
+  for (const h of history) {
+    if (!isObj(h) || h.awards === undefined) continue;
+    h.awards = Array.isArray(h.awards)
+      ? h.awards.filter((a): a is SeasonAward => isObj(a) && SEASON_AWARD_IDS.includes(a.id as SeasonAwardId) && typeof a.playerId === 'string' && typeof a.club === 'string' && typeof a.name === 'string' && typeof a.line === 'string')
+        .map((a) => ({ id: a.id, playerId: a.playerId, name: text(a.name, 'Player', 30), club: a.club, line: text(a.line, '', 60) }))
+      : [];
+  }
 }
 
 const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
@@ -281,6 +294,8 @@ function readTallies(v: unknown): Record<string, Tally> {
   for (const [id, t] of Object.entries(v)) {
     if (!isObj(t) || typeof t.club !== 'string' || typeof t.name !== 'string' || !isNameOk(t.name)) continue;
     out[id] = { club: t.club, name: t.name, gk: t.gk === true, p: count(t.p), g: count(t.g), a: count(t.a), sv: count(t.sv), cs: count(t.cs), motm: count(t.motm) };
+    // Where they played (added with the end-of-season awards).
+    if (POSITIONS.includes(t.pos as Position)) out[id].pos = t.pos as Position;
   }
   return out;
 }
@@ -508,7 +523,9 @@ function mendWorld(c: CareerState, teams: Team[]): void {
   if (team) c.world = worldForOldCareer(c, team);
 }
 function isCareer(v: unknown): v is CareerState {
-  return isObj(v) && typeof v.teamId === 'string' && typeof v.year === 'number' && typeof v.season === 'number' && isLeague(v.league) && isObj(v.seasonStats) && isObj(v.careerStats) && Array.isArray(v.history);
+  if (!(isObj(v) && typeof v.teamId === 'string' && typeof v.year === 'number' && typeof v.season === 'number' && isLeague(v.league) && isObj(v.seasonStats) && isObj(v.careerStats) && Array.isArray(v.history))) return false;
+  mendSeasonAwards(v.history);
+  return true;
 }
 /**
  * Star fields (added with Your Star): a career saved before them, or with a Star who has

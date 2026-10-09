@@ -1,7 +1,8 @@
 import { generateOpponent } from '../data/defaults';
-import type { Team } from '../data/types';
+import type { Position, Team } from '../data/types';
 import { playOut, type SimJob, type SimLine, type SimOutcome } from './background';
 import type { MatchResult } from './MatchScene';
+import { seasonAwards, type SeasonAward } from './seasonAwards';
 
 export interface LeagueTier {
   tier: 1 | 2 | 3 | 4 | 5;
@@ -37,6 +38,8 @@ export interface SeasonRecord {
   tier: number;
   position: number;
   outcome: 'champion' | 'promoted' | 'stayed' | 'relegated';
+  /** The league's end-of-season awards (missing in a season from before them). */
+  awards?: SeasonAward[];
 }
 
 export interface LeagueState {
@@ -67,8 +70,10 @@ export interface Tally {
   g: number;
   a: number;
   sv: number;
-  /** Clean sheets (keepers). */
+  /** Clean sheets: matches they played in without their team letting a goal in. */
   cs: number;
+  /** Where they played (missing in a tally from before positions were kept). */
+  pos?: Position;
   /** Player of the Match awards. */
   motm: number;
 }
@@ -89,9 +94,9 @@ export function tallyMatch(tallies: Record<string, Tally>[], home: Team, away: T
       if (!l) continue;
       for (const t of tallies) {
         const row = t[p.id] ??= { club: team.id, name: p.name, gk: p.position === 'GK', p: 0, g: 0, a: 0, sv: 0, cs: 0, motm: 0 };
-        row.club = team.id; row.name = p.name; row.gk = p.position === 'GK';
+        row.club = team.id; row.name = p.name; row.gk = p.position === 'GK'; row.pos = p.position;
         row.p++; row.g += l.g; row.a += l.a; row.sv += l.sv;
-        if (p.position === 'GK' && score[1 - side] === 0) row.cs++;
+        if (score[1 - side] === 0) row.cs++;
       }
       if (motmId === undefined && motmScore(l) > bs) { bs = motmScore(l); best = p.id; }
     }
@@ -226,7 +231,7 @@ export function seasonOutcome(s: LeagueState, human: Team): SeasonRecord {
   if (s.tier === 1 && position === 1) outcome = 'champion';
   else if (position <= PROMOTED && s.tier > 1) outcome = 'promoted';
   else if (position > TEAMS_PER_LEAGUE - RELEGATED && s.tier < 5) outcome = 'relegated';
-  return { season: s.season, tier: s.tier, position, outcome };
+  return { season: s.season, tier: s.tier, position, outcome, awards: seasonAwards(s.tally ?? {}, s.teams.map((t) => t.id).concat(human.id)) };
 }
 
 /** Build next season's league from this one's outcome. */

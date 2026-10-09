@@ -6,7 +6,7 @@ import { wireLogoControls } from '../logoUpload';
 import { nextMatchHtml, playNextMatch, tableCard } from './leagueParts';
 import { formFrom, matchPreview } from '../../game/news';
 import { previewHtml } from './newsParts';
-import { leagueLookup, openLeagueTeamPage, statsHtml, teamStatsHtml } from './worldParts';
+import { leagueLookup, openLeagueTeamPage, seasonAwardsHtml, statsHtml, teamStatsHtml } from './worldParts';
 import { topBar, wire, ordinal, stickerBanner } from './shared';
 import type { Router } from '../screens';
 import { askConfirm } from '../dialog';
@@ -24,7 +24,7 @@ export function renderLeague(root: HTMLElement, router: Router): void {
   const over = seasonOver(ls);
   const next = nextFixture(ls, you);
   const outcome = over ? seasonOutcome(ls, you) : null;
-  const stickers = outcome ? recordSeason(outcome) : [];
+  const stickers = outcome ? recordSeason(outcome, you.id) : [];
   const outcomeText = outcome
     ? outcome.outcome === 'champion' ? `🏆 Champions of the ${info.name}! You are league legends.`
       : outcome.outcome === 'promoted' ? `⬆️ You finished ${ordinal(outcome.position)}: promoted to Tier ${ls.tier - 1}, the ${tierInfo(ls.tier - 1).name}!`
@@ -50,7 +50,7 @@ export function renderLeague(root: HTMLElement, router: Router): void {
         <p>${esc(info.blurb)} · Season ${ls.season}</p>
         <div class="tier-ladder">${TIERS.map((t) => `<span class="rung ${t.tier === ls.tier ? 'is-here' : ''} ${t.tier >= ls.bestTier && t.tier !== ls.tier ? 'is-reached' : ''}" title="${esc(t.name)}">${t.tier}</span>`).join('')}</div>
       </div>
-      ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p>${stickerBanner(stickers)}</div>` : ''}
+      ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p>${seasonAwardsHtml(outcome.awards, leagueLookup(ls, you), you)}${stickerBanner(stickers)}</div>` : ''}
       ${preview}
       <div class="league-body">
         <div class="table-area">${tableArea()}</div>

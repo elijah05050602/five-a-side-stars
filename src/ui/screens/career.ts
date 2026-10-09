@@ -15,7 +15,8 @@ import { careerTableNote, nextMatchHtml, playNextMatch, tableCard } from './leag
 import { matchPreview } from '../../game/news';
 import { goalText } from '../../game/seasonGoals';
 import { previewHtml } from './newsParts';
-import { ladderHtml, openClubPage, statsHtml, teamStatsHtml, worldLookup } from './worldParts';
+import { ladderHtml, openClubPage, seasonAwardsHtml, statsHtml, teamStatsHtml, worldLookup } from './worldParts';
+import { awardsFor } from '../../game/seasonAwards';
 import { topBar, wire, ordinal, growthList, stickerBanner } from './shared';
 import type { Player, Position, SkillKey, Team } from '../../data/types';
 import { SIGNATURE_AT, SIGNATURE_IDS, superLook, type SignatureId, type SuperKind } from '../../game/supers';
@@ -232,7 +233,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
         <div class="tier-ladder">${CAREER_AGES.map((a, i) => `<span class="rung rung-wide ${a === age && !c.done ? 'is-here' : ''} ${(i < c.year - 1 || c.done) && !(c.twist === 'late' && i < 2) ? 'is-reached' : ''}">${a}</span>`).join('')}</div>
       </div>
       ${pending.length ? `<div class="card outcome-card"><h3>🎒 Moving up to the ${esc(AGE_STATS[age].label)}!</h3><p class="muted">Bigger pitch, longer matches and a higher star cap. Saved-up progress turns into stars:</p>${growthList(pending)}</div>` : ''}
-      ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p></div>` : ''}
+      ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p>${seasonAwardsHtml(outcome.awards, clubs, you, c.starId)}</div>` : ''}
       ${news.length ? `<div class="card news-card"><h3>${summer ? '☀️ Summer News' : '📰 League news'}</h3><ul class="plain-list">${news.map((n) => `<li>${n.emoji} ${esc(n.text)}</li>`).join('')}</ul>${summer && w.ladder ? `<details><summary>Last season's final tables</summary><div class="ladder">${w.ladder.map((ids, i) => `<div class="ladder-tier"><h4>Tier ${i + 1} · ${esc(tierInfo(i + 1).name)}</h4><ol>${ids.map((id) => `<li class="${id === you.id ? 'is-you' : ''}">${esc(clubs(id)?.name ?? '')}</li>`).join('')}</ol></div>`).join('')}</div></details>` : ''}</div>` : ''}
       ${choosing && !c.done ? starPicker(c, you) : ''}
       ${offering ? offersCard(c, you) : ''}
@@ -361,7 +362,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     saveTeam(you);
     setCareer(c);
     const playoff = adv.record.playoff === 'won' ? (adv.record.outcome === 'promoted' ? 'up' : 'stayed') : null;
-    const stickers = recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0, tierTitle: adv.titleTier, allTheWayUp: adv.allTheWayUp, everyYear: adv.everyYear, playoff, twistDone: adv.finished ? c.twist : null, starAward: !!adv.awards?.some((a) => a.playerId === c.starId), loyal: adv.finished && c.starPicked && c.moves === 0, starMilestones: adv.milestones.length ? c.milestones.length : 0 });
+    const stickers = recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0, tierTitle: adv.titleTier, allTheWayUp: adv.allTheWayUp, everyYear: adv.everyYear, playoff, twistDone: adv.finished ? c.twist : null, starAward: !!adv.awards?.some((a) => a.playerId === c.starId), seasonAwards: awardsFor(adv.record.awards, you.id).map((a) => a.id), loyal: adv.finished && c.starPicked && c.moves === 0, starMilestones: adv.milestones.length ? c.milestones.length : 0 });
     renderCareer(root, router);
     const awards = adv.awards?.length ? `<div class="awards-night"><h3>🎤 Awards Night: ${esc(adv.record.age)}</h3><ul class="plain-list">${adv.awards.map((a) => `<li class="${a.playerId === c.starId ? 'is-star' : ''}"><span class="aw-emoji">${a.emoji}</span><span><strong>${esc(a.title)}</strong><br/>${a.playerId === c.starId ? '🌟 ' : ''}${esc(a.name)} <span class="muted small">${esc(a.line)}</span></span></li>`).join('')}</ul></div>` : '';
     const note = awards + (adv.milestones.length ? `<div class="star-note"><h3>🌟 Milestone!</h3><ul class="plain-list">${adv.milestones.map((m) => `<li>${m.emoji} <strong>${esc(m.name)}</strong>: ${esc(m.how)} <span class="muted">(+1 point)</span></li>`).join('')}</ul></div>` : '') + stickerBanner(stickers);
