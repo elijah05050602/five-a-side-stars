@@ -1,10 +1,11 @@
 import { getCareer, getLeague, getTeam, saveTeam, setCareer, setLeague, setTournament } from '../../data/storage';
-import { applyCareerMatch, applyCupMatch, applyPlayoffMatch, cupResultNote, careerAge, careerStar, playerOfTheMatch, seasonName, type CareerMatchSummary, type GrowthEvent, type StarMilestone } from '../../game/career';
+import { applyCareerMatch, applyCupMatch, applyPlayoffMatch, careerPlayoff, cupResultNote, careerAge, careerStar, playerOfTheMatch, seasonName, type CareerMatchSummary, type GrowthEvent, type StarMilestone } from '../../game/career';
 import type { MatchResult } from '../../game/MatchScene';
 import { getProgress, recordCareer, type Sticker } from '../../data/progress';
 import { applyLeagueResult, roundJobs, tierInfo, yourPosition } from '../../game/league';
 import { applyResult, cupAheadRequest, currentFixture, type TournamentState } from '../../game/tournament';
 import { inBackground, type CupAhead, type SimOutcome } from '../../game/background';
+import { cupTrophy, finalTrophy, leagueTrophy, playoffTrophy, type TrophyWin } from '../../game/trophy';
 import { aroundTheLeague, matchReport, type MatchReport } from '../../game/news';
 import { reportHtml } from './newsParts';
 import { goalText } from '../../game/seasonGoals';
@@ -54,6 +55,25 @@ export function playAhead(o: StartOptions): Promise<Ahead> {
   const cup = o.tournament && cupAheadRequest(o.tournament);
   if (cup) return inBackground(cup).then((res) => (res.kind === 'cup' ? { cup: res.ahead } : {}));
   return Promise.resolve({});
+}
+
+/**
+ * Whether this match wins a trophy, worked out at the final whistle so the winners can lift it on the
+ * pitch before the results screen. Reads the save but changes nothing (finishMatch records the result).
+ */
+export function trophyFor(o: StartOptions, r: MatchResult, ahead: Ahead = {}): TrophyWin | null {
+  if (o.tournament) return cupTrophy(o.tournament, r);
+  const career = o.career ? getCareer() : null;
+  if (career?.done) return null;
+  const ls = o.league ? getLeague() : career?.league ?? null;
+  const you = ls && getTeam(o.league ? ls.teamId : career!.teamId);
+  if (!ls || !you) return null;
+  if (career && o.big === 'cup-final') return finalTrophy(you, r);
+  if (career && o.big === 'playoff') {
+    const po = careerPlayoff(career, you);
+    return po ? playoffTrophy(career.league.tier, po.up, career.world.playoff, you, r) : null;
+  }
+  return leagueTrophy(ls, you, r, ahead.round?.index === ls.round ? ahead.round.outcomes : undefined);
 }
 
 /**

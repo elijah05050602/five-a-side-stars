@@ -28,6 +28,10 @@ export function seedRandom(seed: number): void {
   };
 }
 
+// Seed once now too: test files build teams when they load, before any beforeEach, and those players'
+// skills and builds must be the same on every run, or a match that depends on them is a coin toss.
+seedRandom(1234);
+
 beforeEach(() => {
   localStorage.clear();
   seedRandom(1234);

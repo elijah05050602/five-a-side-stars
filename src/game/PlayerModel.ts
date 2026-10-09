@@ -68,6 +68,8 @@ export interface AnimState {
   throwIn?: boolean;
   /** Calling for a pass: an arm up in the air. */
   call?: boolean;
+  /** Holding a trophy in both hands: 0 in front of the chest, 1 lifted high over the head. */
+  trophy?: number;
 }
 
 export const IDLE_STATE: AnimState = { speed: 0, kick: 0, dive: 0, diveDir: 1, stun: 0, tackle: 0, scale: 1, wobble: 0, mood: 'neutral', gazeX: 0, gazeY: 0, cheer: false };
@@ -474,6 +476,9 @@ export class PlayerModel {
   }
 
   /** Colour of the always-on ring under the feet (the team's identifying colour). */
+  /** Show or hide the team-coloured ring on the grass (hidden for the trophy lift). */
+  showTeamRing(on: boolean): void { this.teamRing.visible = on; }
+
   setTeamColour(colour: THREE.ColorRepresentation): void {
     (this.teamRing.material as THREE.MeshBasicMaterial).color.set(colour);
   }
@@ -965,6 +970,7 @@ export class PlayerModel {
   private poseExtras(st: AnimState, move: MoveKind | null, mu: number, k: number, kneel: number, ct: number): void {
     if (!this.armL || !this.armR) return;
     const cel = st.celebrate ?? null;
+    if (st.trophy !== undefined) { this.trophyArms(st.trophy); return; }
     if (kneel > 0) {
       // Thighs upright under the body, shins flat on the grass behind, arms flung up to the sky.
       if (this.legL && this.legR) { this.swingAbout(this.legL, 0, 0, 1, -0.3 * kneel); this.swingAbout(this.legR, 0, 0, 1, -0.3 * kneel); }
@@ -1000,6 +1006,27 @@ export class PlayerModel {
     if (move === 'scoop' || move === 'throw' || move === 'punt') return; // the clip has the arms
     const hold = move === 'catchChest' ? Math.min(1, mu * 4) : st.hold ? 1 : 0;
     if (hold > 0) this.holdArms(hold);
+  }
+
+  /** Both hands on a trophy: held in front of the chest (u = 0), lifted straight up over the head (u = 1). */
+  private trophyArms(u: number): void {
+    const l = THREE.MathUtils.clamp(u, 0, 1);
+    const mix = (a: number, b: number) => a + (b - a) * l;
+    this.aimArms(mix(0.75, 0.15), mix(-0.6, 0.8), mix(0.3, 0.8), mix(0.75, 0.15), mix(-0.6, 0.8), mix(0.3, 0.8), 1);
+    // Forearms in towards each other, hands either side of the trophy.
+    this.aimBone(this.foreL, mix(1, 0.15), mix(0, 1), mix(0.35, -0.25), 1);
+    this.aimBone(this.foreR, mix(1, 0.15), mix(0, 1), mix(-0.35, 0.25), 1);
+  }
+
+  /** Where the hands are in the world (halfway between them), for putting a trophy in them. False before the model loads. */
+  handsAt(out: THREE.Vector3): boolean {
+    const l = this.foreL?.children[0], r = this.foreR?.children[0];
+    if (!l || !r) return false;
+    this.group.updateMatrixWorld(true);
+    l.getWorldPosition(out);
+    out.add(r.getWorldPosition(this.tmpV));
+    out.multiplyScalar(0.5);
+    return true;
   }
 
   /** Arms out in front, wrapped round the ball. */

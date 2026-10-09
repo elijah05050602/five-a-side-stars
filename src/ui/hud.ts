@@ -37,8 +37,20 @@ export interface HudRefs {
   superEnd(): void;
   /** Open the subs card for a side (the match pauses while it is up). */
   openSubs(side: Side): void;
+  /** Keep the full-time card away while the match works out whether a trophy is won, and while it is lifted. */
+  holdFullTime(on: boolean): void;
+  /**
+   * The trophy lift: the buttons and scoreboard go and a tap skips it (`info`), or it is over (null).
+   * `again` puts a "Lift it again" button on the full-time card.
+   */
+  ceremony(info: CeremonyInfo | null, again?: boolean): void;
+  /** The trophy goes up: the CHAMPIONS banner (and confetti from level 3). */
+  ceremonyPeak(): void;
   destroy(): void;
 }
+
+/** What was won, for the trophy lift's banner. */
+export interface CeremonyInfo { title: string; team: string; level: number; colours: [string, string]; calm: boolean }
 
 /** Who scored, for the replay's caption. `lite` (Low graphics) leaves out the film grain and colour grade. */
 export interface ReplayInfo { name: string; team: string; minute: number; ownGoal: boolean; lite: boolean }
@@ -91,7 +103,7 @@ function celebrate(root: HTMLElement, kit: { shirt: string; shirt2: string }, si
   if (score) { score.classList.remove('is-pop'); void score.offsetWidth; score.classList.add('is-pop'); }
 }
 
-export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void; onCamera?(): void; onSkipReplay?(): void } & Partial<SubsCallbacks>, coach?: TutorialCoach): HudRefs {
+export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): void; onResume(): void; onQuit(): void; onFinish(): void; onCamera?(): void; onSkipReplay?(): void; onSkipCeremony?(): void; onLiftAgain?(): void } & Partial<SubsCallbacks>, coach?: TutorialCoach): HudRefs {
   const [home, away] = sim.teams;
   const mode = sim.mode;
   root.innerHTML = `
@@ -140,6 +152,11 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
         <div class="rf-flash"></div>
         <div class="rf-wipe" aria-hidden="true"></div>
       </div>
+      <div class="ceremony" id="ceremony" hidden>
+        <div class="cer-vig"></div>
+        <div class="cer-ban"><div class="cer-big">🏆 CHAMPIONS!</div><div class="cer-title" id="cer-title"></div><div class="cer-team" id="cer-team"></div></div>
+        <div class="rf-skip"><span class="rf-skip-touch">Tap to skip</span><span class="rf-skip-keys">Press any button to skip</span></div>
+      </div>
       <div class="hud-comm" id="hud-comm"><span class="hud-comm-mic">🎙️</span><span id="hud-comm-text"></span></div>
       ${touchControlsHtml(getControls().touch)}
       <div class="overlay" id="overlay" hidden></div>
@@ -173,6 +190,15 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
     e.preventDefault();
     cb.onSkipReplay?.();
   });
+  const ceremonyEl = q('ceremony');
+  ceremonyEl.addEventListener('pointerdown', (e) => {
+    if (ceremonyEl.classList.contains('is-done')) return;
+    e.preventDefault();
+    cb.onSkipCeremony?.();
+  });
+  let ceremonyInfo: CeremonyInfo | null = null;
+  let liftAgain = false;
+  let ftHeld = false;
   /** Play a one-off CSS animation again from the start. */
   const replayAnim = (cls: string) => { replayFrame.classList.remove(cls); void replayFrame.offsetWidth; replayFrame.classList.add(cls); };
   const btnTrick = q('btn-trick');
@@ -457,6 +483,9 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       overlay.hidden = false;
       overlay.innerHTML = `<div class="card overlay-card"><h2>Half time</h2><p class="score-big">${s.score[0]} – ${s.score[1]}</p><p class="muted">Have an orange slice! Second half coming up.</p></div>`;
       announce(`Half time. ${scoreLine(s)}.`);
+    } else if (s.phase === 'fulltime' && ftHeld) {
+      overlay.hidden = true;
+      overlay.innerHTML = '';
     } else if (s.phase === 'fulltime') {
       overlay.hidden = false;
       overlay.innerHTML = `
@@ -467,9 +496,14 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
             <p class="score-big">${s.score[0]} – ${s.score[1]}</p>
             <div class="ft-team">${badgeSvg(away.badge, 48)}<span>${esc(away.name)}</span></div>
           </div>`}
-          <button class="btn btn-primary" id="ov-finish">See the results</button>
+          ${liftAgain ? `<p class="ft-trophy">🏆 ${esc(ceremonyInfo?.title ?? '')}!</p>` : ''}
+          <div class="row">
+            <button class="btn btn-primary" id="ov-finish">See the results</button>
+            ${liftAgain ? '<button class="btn btn-blue" id="ov-lift">🏆 Lift it again</button>' : ''}
+          </div>
         </div>`;
       overlay.querySelector('#ov-finish')!.addEventListener('click', () => cb.onFinish());
+      overlay.querySelector('#ov-lift')?.addEventListener('click', () => cb.onLiftAgain?.());
       focusCard();
       announce(`${mode === 'training' ? "Time's up" : mode === 'shootout' ? 'Shoot-out over' : 'Full time'}. ${scoreLine(s)}.`);
     } else {
@@ -511,6 +545,38 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       }
     },
     replayCut() { replayAnim('is-slow'); },
+    holdFullTime(on) {
+      if (ftHeld === on) return;
+      ftHeld = on;
+      if (sim.phase === 'fulltime') renderOverlay(sim);
+    },
+    ceremony(info, again = false) {
+      hudEl.classList.toggle('is-replay', !!info);
+      if (info) {
+        ceremonyInfo = info;
+        ceremonyEl.style.setProperty('--c1', info.colours[0]);
+        ceremonyEl.style.setProperty('--c2', info.colours[1]);
+        ceremonyEl.dataset.level = String(info.level);
+        q('cer-title').textContent = info.title;
+        q('cer-team').textContent = info.team;
+        ceremonyEl.classList.remove('is-peak', 'is-done');
+        ceremonyEl.hidden = false;
+        announce(`Full time. ${info.team} have won! Tap to skip.`);
+      } else {
+        ceremonyEl.classList.add('is-done');
+        ceremonyEl.hidden = true;
+        liftAgain = again;
+      }
+    },
+    ceremonyPeak() {
+      ceremonyEl.classList.remove('is-peak');
+      void ceremonyEl.offsetWidth;
+      ceremonyEl.classList.add('is-peak');
+      if (ceremonyInfo) {
+        announce(`${ceremonyInfo.team}, ${ceremonyInfo.title}!`);
+        if (ceremonyInfo.level >= 3 && !ceremonyInfo.calm) for (const d of [0, 700, 1500]) window.setTimeout(() => { if (!ceremonyEl.hidden) confetti(root, '#ffd23f', ceremonyInfo!.colours[0]); }, d);
+      }
+    },
     superStart(kind, who, yours, team, quick) {
       const info = SUPERS[kind];
       superCut.style.setProperty('--c', info.css);

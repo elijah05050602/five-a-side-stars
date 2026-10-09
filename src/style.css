@@ -456,6 +456,22 @@ input[type='checkbox']:checked { background-color: var(--yellow); background-ima
 @keyframes sc-ban-in { from { transform: translate(110%, -50%) skewX(-12deg); } }
 @keyframes sc-ban-in-left { from { transform: translate(-110%, -50%) skewX(12deg); } }
 @keyframes sc-shine { from { left: -40%; } to { left: 110%; } }
+/* The trophy lift: a clean screen, a soft vignette, and the CHAMPIONS banner as the trophy goes up. A tap skips it. */
+.ceremony { position: absolute; inset: 0; z-index: 5; overflow: hidden; pointer-events: auto; cursor: pointer; touch-action: none; --c1: #ffd23f; --c2: #ffffff; --rf-bar: 6vh; }
+.ceremony .cer-vig { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 50%, rgba(5,7,15,.45) 100%); }
+.ceremony .rf-skip { animation: rf-skip 2.4s .3s ease-in-out both; }
+.ceremony .cer-ban { position: absolute; left: 50%; top: 13%; transform: translateX(-50%); text-align: center; font-family: var(--font); opacity: 0; white-space: nowrap; }
+.ceremony.is-peak .cer-ban { animation: cer-in .7s cubic-bezier(.2,1.4,.4,1) both; }
+.ceremony .cer-big { font: 800 clamp(34px, 10vmin, 96px)/1 var(--font); color: #ffd23f; -webkit-text-stroke: 3px var(--navy); paint-order: stroke fill; text-shadow: 0 6px 0 var(--navy), 0 0 30px rgba(255,210,63,.7); }
+.ceremony .cer-title { margin-top: 6px; display: inline-block; padding: 4px 16px; border-radius: 999px; background: var(--navy); color: #fff; font-weight: 800; font-size: clamp(15px, 3.4vmin, 26px); border: 3px solid #ffd23f; }
+.ceremony .cer-team { margin-top: 4px; color: #fff; font-weight: 800; font-size: clamp(14px, 3vmin, 22px); -webkit-text-stroke: 2px var(--navy); paint-order: stroke fill; }
+/* The top tiers' banner shines. */
+.ceremony:is([data-level="4"], [data-level="5"]).is-peak .cer-big { background: linear-gradient(100deg, #ffd23f 30%, #fff8d6 45%, #ffd23f 60%) 0 0 / 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 6px 0 var(--navy)); animation: cer-shine 2.2s linear infinite; }
+@media (orientation: portrait) { .ceremony .cer-ban { top: 9%; white-space: normal; width: 92vw; } }
+@media (prefers-reduced-motion: reduce) { .ceremony.is-peak .cer-ban { animation-duration: .01s; } .ceremony .cer-big { animation: none !important; } }
+@keyframes cer-in { 0% { opacity: 0; transform: translateX(-50%) scale(2.4); } 60% { opacity: 1; transform: translateX(-50%) scale(.95); } 100% { opacity: 1; transform: translateX(-50%) scale(1); } }
+@keyframes cer-shine { to { background-position: -300% 0; } }
+.ft-trophy { font-weight: 800; color: var(--navy); margin: 4px 0 8px; }
 /* The star meter: a bar for keyboard and controller players, a ring round the Trick button on a touch screen. */
 .bar-fill.bar-super { background: linear-gradient(90deg, #ffb703, #ffd23f, #fff3a0); }
 .bar-super-row.is-ready .bar-label { color: #ffd23f; }

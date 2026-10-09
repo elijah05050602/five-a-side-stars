@@ -19,7 +19,7 @@ import { renderAlbum } from './screens/album';
 import { renderParents } from './screens/parents';
 import { renderHallOfFame } from './screens/hallOfFame';
 
-export { finishMatch, playAhead, type Ahead, type ResultSummary } from './screens/results';
+export { finishMatch, playAhead, trophyFor, type Ahead, type ResultSummary } from './screens/results';
 export { resolveKits } from './screens/setup';
 
 export interface StartOptions {

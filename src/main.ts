@@ -9,7 +9,7 @@ import { unlockAudio } from './game/audio';
 import { preloadCommentary } from './game/voice';
 import { loadPlayerAsset } from './game/playerAsset';
 import { gameRenderer, showDrawError } from './game/renderer';
-import { canLeaveScreen, finishMatch, goBack, leaveScreen, playAhead, renderScreen, type Router, type Screen, type StartOptions } from './ui/screens';
+import { canLeaveScreen, finishMatch, goBack, leaveScreen, playAhead, renderScreen, trophyFor, type Router, type Screen, type StartOptions } from './ui/screens';
 import { armBack, initBackButton } from './ui/backButton';
 import { closePop } from './ui/dialog';
 import type { Occasion } from './game/grounds';
@@ -101,7 +101,11 @@ const router: Router = {
         void ahead.catch(() => ({})).then((a) => router.go(finishMatch(result, o, stickers, a)));
       },
       () => { match = null; router.go(o.tournament ? { name: 'tournament', state: o.tournament } : o.league ? { name: 'league' } : o.career ? { name: 'career' } : { name: 'menu' }); },
-      { weather: o.weather, starId: o.starId, occasion: occasionFor(o, mode) });
+      {
+        weather: o.weather, starId: o.starId, occasion: occasionFor(o, mode),
+        // A match that wins the league or the cup ends with the trophy lift.
+        trophy: (r) => ahead.then((a) => trophyFor(o, r, a), () => null),
+      });
     // `?debug` exposes the running match so screenshot scripts can poke at it.
     if (location.search.includes('debug')) (window as unknown as { __match?: MatchScene }).__match = match;
   },
