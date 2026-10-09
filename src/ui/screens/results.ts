@@ -1,5 +1,5 @@
 import { getCareer, getLeague, getTeam, saveTeam, setCareer, setLeague, setTournament } from '../../data/storage';
-import { applyCareerMatch, applyPlayoffMatch, careerAge, careerStar, playerOfTheMatch, seasonName, type CareerMatchSummary, type GrowthEvent, type StarMilestone } from '../../game/career';
+import { applyCareerMatch, applyCupMatch, applyPlayoffMatch, cupResultNote, careerAge, careerStar, playerOfTheMatch, seasonName, type CareerMatchSummary, type GrowthEvent, type StarMilestone } from '../../game/career';
 import type { MatchResult } from '../../game/MatchScene';
 import { getProgress, recordCareer, type Sticker } from '../../data/progress';
 import { applyLeagueResult, roundJobs, tierInfo, yourPosition } from '../../game/league';
@@ -71,8 +71,10 @@ export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[]
     const you = c && getTeam(c.teamId);
     if (c && you && !c.done) {
       const playoff = o.big === 'playoff';
+      const cupTie = o.big === 'cup' || o.big === 'cup-final';
       const others = ahead.round?.index === c.league.round ? ahead.round.outcomes : undefined;
-      const s: CareerMatchSummary | null = playoff ? applyPlayoffMatch(c, you, r) : applyCareerMatch(c, you, r, others);
+      const cupDone = cupTie ? applyCupMatch(c, you, r) : null;
+      const s: CareerMatchSummary | null = cupTie ? cupDone : playoff ? applyPlayoffMatch(c, you, r) : applyCareerMatch(c, you, r, others);
       saveTeam(you);
       setCareer(c);
       if (s) {
@@ -86,10 +88,15 @@ export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[]
       }
       const played = c.league.rounds[c.league.round - 1];
       const name = (id: string) => (id === you.id ? you.name : c.league.teams.find((t) => t.id === id)?.name ?? '');
-      summary.report = matchReport(r, you.id, r.mode === 'match' ? playerOfTheMatch(r) : null, playoff || !played ? [] : aroundTheLeague(played, you.id, name));
+      summary.report = matchReport(r, you.id, r.mode === 'match' ? playerOfTheMatch(r) : null, playoff || cupTie || !played ? [] : aroundTheLeague(played, you.id, name));
       if (summary.report.hero) summary.stickers.push(...recordCareer({ headline: true }));
       const po = c.world.playoff;
-      if (playoff && po) {
+      if (cupTie) {
+        const note = cupResultNote(c, you, !!cupDone?.cupDone);
+        summary.tableNote = note.text;
+        if (note.won) summary.stickers.push(...recordCareer({ cupWon: true }));
+        if (note.pens && r.mode === 'match') summary.shootout = { ...o, mode: 'shootout', halfSeconds: 60 };
+      } else if (playoff && po) {
         summary.tableNote = po.won === null ? 'All square in the play-off! Penalties decide it.' : po.won ? (po.up ? '🎟️ Play-off won: you are going up!' : '🛟 Play-off won: you are staying up!') : (po.up ? 'Play-off lost. Next season you go again!' : 'Play-off lost: down a tier next season. You will bounce back!');
         if (po.won === null && r.mode === 'match') summary.shootout = { ...o, mode: 'shootout', halfSeconds: 60 };
       } else summary.tableNote = `${careerAge(c)} · ${seasonName(c)} season · match ${Math.min(c.league.round, c.league.rounds.length)} of ${c.league.rounds.length} · you are ${ordinal(yourPosition(c.league, you))}`;

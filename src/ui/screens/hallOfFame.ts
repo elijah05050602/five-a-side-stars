@@ -43,7 +43,7 @@ function cardHtml(e: HallEntry, i: number): string {
       <div class="psc-skills">${Object.entries(s.skills).map(([k, n]) => { const l = skillLabel(s.position, k as never); return `<span title="${esc(l.label)}">${l.emoji} <span class="stars">${starsText(n, 5)}</span></span>`; }).join('')}</div>` : ''}
     <div class="psc-stats"><span><strong>${e.totals.played}</strong> played</span>${keeper ? `<span><strong>${e.totals.saves}</strong> saves</span><span><strong>${e.totals.cleanSheets}</strong> clean sheets</span>` : `<span><strong>${e.totals.goals}</strong> goals</span><span><strong>${e.totals.assists}</strong> assists</span>`}<span><strong>${e.totals.motm}</strong> 🏆</span></div>
     <p class="hof-trophies">${trophyRow(e)}</p>
-    <p class="small">${e.titles} title${e.titles === 1 ? '' : 's'} · ${e.seasons} mini season${e.seasons === 1 ? '' : 's'} · ${e.milestones.length} of ${STAR_MILESTONES.length} milestones${e.playoffsWon ? ` · ${e.playoffsWon} play-off${e.playoffsWon === 1 ? '' : 's'} won` : ''}</p>
+    <p class="small">${e.titles} title${e.titles === 1 ? '' : 's'} · ${e.seasons} mini season${e.seasons === 1 ? '' : 's'} · ${e.milestones.length} of ${STAR_MILESTONES.length} milestones${e.cups ? ` · ${e.cups} cup${e.cups === 1 ? '' : 's'} 🏵️` : ''}${e.playoffsWon ? ` · ${e.playoffsWon} play-off${e.playoffsWon === 1 ? '' : 's'} won` : ''}</p>
     ${e.best ? `<p class="small muted">Best season: ${esc(e.best.when)}, ${ordinal(e.best.position)} in the ${esc(tierInfo(e.best.tier).name)}</p>` : ''}
     ${e.rival ? `<p class="small muted">🔥 v ${esc(e.rival.name)}: won ${e.rival.w}, drew ${e.rival.d}, lost ${e.rival.l}</p>` : ''}
     <button class="btn btn-blue" data-book="${i}">📖 Scrapbook</button>
