@@ -1,6 +1,7 @@
 import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, uid } from './defaults';
-import type { LeagueState } from '../game/league';
-import { defaultStar, type CareerState, type TrialDay } from '../game/career';
+import type { LeagueFixture, LeagueState, Tally } from '../game/league';
+import { defaultStar, worldForOldCareer, type CareerState, type TrialDay } from '../game/career';
+import { TIER_COUNT, freshRecord, type CareerWorld, type ClubRecord, type HeadToHead, type Playoff, type TierSeason, type WorldClub, type WorldNews } from '../game/careerWorld';
 import type { TournamentState } from '../game/tournament';
 import { ensureSkills, fitSkills } from './skills';
 import { freshProgress, type Progress } from './progress';
@@ -102,7 +103,7 @@ function readSave(raw: string): { save: SaveFile; repaired: boolean } {
   if (parsed.progress !== undefined && !progress) repaired = true;
   const league = readOptional(parsed.league, isLeague);
   const career = readOptional(parsed.career, isCareer);
-  if (career && career !== 'broken') mendStar(career, teams);
+  if (career && career !== 'broken') { mendStar(career, teams); mendWorld(career, teams); }
   const tournament = readOptional(parsed.tournament, isTournament);
   if ([league, career, tournament].some((x) => x === 'broken')) repaired = true;
   return {
@@ -227,6 +228,10 @@ function readProgress(p: unknown): Progress | null {
     trophies: n(o.trophies), shootoutsWon: n(o.shootoutsWon), trainingBest: n(o.trainingBest),
     agesPlayed: Array.isArray(o.agesPlayed) ? o.agesPlayed.filter((a) => AGE_GROUPS.includes(a)) : base.agesPlayed,
     stickers: Array.isArray(o.stickers) ? o.stickers.filter((s): s is string => typeof s === 'string') : base.stickers,
+    // Counts on stickers won again (added with tier titles): an older save starts them now.
+    counts: o.counts && typeof o.counts === 'object' && !Array.isArray(o.counts)
+      ? Object.fromEntries(Object.entries(o.counts).filter(([, v]) => typeof v === 'number' && Number.isFinite(v) && v > 0).map(([k, v]) => [k, Math.floor(v)]))
+      : {},
   };
 }
 
@@ -248,7 +253,89 @@ const mendTeams = (list: unknown): boolean => {
 };
 
 function isLeague(v: unknown): v is LeagueState {
-  return isObj(v) && typeof v.teamId === 'string' && typeof v.tier === 'number' && v.tier >= 1 && v.tier <= 5 && Array.isArray(v.rounds) && typeof v.round === 'number' && Array.isArray(v.history) && mendTeams(v.teams);
+  if (!(isObj(v) && typeof v.teamId === 'string' && typeof v.tier === 'number' && v.tier >= 1 && v.tier <= 5 && Array.isArray(v.rounds) && typeof v.round === 'number' && Array.isArray(v.history) && mendTeams(v.teams))) return false;
+  // Stats pages (added with the living league): a league saved before them starts its tally now.
+  v.tally = readTallies(v.tally);
+  return true;
+}
+
+const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+
+/** Everyone's goals, saves and awards; a row that cannot be read is left out. */
+function readTallies(v: unknown): Record<string, Tally> {
+  const out: Record<string, Tally> = {};
+  if (!isObj(v)) return out;
+  for (const [id, t] of Object.entries(v)) {
+    if (!isObj(t) || typeof t.club !== 'string' || typeof t.name !== 'string' || !isNameOk(t.name)) continue;
+    out[id] = { club: t.club, name: t.name, gk: t.gk === true, p: count(t.p), g: count(t.g), a: count(t.a), sv: count(t.sv), cs: count(t.cs), motm: count(t.motm) };
+  }
+  return out;
+}
+
+function readRecord(v: unknown): ClubRecord {
+  if (!isObj(v)) return freshRecord();
+  const big = Array.isArray(v.big) && v.big.length === 3 && typeof v.big[2] === 'string' ? [count(v.big[0]), count(v.big[1]), v.big[2]] as [number, number, string] : null;
+  return { p: count(v.p), w: count(v.w), d: count(v.d), l: count(v.l), gf: count(v.gf), ga: count(v.ga), big, run: count(v.run), bestRun: count(v.bestRun), form: typeof v.form === 'string' ? v.form.replace(/[^WDL]/g, '').slice(-5) : '' };
+}
+
+const isScore = (v: unknown): v is [number, number] => Array.isArray(v) && v.length === 2 && v.every((x) => Number.isInteger(x) && x >= 0);
+const isFixture = (f: unknown): f is LeagueFixture => isObj(f) && typeof f.homeId === 'string' && typeof f.awayId === 'string' && (f.score === null || isScore(f.score));
+
+/**
+ * The career's world (added with the living league), checked piece by piece. Anything that does
+ * not add up (a club in two tiers, a missing tier, your team in none) means a fresh world built
+ * around the career's current league, so the career itself is never lost.
+ */
+function readWorld(v: unknown, youId: string): CareerWorld | null {
+  if (!isObj(v) || !Array.isArray(v.clubs) || !Array.isArray(v.tiers) || v.tiers.length !== TIER_COUNT) return null;
+  const clubs: WorldClub[] = v.clubs.map((c: unknown) => {
+    if (!isObj(c) || !Number.isInteger(c.tier) || typeof c.strength !== 'number' || !Number.isFinite(c.strength)) throw new Error('bad club');
+    const team = migrateTeam(c.team);
+    const past = Array.isArray(c.past) ? c.past.filter((x): x is [number, number, number] => Array.isArray(x) && x.length === 3 && x.every((n) => Number.isInteger(n))) : [];
+    return {
+      team, tier: c.tier as number, strength: Math.min(1.4, Math.max(0.6, c.strength)),
+      starId: typeof c.starId === 'string' && team.players.some((p) => p.id === c.starId) ? c.starId : team.players[0]?.id ?? '',
+      lastRest: typeof c.lastRest === 'number' ? c.lastRest : -1, rec: readRecord(c.rec), past,
+    };
+  });
+  const ids = new Set(clubs.map((c) => c.team.id));
+  const seen = new Set<string>();
+  const tiers: TierSeason[] = v.tiers.map((t: unknown, i: number) => {
+    if (!isObj(t) || t.tier !== i + 1 || !Array.isArray(t.members) || !Array.isArray(t.rounds)) throw new Error('bad tier');
+    const members = t.members.filter((m): m is string => typeof m === 'string');
+    for (const m of members) {
+      if (seen.has(m) || (m !== youId && !ids.has(m))) throw new Error('bad member');
+      seen.add(m);
+    }
+    if (!t.rounds.every((r) => Array.isArray(r) && r.every(isFixture))) throw new Error('bad rounds');
+    return { tier: i + 1, members, resting: typeof t.resting === 'string' && members.includes(t.resting) ? t.resting : null, rounds: t.rounds as LeagueFixture[][] };
+  });
+  if (!seen.has(youId) || seen.size !== ids.size + 1) return null;
+  for (const c of clubs) c.tier = tiers.find((t) => t.members.includes(c.team.id))!.tier;
+  const h2h: Record<string, HeadToHead> = {};
+  if (isObj(v.h2h)) for (const [id, r] of Object.entries(v.h2h)) if (isObj(r)) h2h[id] = { w: count(r.w), d: count(r.d), l: count(r.l), gf: count(r.gf), ga: count(r.ga) };
+  const po = v.playoff;
+  const playoff: Playoff | null = isObj(po) && typeof po.opponentId === 'string' && ids.has(po.opponentId) && isScore(po.score)
+    ? { opponentId: po.opponentId, up: po.up === true, score: po.score, pens: isScore(po.pens) ? po.pens : null, won: typeof po.won === 'boolean' ? po.won : null }
+    : null;
+  const news: WorldNews[] = Array.isArray(v.news) ? v.news.filter((x): x is WorldNews => isObj(x) && typeof x.at === 'number' && typeof x.emoji === 'string' && typeof x.text === 'string') : [];
+  const ladder = Array.isArray(v.ladder) && v.ladder.length === TIER_COUNT && v.ladder.every((t) => Array.isArray(t) && t.every((x) => typeof x === 'string')) ? v.ladder as string[][] : null;
+  const titles = Array.isArray(v.tierTitles) && v.tierTitles.length === TIER_COUNT ? v.tierTitles.map(count) : [0, 0, 0, 0, 0];
+  return {
+    clubs, tiers,
+    rivalId: typeof v.rivalId === 'string' && ids.has(v.rivalId) ? v.rivalId : clubs[0]?.team.id ?? '',
+    rivalFar: count(v.rivalFar), rivalWins: count(v.rivalWins), h2h, you: readRecord(v.you), tally: readTallies(v.tally), playoff, news, ladder,
+    tierTitles: titles, titleAges: Array.isArray(v.titleAges) ? v.titleAges.filter((a): a is AgeGroup => AGE_GROUPS.includes(a as AgeGroup)) : [],
+  };
+}
+
+/** A career saved before the living league (or with a world that cannot be read) gets one built on load, keeping the clubs it is playing now. */
+function mendWorld(c: CareerState, teams: Team[]): void {
+  const team = teams.find((t) => t.id === c.teamId);
+  let world: CareerWorld | null = null;
+  try { world = readWorld((c as Partial<CareerState>).world, c.teamId); } catch { world = null; }
+  if (world && world.tiers[c.league.tier - 1].members.includes(c.teamId)) { c.world = world; return; }
+  if (team) c.world = worldForOldCareer(c, team);
 }
 function isCareer(v: unknown): v is CareerState {
   return isObj(v) && typeof v.teamId === 'string' && typeof v.year === 'number' && typeof v.season === 'number' && isLeague(v.league) && isObj(v.seasonStats) && isObj(v.careerStats) && Array.isArray(v.history);
