@@ -75,6 +75,11 @@ export const STICKERS: Sticker[] = [
   { id: 'cup-winners', emoji: '🏵️', name: 'Cup Winners', how: 'Win the yearly cup in a career.' },
   { id: 'cup-kings', emoji: '🫅', name: 'Cup Kings', how: 'Win the yearly career cup three times.', unlocks: '🫅' },
   { id: 'award-night', emoji: '🎤', name: 'Award Night', how: 'Your career Star wins an end-of-year award.' },
+  { id: 'twist-underdogs', emoji: '🐭', name: 'Underdog Story', how: 'Finish an Underdogs career.' },
+  { id: 'twist-keeper', emoji: '🥅', name: "Keeper's Journey", how: "Finish a Keeper's Journey career." },
+  { id: 'twist-town', emoji: '🏘️', name: 'Town Team Hero', how: 'Finish a Town Team career with Davao Strikers.' },
+  { id: 'twist-late', emoji: '⏰', name: 'Late Bloomer', how: 'Finish a Start Late career.' },
+  { id: 'twist-big', emoji: '🏰', name: 'Big Club Boss', how: 'Finish a Big Club career.' },
   { id: 'new-adventure', emoji: '✈️', name: 'New Adventure', how: 'Your career Star joins a new club.' },
   { id: 'loyal-club', emoji: '🛡️', name: 'Loyal Club', how: 'Finish a career with your Star staying at the same club at every transfer window.' },
   { id: 'hall-of-famer', emoji: '🏛️', name: 'Hall of Famer', how: 'Put three careers in the Hall of Fame.', unlocks: '🏛️' },
@@ -189,6 +194,8 @@ export interface CareerMilestones {
   sweep?: boolean;
   /** One of your players made the Gazette headline. */
   headline?: boolean;
+  /** A career that started with a twist was finished. */
+  twistDone?: string | null;
   /** The Star won an award at awards night. */
   starAward?: boolean;
   /** Won the career's yearly cup. */
@@ -216,6 +223,7 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.starMilestones && m.starMilestones >= 8) award(p, 'star-legend', out);
   if (m.starMilestones && m.starMilestones >= 16) award(p, 'living-legend', out);
   if (m.starMilestones && m.starMilestones >= 24) award(p, 'goat', out);
+  if (m.twistDone) award(p, `twist-${m.twistDone}`, out);
   if (m.starAward) award(p, 'award-night', out);
   if (m.cupWon) {
     award(p, 'cup-winners', out);

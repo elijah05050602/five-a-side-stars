@@ -4,7 +4,7 @@ import { scrapbookHtml } from './hallOfFame';
 import { cabinetHtml } from './cabinet';
 import { POSITION_LABELS } from '../../data/types';
 import { STAR_CAP, skillKeys, skillLabel, starsText } from '../../data/skills';
-import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, cupWaiting, joinClub, signTriallist, stayAtClub, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
+import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, TWISTS, advanceCareer, canTrain, cupWaiting, joinClub, signTriallist, stayAtClub, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
 import { recordCareer } from '../../data/progress';
 import { computeTable, nextFixture, tierInfo } from '../../game/league';
 import { clubById, seasonIndex, tierOf } from '../../game/careerWorld';
@@ -212,11 +212,11 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     <div class="screen career">
       ${topBar('Career')}
       <div class="tier-banner career-banner">
-        <span class="tier-num">Year ${c.year} · ${esc(AGE_STATS[age].label)}</span>
+        <span class="tier-num">Year ${c.year} · ${esc(AGE_STATS[age].label)}${c.twist ? ` · ${TWISTS[c.twist].emoji} ${esc(TWISTS[c.twist].name)}` : ''}</span>
         <h2>${esc(you.name)}</h2>
         <p>${c.done ? 'Career complete! 🎓' : `${esc(seasonName(c))} season (${c.season} of ${SEASONS_PER_YEAR}) · ${esc(tier.name)} (Tier ${c.league.tier})`}</p>
         ${rival ? `<button class="t-link rival-line" data-club="${esc(rival.team.id)}">🔥 Rival: ${badgeSvg(rival.team.badge, 18)} <strong>${esc(rival.team.name)}</strong> <span class="small">(Tier ${tierOf(w, rival.team.id)}${h2h ? ` · won ${h2h.w}, drawn ${h2h.d}, lost ${h2h.l}` : ''})</span></button>` : ''}
-        <div class="tier-ladder">${CAREER_AGES.map((a, i) => `<span class="rung rung-wide ${a === age && !c.done ? 'is-here' : ''} ${i < c.year - 1 || c.done ? 'is-reached' : ''}">${a}</span>`).join('')}</div>
+        <div class="tier-ladder">${CAREER_AGES.map((a, i) => `<span class="rung rung-wide ${a === age && !c.done ? 'is-here' : ''} ${(i < c.year - 1 || c.done) && !(c.twist === 'late' && i < 2) ? 'is-reached' : ''}">${a}</span>`).join('')}</div>
       </div>
       ${pending.length ? `<div class="card outcome-card"><h3>🎒 Moving up to the ${esc(AGE_STATS[age].label)}!</h3><p class="muted">Bigger pitch, longer matches and a higher star cap. Saved-up progress turns into stars:</p>${growthList(pending)}</div>` : ''}
       ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p></div>` : ''}
@@ -341,7 +341,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     saveTeam(you);
     setCareer(c);
     const playoff = adv.record.playoff === 'won' ? (adv.record.outcome === 'promoted' ? 'up' : 'stayed') : null;
-    const stickers = recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0, tierTitle: adv.titleTier, allTheWayUp: adv.allTheWayUp, everyYear: adv.everyYear, playoff, starAward: !!adv.awards?.some((a) => a.playerId === c.starId), loyal: adv.finished && c.starPicked && c.moves === 0, starMilestones: adv.milestones.length ? c.milestones.length : 0 });
+    const stickers = recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0, tierTitle: adv.titleTier, allTheWayUp: adv.allTheWayUp, everyYear: adv.everyYear, playoff, twistDone: adv.finished ? c.twist : null, starAward: !!adv.awards?.some((a) => a.playerId === c.starId), loyal: adv.finished && c.starPicked && c.moves === 0, starMilestones: adv.milestones.length ? c.milestones.length : 0 });
     renderCareer(root, router);
     const awards = adv.awards?.length ? `<div class="awards-night"><h3>🎤 Awards Night: ${esc(adv.record.age)}</h3><ul class="plain-list">${adv.awards.map((a) => `<li class="${a.playerId === c.starId ? 'is-star' : ''}"><span class="aw-emoji">${a.emoji}</span><span><strong>${esc(a.title)}</strong><br/>${a.playerId === c.starId ? '🌟 ' : ''}${esc(a.name)} <span class="muted small">${esc(a.line)}</span></span></li>`).join('')}</ul></div>` : '';
     const note = awards + (adv.milestones.length ? `<div class="star-note"><h3>🌟 Milestone!</h3><ul class="plain-list">${adv.milestones.map((m) => `<li>${m.emoji} <strong>${esc(m.name)}</strong>: ${esc(m.how)} <span class="muted">(+1 point)</span></li>`).join('')}</ul></div>` : '') + stickerBanner(stickers);

@@ -1,6 +1,6 @@
 import { skillKeys } from '../data/skills';
 import type { AgeGroup, Badge, Gender, HairStyle, Position, Team } from '../data/types';
-import type { CareerState } from './career';
+import { TWISTS, type CareerState } from './career';
 
 /**
  * The scrapbook and the Hall of Fame. A career writes short lines into its scrapbook as things
@@ -55,6 +55,8 @@ export interface HallEntry {
   cups: number;
   /** End-of-year awards the Star won. */
   awards: number;
+  /** The twist the career started with, as its emoji and name, or null. */
+  twist: string | null;
   /** The Star's career numbers. */
   totals: { played: number; goals: number; assists: number; saves: number; cleanSheets: number; motm: number };
   milestones: string[];
@@ -97,6 +99,7 @@ export function hallEntry(c: CareerState, team: Team, no: number, ended = Date.n
     bestTier: Math.min(c.league.tier, ...c.history.map((h) => h.tier)),
     playoffsWon: c.history.filter((h) => h.playoff === 'won').length,
     cups: (c.cupRuns ?? []).filter((r) => r.reached === 3).length,
+    twist: c.twist ? `${TWISTS[c.twist].emoji} ${TWISTS[c.twist].name}` : null,
     awards: (c.awards ?? []).reduce((n, y) => n + y.awards.filter((a) => a.playerId === c.starId).length, 0),
     totals: { played: st?.played ?? 0, goals: st?.goals ?? 0, assists: st?.assists ?? 0, saves: st?.saves ?? 0, cleanSheets: st?.cleanSheets ?? 0, motm: st?.motm ?? 0 },
     milestones: [...c.milestones],
