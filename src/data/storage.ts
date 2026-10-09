@@ -1,3 +1,4 @@
+import { SIGNATURE_IDS, type SignatureId } from '../game/supers';
 import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, uid } from './defaults';
 import type { LeagueFixture, LeagueState, Tally } from '../game/league';
 import { LEGACY_RELATIONS, TWIST_IDS, defaultStar, type Legacy, type LegacyRelation, newGoals, worldForOldCareer, type Twist, type CareerState, type TransferOffer, type TrialDay } from '../game/career';
@@ -186,8 +187,10 @@ function migrateTeam(raw: unknown): Team {
       bootStyle: old.bootStyle === undefined ? undefined : oneOf(BOOT_STYLES, old.bootStyle, 'classic'),
       special: oneOf(SPECIALS.map((s) => s.id), old.special, 'none'),
       starter: typeof old.starter === 'boolean' ? old.starter : i < 5,
+      signature: SIGNATURE_IDS.includes(old.signature as SignatureId) ? old.signature : undefined,
     };
     if (!fixedUp.positions?.length) delete fixedUp.positions;
+    if (!fixedUp.signature) delete fixedUp.signature;
     const player = ensureSkills(fixedUp, ageGroup);
     // Teams saved before the star budget (or moved down an age group) can carry too many stars; trim them so no one is blocked.
     return { ...player, skills: fitSkills(player, ageGroup, !team.career) };

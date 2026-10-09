@@ -1,3 +1,5 @@
+import type { SignatureId } from '../game/supers';
+
 export type AgeGroup = 'U5' | 'U6' | 'U7' | 'U8' | 'U9' | 'U10';
 export const AGE_GROUPS: AgeGroup[] = ['U5', 'U6', 'U7', 'U8', 'U9', 'U10'];
 
@@ -91,6 +93,8 @@ export interface Player {
   skills: Skills;
   /** Career mode: progress (0..1) towards the next star in each skill. */
   xp?: Skills;
+  /** Career mode: the Star's signature super look, picked at Legend in the Making. */
+  signature?: SignatureId;
 }
 
 export interface Team {

@@ -7,7 +7,7 @@ import { TUTORIAL_STEPS, type TutorialCoach, type TutorialStep } from '../game/t
 import { getSettings } from '../data/storage';
 import { CAMERA_HEIGHTS, CAMERA_HEIGHT_LABELS, PORTRAIT_VIEW_LABELS, controlsSentence, firstKey, getControls, moveKeysLabel, saveControls, type CameraHeight, type PortraitView } from '../data/controls';
 import { badgeSvg } from './kitPreview';
-import { SUPERS, type SuperKind } from '../game/supers';
+import { superLook, type SignatureId, type SuperKind } from '../game/supers';
 
 export interface HudRefs {
   joystickZone: HTMLElement;
@@ -31,7 +31,7 @@ export interface HudRefs {
   /** The replay cuts to its slow-motion close-up: a flash, and the scorer's caption slides in. */
   replayCut(): void;
   /** A super skill's cutscene overlay (or, with `quick`, just its banner for a moment). */
-  superStart(kind: SuperKind, who: { number: number; name: string }, yours: boolean, team: string, quick: boolean): void;
+  superStart(kind: SuperKind, who: { number: number; name: string; signature?: SignatureId }, yours: boolean, team: string, quick: boolean): void;
   /** Where the hero is on screen, 0..1 across and down, so the glow and speed lines centre on them. */
   superFocus(x: number, y: number): void;
   superEnd(): void;
@@ -206,7 +206,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
   const superRows = [q('bar-super-row'), q('bar-super-row-2')];
   const superBars = [q('bar-super'), q('bar-super-2')];
   const superLabels = [q('bar-super-label'), q('bar-super-label-2')];
-  let trickShows: SuperKind | 'trick' = 'trick';
+  let trickShows = 'trick';
   let superTimer = 0;
   /** The star meters: a bar for keyboard and controller, and the Trick button that turns into the Super button. */
   const showSupers = (sim: MatchSim) => {
@@ -218,18 +218,19 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       const ready = sim.superReady(side) ? sim.superFor(side) : null;
       superBars[i].style.width = `${Math.round(sim.superMeter[side] * 100)}%`;
       superRows[i].classList.toggle('is-ready', !!ready);
-      const label = ready ? `${SUPERS[ready.kind].icon} ${SUPERS[ready.kind].name}! Press Trick` : '⭐ Super';
+      const look = ready ? superLook(ready.kind, ready.p.info) : null;
+      const label = ready && look ? `${look.icon} ${look.name}! Press Trick` : '⭐ Super';
       if (superLabels[i].textContent !== label) superLabels[i].textContent = label;
       if (i !== 0) return;
       btnTrick.style.setProperty('--meter', sim.superMeter[side].toFixed(2));
       btnTrick.classList.toggle('has-meter', true);
-      const shows = ready ? ready.kind : 'trick';
+      const shows = ready ? `${ready.kind}:${ready.p.id}` : 'trick';
       if (shows === trickShows) return;
       trickShows = shows;
       btnTrick.classList.toggle('is-super', !!ready);
-      btnTrick.setAttribute('aria-label', ready ? `Super: ${SUPERS[ready.kind].name}` : 'Trick');
-      btnTrick.innerHTML = ready
-        ? `<span class="abtn-ico" aria-hidden="true">${SUPERS[ready.kind].icon}</span><span class="abtn-txt" aria-hidden="true">Super</span>`
+      btnTrick.setAttribute('aria-label', look ? `Super: ${look.name}` : 'Trick');
+      btnTrick.innerHTML = look
+        ? `<span class="abtn-ico" aria-hidden="true">${look.icon}</span><span class="abtn-txt" aria-hidden="true">Super</span>`
         : '<span class="abtn-ico" aria-hidden="true">✨</span><span class="abtn-txt" aria-hidden="true">Trick</span>';
     });
   };
@@ -578,7 +579,7 @@ export function renderHud(root: HTMLElement, sim: MatchSim, cb: { onPause(): voi
       }
     },
     superStart(kind, who, yours, team, quick) {
-      const info = SUPERS[kind];
+      const info = superLook(kind, who);
       superCut.style.setProperty('--c', info.css);
       superCut.classList.toggle('is-quick', quick);
       superCut.classList.toggle('is-theirs', !yours);
