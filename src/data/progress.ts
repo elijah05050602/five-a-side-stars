@@ -80,6 +80,8 @@ export const STICKERS: Sticker[] = [
   { id: 'twist-town', emoji: '🏘️', name: 'Town Team Hero', how: 'Finish a Town Team career with Davao Strikers.' },
   { id: 'twist-late', emoji: '⏰', name: 'Late Bloomer', how: 'Finish a Start Late career.' },
   { id: 'twist-big', emoji: '🏰', name: 'Big Club Boss', how: 'Finish a Big Club career.' },
+  { id: 'legacy-2', emoji: '👪', name: 'Family Club', how: 'Start a Legacy career with the third generation of your club.' },
+  { id: 'legacy-3', emoji: '🌳', name: 'Family Tree', how: 'Start a Legacy career with the fourth generation of your club.', unlocks: '🌳' },
   { id: 'new-adventure', emoji: '✈️', name: 'New Adventure', how: 'Your career Star joins a new club.' },
   { id: 'loyal-club', emoji: '🛡️', name: 'Loyal Club', how: 'Finish a career with your Star staying at the same club at every transfer window.' },
   { id: 'hall-of-famer', emoji: '🏛️', name: 'Hall of Famer', how: 'Put three careers in the Hall of Fame.', unlocks: '🏛️' },
@@ -194,6 +196,8 @@ export interface CareerMilestones {
   sweep?: boolean;
   /** One of your players made the Gazette headline. */
   headline?: boolean;
+  /** A Legacy career started, at this level. */
+  legacy?: number;
   /** A career that started with a twist was finished. */
   twistDone?: string | null;
   /** The Star won an award at awards night. */
@@ -223,6 +227,8 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.starMilestones && m.starMilestones >= 8) award(p, 'star-legend', out);
   if (m.starMilestones && m.starMilestones >= 16) award(p, 'living-legend', out);
   if (m.starMilestones && m.starMilestones >= 24) award(p, 'goat', out);
+  if (m.legacy && m.legacy >= 2) award(p, 'legacy-2', out);
+  if (m.legacy && m.legacy >= 3) award(p, 'legacy-3', out);
   if (m.twistDone) award(p, `twist-${m.twistDone}`, out);
   if (m.starAward) award(p, 'award-night', out);
   if (m.cupWon) {
