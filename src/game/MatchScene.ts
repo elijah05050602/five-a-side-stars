@@ -12,7 +12,7 @@ import { PlayerModel, type AnimState } from './PlayerModel';
 import { clearPlayerAtlasCache } from './playerAtlas';
 import { clearFaceCache, type Expression } from './playerFace';
 import { CROWD_SHOT_AT, DIVE_RECOVER, MatchSim, RUNOFF_END, RUNOFF_SIDE, type PlayerMatchStats, type SimConfig, type SimPlayer, type Side, type SimEvent, type TrickKind } from './sim';
-import { renderHud, type HudRefs } from '../ui/hud';
+import { renderHud, type CeremonyInfo, type HudRefs } from '../ui/hud';
 import { Sfx } from './sfx';
 import { Commentary } from './voice';
 import { music } from './music';
@@ -27,6 +27,8 @@ import { lastingSuper, puffsFor, startedSupers, type FxPlayer } from './fxView';
 import { P1_RING, P2_RING, teamRingColours } from './ringColours';
 import { GROUNDS, crowdFill, groundFor, type Ground, type GroundId, type Occasion } from './grounds';
 import { goalCamShot } from './replayCamera';
+import { Ceremony } from './ceremony';
+import type { TrophyWin } from './trophy';
 
 /** Whether the touch buttons are showing (the same test the CSS uses). */
 const TOUCH_SCREEN = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
@@ -40,6 +42,11 @@ export interface SceneOptions {
   starId?: string;
   /** What kind of match it is, for where it is played and how full the stands are (default a friendly). */
   occasion?: Occasion;
+  /**
+   * Asked at the final whistle: does this match win a trophy? If it does, the winners lift it on the pitch
+   * (see ceremony.ts) before the full-time card.
+   */
+  trophy?: (r: MatchResult) => Promise<TrophyWin | null>;
 }
 
 /**
@@ -171,6 +178,14 @@ export class MatchScene {
   private lastAdaptUp = false;
   private frameMs = 16.7;
   private adaptTimer = -3;
+  /** The trophy lift: asked once at the final whistle, waiting for any replay to finish, then running. */
+  private readonly askTrophy: SceneOptions['trophy'];
+  private trophyAsked = false;
+  private trophyWin: TrophyWin | null = null;
+  private ceremony: Ceremony | null = null;
+  private ceremonyOver = false;
+  private skipCeremony = false;
+  private skyColours: { bg: THREE.Color; fog: THREE.Color } | null = null;
 
   constructor(renderer: THREE.WebGLRenderer, uiRoot: HTMLElement, config: SimConfig, private readonly onFinish: (r: MatchResult) => void, private readonly onQuit: () => void, options: SceneOptions = {}) {
     this.sim = new MatchSim(config);
@@ -247,6 +262,7 @@ export class MatchScene {
     if (import.meta.env.DEV) (window as unknown as { __crowd: Crowd }).__crowd = this.crowd;
 
     this.starId = options.starId;
+    this.askTrophy = options.trophy;
     this.ringColours = teamRingColours(this.sim.teams[0].kit, this.sim.teams[1].kit);
     for (const p of this.sim.players) this.models.set(p, this.makeModel(p.info, p.side, p.isKeeper));
     for (const side of [0, 1] as Side[]) for (const info of this.sim.bench[side]) this.benchModels.set(info.id, this.makeModel(info, side, info.position === 'GK'));
@@ -279,6 +295,8 @@ export class MatchScene {
       onOpenSubs: (side) => this.openSubs(side),
       onSubs: (side, lineup) => this.sim.requestSubs(side, lineup),
       onSkipReplay: () => { this.skipTapped = true; },
+      onSkipCeremony: () => { this.skipCeremony = true; },
+      onLiftAgain: () => this.liftAgain(),
     }, this.coach ?? undefined);
     // Name the ground in the commentary ticker as the players come out.
     if (this.sim.mode !== 'tutorial') this.hud.say(`Today's match is at ${this.ground.name}!`);
@@ -678,7 +696,7 @@ export class MatchScene {
     if (steps > 0 || replaying || cutting) { this.latches[0].clear(); this.latches[1].clear(); }
     for (const ev of this.sim.events) {
       this.sfx.play(ev);
-      if (ev.type === 'fulltime') music.jingle(this.fullTimeJingle());
+      if (ev.type === 'fulltime') { music.jingle(this.fullTimeJingle()); this.checkTrophy(); }
       if (ev.type === 'sub') this.onSub(ev);
       this.crowd.onEvent(ev);
       if (!this.calm) this.puffFor(ev);
@@ -719,6 +737,15 @@ export class MatchScene {
 
     // Sync models
     const scale = this.sim.stats.scale;
+    // A trophy won: once any goal replay has finished, the winners lift it.
+    if (this.trophyWin && !this.ceremony && !this.replay) this.startCeremony(this.trophyWin);
+    if (this.ceremony) {
+      if (this.skipCeremony || tapped(input) || tapped(input2)) this.ceremony.skip();
+      this.skipCeremony = false;
+      this.runCeremony(dt);
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
     if (this.runReplay(dt, scale)) {
       this.renderer.render(this.scene, this.camera);
       return;
@@ -882,6 +909,114 @@ export class MatchScene {
     } catch (e) { this.cutFailed(e); }
   }
 
+  /**
+   * The final whistle: ask whether a trophy has been won. The full-time card waits for the answer (usually
+   * there at once: the rest of the league round was played in the background during the match).
+   */
+  private checkTrophy(): void {
+    if (!this.askTrophy || this.trophyAsked) return;
+    this.trophyAsked = true;
+    this.hud.holdFullTime(true);
+    const release = () => { if (!this.disposed && !this.trophyWin && !this.ceremony) this.hud.holdFullTime(false); };
+    // Never keep the card away for long, whatever happens to the answer.
+    window.setTimeout(release, 4000);
+    try {
+      this.askTrophy(this.result()).then((win) => { if (this.disposed) return; if (win) this.trophyWin = win; else release(); }, release);
+    } catch (e) {
+      console.warn('trophy check', e);
+      release();
+    }
+  }
+
+  /** Build the trophy lift: who lifts it, who lines up beside them, and who looks on. */
+  private startCeremony(win: TrophyWin): void {
+    try {
+      this.trophyWin = null;
+      const side = win.side;
+      const team = this.sim.players.filter((p) => p.side === side);
+      const goals = new Map<string, number>();
+      for (const g of this.sim.goals) if (g.side === side && !g.ownGoal) goals.set(g.scorer.id, (goals.get(g.scorer.id) ?? 0) + 1);
+      const scorer = [...team].sort((a, b) => (goals.get(b.id) ?? 0) - (goals.get(a.id) ?? 0)).find((p) => (goals.get(p.id) ?? 0) > 0);
+      // The career Star lifts it when they are on the pitch; otherwise the top scorer, or an outfield player.
+      const lifterP = (side === 0 && this.starId ? team.find((p) => p.id === this.starId) : undefined) ?? scorer ?? team.find((p) => !p.isKeeper) ?? team[0];
+      const lifter = this.models.get(lifterP)!;
+      const bench = (s: Side) => this.sim.bench[s].map((b) => this.benchModels.get(b.id)).filter((m): m is PlayerModel => !!m);
+      const mates = [...team.filter((p) => p !== lifterP).map((p) => this.models.get(p)!), ...bench(side)];
+      const others = this.sim.players.filter((p) => p.side !== side);
+      const losers = [...others.map((p) => this.models.get(p)!), ...bench(side === 0 ? 1 : 0)];
+      const loserKeepers = others.filter((p) => p.isKeeper).map((p) => this.models.get(p)!);
+      this.walkers.length = 0;
+      for (const m of [...this.models.values(), ...this.benchModels.values()]) m.setSelected(false);
+      this.clearEffects();
+      const kit = this.sim.teams[side].kit;
+      const c = new Ceremony(win, { lifter, mates, losers, loserKeepers }, {
+        length: this.sim.length, width: this.sim.width, scale: this.sim.stats.scale, colours: [kit.shirt, kit.shirt2],
+        calm: this.calm, lite: this.gfx.tier === 'low', night: this.conditions.time === 'night',
+      }, this.camera, this.camLook);
+      c.onPeak = () => {
+        this.sfx.play('trophy');
+        this.hud.ceremonyPeak();
+        if (c.show.boards) { try { this.extras.boards.show('CHAMPIONS!', '#ffd23f', Infinity); } catch { /* only decoration */ } }
+      };
+      c.fireworks.onBurst = () => this.sfx.play('firework');
+      c.onDusk = (k) => this.dusk(k);
+      this.scene.add(c.group);
+      this.ceremony = c;
+      this.ceremonyOver = false;
+      this.hud.holdFullTime(true);
+      this.hud.ceremony(this.ceremonyInfo(win));
+    } catch (e) { this.ceremonyFailed(e); }
+  }
+
+  private ceremonyInfo(win: TrophyWin): CeremonyInfo {
+    const t = this.sim.teams[win.side];
+    return { title: win.title, team: t.name, level: win.level, colours: [t.kit.shirt, t.kit.shirt2], calm: this.calm };
+  }
+
+  private runCeremony(dt: number): void {
+    const c = this.ceremony!;
+    try {
+      c.update(dt, this.camera);
+      // The winners' fans go wild all the way through.
+      this.crowd.celebrate(c.win.side);
+      if (c.finished && !this.ceremonyOver) {
+        this.ceremonyOver = true;
+        this.hud.ceremony(null, true);
+        this.hud.holdFullTime(false);
+      }
+    } catch (e) { this.ceremonyFailed(e); }
+  }
+
+  /** "Lift it again" on the full-time card. */
+  private liftAgain(): void {
+    const c = this.ceremony;
+    if (!c) return;
+    c.restart();
+    this.ceremonyOver = false;
+    this.hud.holdFullTime(true);
+    this.hud.ceremony(this.ceremonyInfo(c.win));
+  }
+
+  /** The top tier's show: the stadium dims towards dusk (0 to 1) so the fireworks glow. */
+  private dusk(k: number): void {
+    const bg = this.scene.background, fog = this.scene.fog;
+    if (!(bg instanceof THREE.Color) || !fog) return;
+    this.skyColours ??= { bg: bg.clone(), fog: fog.color.clone() };
+    const evening = new THREE.Color('#232a5c');
+    bg.lerpColors(this.skyColours.bg, evening, 0.85 * k);
+    fog.color.lerpColors(this.skyColours.fog, evening, 0.7 * k);
+    this.renderer.toneMappingExposure = EXPOSURE * (1 - 0.42 * k);
+  }
+
+  /** If the trophy lift ever fails, put the full-time card up as usual rather than stop the match ending. */
+  private ceremonyFailed(e: unknown): void {
+    console.warn('Trophy lift stopped after an error', e);
+    if (this.ceremony) { this.scene.remove(this.ceremony.group); this.ceremony.dispose(); disposeObject(this.ceremony.group); }
+    this.ceremony = null;
+    this.trophyWin = null;
+    try { this.hud.ceremony(null); this.hud.holdFullTime(false); } catch { /* the HUD is already gone */ }
+  }
+
   /** A fanfare when the player wins (or in two-player and training), a warm "well played" otherwise. */
   private fullTimeJingle(): 'win' | 'draw' {
     const me = this.sim.config.humanSide;
@@ -953,6 +1088,7 @@ export class MatchScene {
     disposeObject(this.puffs.group);
     disposeObject(this.aura.group);
     disposeObject(this.marker);
+    if (this.ceremony) { this.ceremony.dispose(); disposeObject(this.ceremony.group); this.ceremony = null; }
     this.sun.dispose();
     // Nobody is wearing a kit or pulling a face now: free the cached ones, bar any still held.
     clearPlayerAtlasCache();

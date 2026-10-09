@@ -5,6 +5,7 @@ import { getProgress, recordCareer, type Sticker } from '../../data/progress';
 import { applyLeagueResult, roundJobs, tierInfo, yourPosition } from '../../game/league';
 import { applyResult, cupAheadRequest, currentFixture, type TournamentState } from '../../game/tournament';
 import { inBackground, type CupAhead, type SimOutcome } from '../../game/background';
+import { cupTrophy, leagueTrophy, type TrophyWin } from '../../game/trophy';
 import { esc } from '../hud';
 import { badgeSvg } from '../kitPreview';
 import { topBar, wire, ordinal, stickerBanner, growthList } from './shared';
@@ -44,6 +45,20 @@ export function playAhead(o: StartOptions): Promise<Ahead> {
   const cup = o.tournament && cupAheadRequest(o.tournament);
   if (cup) return inBackground(cup).then((res) => (res.kind === 'cup' ? { cup: res.ahead } : {}));
   return Promise.resolve({});
+}
+
+/**
+ * Whether this match wins a trophy, worked out at the final whistle so the winners can lift it on the
+ * pitch before the results screen. Reads the save but changes nothing (finishMatch records the result).
+ */
+export function trophyFor(o: StartOptions, r: MatchResult, ahead: Ahead = {}): TrophyWin | null {
+  if (o.tournament) return cupTrophy(o.tournament, r);
+  const career = o.career ? getCareer() : null;
+  if (career?.done) return null;
+  const ls = o.league ? getLeague() : career?.league ?? null;
+  const you = ls && getTeam(o.league ? ls.teamId : career!.teamId);
+  if (!ls || !you) return null;
+  return leagueTrophy(ls, you, r, ahead.round?.index === ls.round ? ahead.round.outcomes : undefined);
 }
 
 /**

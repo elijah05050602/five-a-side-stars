@@ -337,3 +337,39 @@ test('a sub picked on the subs card comes on at the next stoppage', async ({ pag
   await expect.poll(() => page.evaluate(() => (window as unknown as SubsWindow).__match.sim.phase)).not.toBe('paused');
   expect(errors).toEqual([]);
 });
+
+test('winning the cup final ends with the trophy lift, which skips with a tap and can be lifted again', async ({ page }) => {
+  const errors: string[] = [];
+  await toLobby(page, errors);
+  type CupWindow = Window & { __match?: { ceremony: unknown; sim: { phase: string; half: number; clock: number; score: number[]; config: { halfSeconds: number } } } };
+  /** Start the cup's next match and win it 2-0 straight away. */
+  const winNext = async () => {
+    await page.evaluate(() => { delete (window as CupWindow).__match; });
+    await page.locator('#c-play').click();
+    await expect.poll(() => page.evaluate(() => !!(window as CupWindow).__match)).toBe(true);
+    await page.evaluate(() => { const s = (window as CupWindow).__match!.sim; s.score[0] = 2; s.score[1] = 0; s.phase = 'play'; s.half = 2; s.clock = s.config.halfSeconds * 2 - 0.2; });
+  };
+  await page.locator('#m-cup').click();
+  await page.locator('#s-go').click();
+  await expect(heading(page)).toContainText('Cup');
+  // A semi-final win is no trophy: straight to the full-time card.
+  await winNext();
+  await expect(page.locator('#overlay:not([hidden]) h2')).toHaveText('Full time!');
+  await expect(page.locator('#ov-lift')).toHaveCount(0);
+  await page.locator('#ov-finish').click();
+  await page.locator('#r-cup').click();
+  // The final: the winners lift the cup before the full-time card.
+  await winNext();
+  const ceremony = page.locator('#ceremony:not([hidden])');
+  await expect(ceremony).toBeVisible();
+  await expect(page.locator('#overlay')).toBeHidden();
+  await expect(page.locator('#cer-title')).toHaveText('Cup winners');
+  await ceremony.click();
+  await expect(page.locator('#overlay:not([hidden]) h2')).toHaveText('Full time!');
+  await page.locator('#ov-lift').click();
+  await expect(ceremony).toBeVisible();
+  await ceremony.click();
+  await page.locator('#ov-finish').click();
+  await expect(heading(page)).toHaveText('Full Time');
+  expect(errors).toEqual([]);
+});

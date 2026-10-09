@@ -128,6 +128,7 @@ export class Sfx {
   /** 0..1 how worked up the crowd is right now (drives the fans in the stand too). */
   get level(): number { return this.excitement; }
 
+  private lastBang = 0;
   private pendingWeather: 'clear' | 'cloudy' | 'rain' | 'snow' = 'clear';
   setWeather(w: 'clear' | 'cloudy' | 'rain' | 'snow'): void { this.pendingWeather = w; }
 
@@ -173,6 +174,19 @@ export class Sfx {
         break;
       case 'super':
         this.superSting(t);
+        break;
+      case 'trophy':
+        // The trophy goes up: the biggest roar of the day.
+        this.roar(t);
+        this.clap(t + 0.4, 30, 0.1);
+        break;
+      case 'firework':
+        // A thump, then the crackle as it opens (not too many at once, or it is all noise).
+        if (t - this.lastBang < 0.09) return;
+        this.lastBang = t;
+        tone(c, out, t, { freq: 80, freqEnd: 34, type: 'sine', gain: 0.32, attack: 0.004, decay: 0.45 });
+        noiseBurst(c, out, t, { gain: 0.12, attack: 0.005, decay: 0.35, freq: 900, freqEnd: 300, q: 0.7 });
+        for (let i = 0; i < 6; i++) noiseBurst(c, out, t + 0.12 + Math.random() * 0.5, { gain: 0.03, decay: 0.04, freq: 2500 + Math.random() * 2500, q: 1.4 });
         break;
       case 'superGo':
         // The cutscene ends and the super lets rip.
