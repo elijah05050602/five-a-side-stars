@@ -1,6 +1,7 @@
 import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, uid } from './defaults';
 import type { LeagueFixture, LeagueState, Tally } from '../game/league';
-import { defaultStar, worldForOldCareer, type CareerState, type TrialDay } from '../game/career';
+import { defaultStar, newGoals, worldForOldCareer, type CareerState, type TrialDay } from '../game/career';
+import { goalDef, type SeasonGoal } from '../game/seasonGoals';
 import { TIER_COUNT, freshRecord, type CareerWorld, type ClubRecord, type HeadToHead, type Playoff, type TierSeason, type WorldClub, type WorldNews } from '../game/careerWorld';
 import type { TournamentState } from '../game/tournament';
 import { ensureSkills, fitSkills } from './skills';
@@ -103,7 +104,7 @@ function readSave(raw: string): { save: SaveFile; repaired: boolean } {
   if (parsed.progress !== undefined && !progress) repaired = true;
   const league = readOptional(parsed.league, isLeague);
   const career = readOptional(parsed.career, isCareer);
-  if (career && career !== 'broken') { mendStar(career, teams); mendWorld(career, teams); }
+  if (career && career !== 'broken') { mendStar(career, teams); mendWorld(career, teams); mendGoals(career, teams); }
   const tournament = readOptional(parsed.tournament, isTournament);
   if ([league, career, tournament].some((x) => x === 'broken')) repaired = true;
   return {
@@ -327,6 +328,24 @@ function readWorld(v: unknown, youId: string): CareerWorld | null {
     rivalFar: count(v.rivalFar), rivalWins: count(v.rivalWins), h2h, you: readRecord(v.you), tally: readTallies(v.tally), playoff, news, ladder,
     tierTitles: titles, titleAges: Array.isArray(v.titleAges) ? v.titleAges.filter((a): a is AgeGroup => AGE_GROUPS.includes(a as AgeGroup)) : [],
   };
+}
+
+/**
+ * Season goals (added after the living league): a career saved before them gets three for the
+ * mini season it is in, and a goal the game no longer knows is left out.
+ */
+function mendGoals(c: CareerState, teams: Team[]): void {
+  const raw = c as Partial<CareerState>;
+  c.sweeps = count(raw.sweeps);
+  const goals: SeasonGoal[] = Array.isArray(raw.goals)
+    ? raw.goals.filter((g): g is SeasonGoal => isObj(g) && typeof g.id === 'string' && !!goalDef(g.id)).map((g) => {
+      const target = Math.max(1, count(g.target));
+      const progress = Math.min(target, count(g.progress));
+      return { id: g.id, level: goalDef(g.id)!.level, target, progress, done: progress >= target };
+    })
+    : [];
+  const team = teams.find((t) => t.id === c.teamId);
+  c.goals = goals.length || !team || !c.world ? goals : newGoals(c, team);
 }
 
 /** A career saved before the living league (or with a world that cannot be read) gets one built on load, keeping the clubs it is playing now. */

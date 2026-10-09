@@ -1009,3 +1009,16 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .gz-form { letter-spacing: 1px; font-size: .85rem; }
 .gz-h2h { text-align: center; margin: 8px 0 0; }
 .gz-around h4 { margin: 8px 0 2px; }
+
+/* ---------- Season goals ---------- */
+.goals-card { max-width: 900px; margin: 0 auto 14px; }
+.goals-card h3 { margin: 0 0 8px; }
+.season-goals li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid #e2e8f0; }
+.season-goals li:last-child { border-bottom: 0; }
+.season-goals li.is-done .sg-text { text-decoration: line-through; text-decoration-color: rgba(46,184,114,.7); }
+.sg-level { font-size: .72rem; font-weight: 800; text-transform: uppercase; border-radius: 999px; padding: 2px 8px; background: #e3f0ff; }
+.sg-level.sg-1 { background: #fff1c2; }
+.sg-level.sg-2 { background: #ffd8cc; }
+.sg-text { flex: 1 1 200px; font-weight: 700; }
+.sg-count { font-weight: 800; color: var(--navy); }
+.season-goals .xp-bar { flex: 0 0 80px; }
