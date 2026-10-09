@@ -30,5 +30,6 @@ export function cabinetHtml(c: CareerState): string {
     ${shelf('Cups', cups, bestRun >= 0 && bestRun < CUP_ROUNDS.length ? `Best cup run so far: the ${CUP_ROUNDS[bestRun].toLowerCase()}.` : 'The cup comes before the 3rd mini season of every year.')}
     ${shelf('Play-offs', playoffs, 'Win a play-off to go up, or to stay up.')}
     ${shelf('Awards', awards, 'Awards night is at the end of every year.')}
+    ${c.legacy ? `<p class="muted small cab-heritage">👪 Club history from ${c.legacy.heritage.careers} ${c.legacy.heritage.careers === 1 ? 'career' : 'careers'} before: ${c.legacy.heritage.titles} league ${c.legacy.heritage.titles === 1 ? 'title' : 'titles'}, ${c.legacy.heritage.cups} ${c.legacy.heritage.cups === 1 ? 'cup' : 'cups'}, ${c.legacy.heritage.awards} ${c.legacy.heritage.awards === 1 ? 'award' : 'awards'}.</p>` : ''}
   </details>`;
 }

@@ -1,6 +1,6 @@
 import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, uid } from './defaults';
 import type { LeagueFixture, LeagueState, Tally } from '../game/league';
-import { TWIST_IDS, defaultStar, newGoals, worldForOldCareer, type Twist, type CareerState, type TransferOffer, type TrialDay } from '../game/career';
+import { LEGACY_RELATIONS, TWIST_IDS, defaultStar, type Legacy, type LegacyRelation, newGoals, worldForOldCareer, type Twist, type CareerState, type TransferOffer, type TrialDay } from '../game/career';
 import { goalDef, type SeasonGoal } from '../game/seasonGoals';
 import type { Award, AwardsNight } from '../game/awards';
 import { CUP_ROUNDS, CUP_SIZE, type CareerCup, type CupTie } from '../game/careerCup';
@@ -412,6 +412,18 @@ function mendAwards(c: CareerState): void {
     : [];
 }
 
+/** A Legacy start's details (added with Legacy), or null when there are none or they cannot be read. */
+function readLegacy(v: unknown): Legacy | null {
+  if (!isObj(v) || typeof v.coach !== 'string' || !isObj(v.heritage)) return null;
+  const h = v.heritage;
+  return {
+    level: Math.max(1, count(v.level)),
+    coach: text(v.coach, 'Coach', 24),
+    relation: oneOf(Object.keys(LEGACY_RELATIONS) as LegacyRelation[], v.relation, 'cousin'),
+    heritage: { titles: count(h.titles), cups: count(h.cups), awards: count(h.awards), careers: count(h.careers) },
+  };
+}
+
 /** Transfer offers (added with transfers): kept only for clubs still in the world; none in an older save. */
 function mendOffers(c: CareerState): void {
   const raw = (c as Partial<CareerState>).offers;
@@ -420,6 +432,7 @@ function mendOffers(c: CareerState): void {
   // The twist the career started with (added with twist starts); an older career had none.
   const twist = (c as Partial<CareerState>).twist;
   c.twist = TWIST_IDS.includes(twist as Twist) ? twist as Twist : null;
+  c.legacy = readLegacy((c as Partial<CareerState>).legacy);
   c.offers = list.length ? list.map((o) => ({ clubId: o.clubId, why: Array.from(o.why).slice(0, 200).join('') })) : null;
 }
 

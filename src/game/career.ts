@@ -76,6 +76,8 @@ export interface CareerState {
   moves: number;
   /** The story the career started with, or null for an ordinary start. */
   twist: Twist | null;
+  /** A Legacy start: the club's earlier generations, or null for a career that started fresh. */
+  legacy: Legacy | null;
   /** This year's cup, from the 3rd mini season until the year's 3rd season is over. Null the rest of the time. */
   cup: CareerCup | null;
   /** Every cup played: the age group and how far you got (0 quarter-finals, 1 semis, 2 final, 3 won). */
@@ -167,6 +169,49 @@ export const seasonName = (c: CareerState): string => SEASON_NAMES[(c.season - 1
 
 const zeroSkills = (): Skills => Object.fromEntries(SKILL_KEYS.map((k) => [k, 0])) as Skills;
 
+/**
+ * Legacy: after a finished career, the next generation starts at the same club. The old Star
+ * coaches (a training point at the start of every mini season), and the club remembers what
+ * every generation before won.
+ */
+export interface Legacy {
+  /** 1 for the second generation, 2 for the third, and so on. */
+  level: number;
+  /** The Star who now coaches, and how the new Star is related to them. */
+  coach: string;
+  relation: LegacyRelation;
+  /** What the club won in the generations before. */
+  heritage: { titles: number; cups: number; awards: number; careers: number };
+}
+export type LegacyRelation = 'brother' | 'sister' | 'cousin';
+export const LEGACY_RELATIONS: Record<LegacyRelation, string> = { brother: 'little brother', sister: 'little sister', cousin: 'cousin' };
+/** The coach's extra training point at the start of every mini season. */
+export const COACH_POINTS = 1;
+
+/** The legacy for the next generation after a finished career (its Star becomes the coach). */
+export function legacyAfter(c: CareerState, team: Team, relation: LegacyRelation): Legacy {
+  const before = c.legacy?.heritage ?? { titles: 0, cups: 0, awards: 0, careers: 0 };
+  const coach = careerStar(c, team)?.name ?? team.name;
+  return {
+    level: (c.legacy?.level ?? 0) + 1,
+    coach,
+    relation,
+    heritage: {
+      titles: before.titles + c.titles,
+      cups: before.cups + c.cupRuns.filter((r) => r.reached === 3).length,
+      awards: before.awards + c.awards.reduce((n, y) => n + y.awards.length, 0),
+      careers: before.careers + 1,
+    },
+  };
+}
+
+/** The club's next generation: the same name, badge and kits, and a new squad of Under 5s. */
+export function nextGeneration(team: Team): Team {
+  const t = structuredClone(team);
+  t.players = team.players.map((p) => makePlayer(p.position, p.number, pick(FIRST_NAMES), p.starter, CAREER_AGES[0]));
+  return t;
+}
+
 /** Career starts with a twist: a different story from the first match. */
 export type Twist = 'underdogs' | 'keeper' | 'town' | 'late' | 'big';
 export const TWISTS: Record<Twist, { emoji: string; name: string; blurb: string }> = {
@@ -214,7 +259,7 @@ function underdogs(team: Team, starId: string | null): void {
  * original is untouched. Give a `star` (one of the team's players, a player from
  * another team, or one made up for the career) and they join as the Star.
  */
-export function createCareer(source: Team, halfSeconds: number, star?: Player, twist: Twist | null = null): { career: CareerState; team: Team } {
+export function createCareer(source: Team, halfSeconds: number, star?: Player, twist: Twist | null = null, legacy: Legacy | null = null): { career: CareerState; team: Team } {
   const year = twist === 'late' ? LATE_START_YEAR : 1;
   const age = CAREER_AGES[year - 1];
   const team: Team = {
@@ -238,12 +283,13 @@ export function createCareer(source: Team, halfSeconds: number, star?: Player, t
   const world = buildWorld(team, tier);
   const league = createLeague(team, halfSeconds, tier, undefined, startSeasons(world, team.id, seasonIndex(year, 1)));
   const career: CareerState = {
-    teamId: team.id, year, season: 1, league, halfSeconds, twist,
+    teamId: team.id, year, season: 1, league, halfSeconds, twist, legacy,
     seasonStats: {}, careerStats: {}, history: [], titles: 0, done: false, pendingGrowth: [],
     starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null, offers: null, moves: 0, cup: null, cupRuns: [], yearStats: {}, newcomer: null, awards: [], world,
     goals: [], sweeps: 0, scrapbook: [],
   };
   career.goals = newGoals(career, team);
+  if (legacy) addScrap(career.scrapbook, seasonIndex(year, 1), '👪', `A new generation at ${team.name}, coached by ${legacy.coach}.`);
   addScrap(career.scrapbook, seasonIndex(year, 1), twist ? TWISTS[twist].emoji : '🌱', `${team.name} kick off in the ${tierInfo(tier).name}${twist ? `: ${TWISTS[twist].name}` : ''}.`);
   return { career, team };
 }
@@ -757,6 +803,10 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
     }
   } else {
     c.season++;
+  }
+  // The coach's training point for every new mini season.
+  if (!finished && c.legacy) {
+    c.trainingPoints += COACH_POINTS;
   }
   c.seasonStats = {};
   if (!finished) {

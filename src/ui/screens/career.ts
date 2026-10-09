@@ -212,7 +212,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     <div class="screen career">
       ${topBar('Career')}
       <div class="tier-banner career-banner">
-        <span class="tier-num">Year ${c.year} · ${esc(AGE_STATS[age].label)}${c.twist ? ` · ${TWISTS[c.twist].emoji} ${esc(TWISTS[c.twist].name)}` : ''}</span>
+        <span class="tier-num">Year ${c.year} · ${esc(AGE_STATS[age].label)}${c.twist ? ` · ${TWISTS[c.twist].emoji} ${esc(TWISTS[c.twist].name)}` : ''}${c.legacy ? ` · 👪 Legacy ${'⭐'.repeat(Math.min(5, c.legacy.level))} · Coach ${esc(c.legacy.coach)}` : ''}</span>
         <h2>${esc(you.name)}</h2>
         <p>${c.done ? 'Career complete! 🎓' : `${esc(seasonName(c))} season (${c.season} of ${SEASONS_PER_YEAR}) · ${esc(tier.name)} (Tier ${c.league.tier})`}</p>
         ${rival ? `<button class="t-link rival-line" data-club="${esc(rival.team.id)}">🔥 Rival: ${badgeSvg(rival.team.badge, 18)} <strong>${esc(rival.team.name)}</strong> <span class="small">(Tier ${tierOf(w, rival.team.id)}${h2h ? ` · won ${h2h.w}, drawn ${h2h.d}, lost ${h2h.l}` : ''})</span></button>` : ''}

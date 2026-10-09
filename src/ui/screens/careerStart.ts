@@ -1,10 +1,10 @@
-import { HAIR_COLOURS, SKIN_TONES, generateOpponent, makePlayer, randomPlayerName } from '../../data/defaults';
+import { HAIR_COLOURS, SKIN_TONES, generateOpponent, genderOfName, makePlayer, randomPlayerName } from '../../data/defaults';
 import { CLUB_TEAM_ID, davaoStrikersTeam } from '../../data/club';
 import { getCareer, getHall, getSettings, getTeam, getTeams, retireCareer, saveTeam, setCareer, updateSettings } from '../../data/storage';
 import { GENDERS, HAIR_STYLES, HAIR_STYLE_LABELS, POSITIONS, POSITION_LABELS, type Gender, type HairStyle, type Player, type Position, type Team } from '../../data/types';
 import { isNameOk } from '../../data/wordFilter';
 import { recordCareer } from '../../data/progress';
-import { CAREER_AGES, SEASONS_PER_YEAR, TWISTS, TWIST_IDS, createCareer, type Twist } from '../../game/career';
+import { CAREER_AGES, LEGACY_RELATIONS, SEASONS_PER_YEAR, TWISTS, TWIST_IDS, careerStar, createCareer, legacyAfter, nextGeneration, type LegacyRelation, type Twist } from '../../game/career';
 import { esc } from '../hud';
 import { badgeSvg, kitChip } from '../kitPreview';
 import { topBar, wire, pressed, focusKey, restoreFocus } from './shared';
@@ -34,10 +34,17 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
   let help = settings.beginnerHelp;
   let halfSeconds = settings.halfLengthSeconds;
   let twist: Twist | null = null;
+  // After a finished career, the next generation can start at the same club.
+  const finished = getCareer();
+  const oldTeam = finished?.done ? getTeam(finished.teamId) : undefined;
+  const oldStar = finished && oldTeam ? careerStar(finished, oldTeam) : undefined;
+  let legacyOn = !!oldTeam;
+  let relation: LegacyRelation = 'cousin';
+  const heirs = oldTeam ? nextGeneration(oldTeam) : null;
 
   const source = () => sources.find((t) => t.id === sourceId) ?? sources[0];
-  const team = (): Team => (teamChoice === 'club' || twist === 'town' ? club : teamChoice === 'mine' ? mine.find((t) => t.id === mineId) ?? random : random);
-  const star = (): Player | null => (starChoice === 'create' ? made : source().players.find((p) => p.id === playerId) ?? null);
+  const team = (): Team => (legacyOn && heirs ? heirs : teamChoice === 'club' || twist === 'town' ? club : teamChoice === 'mine' ? mine.find((t) => t.id === mineId) ?? random : random);
+  const star = (): Player | null => (starChoice === 'create' || legacyOn ? made : source().players.find((p) => p.id === playerId) ?? null);
 
   const playerTile = (t: Team, p: Player) => `<button class="btn star-pick-btn ${p.id === playerId ? 'is-suggested' : ''}" data-player="${esc(p.id)}" ${pressed(p.id === playerId)}>${kitChip(p.position === 'GK' ? t.keeperKit : t.kit, 36)}<span><strong>${esc(p.name)}</strong> #${p.number}<br/><span class="chip chip-pos chip-${p.position.toLowerCase()}">${POSITION_LABELS[p.position]}</span></span></button>`;
   const teamTile = (id: TeamChoice, t: Team, label: string) => `<button class="card team-choice ${teamChoice === id ? 'is-active' : ''}" data-team="${id}" ${pressed(teamChoice === id)}>
@@ -52,10 +59,16 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
       <div class="screen setup career-start">
         ${topBar('Career')}
         <p class="mode-blurb">Grow up from the Under 5s to the Under 10s: four mini seasons a year, five matches each. You play every match with the whole team, and your Star earns training points and milestones along the way.</p>
+        ${oldTeam ? `<div class="card options legacy-card">
+          <h3>👪 Legacy start</h3>
+          <div class="pills"><button class="pill ${legacyOn ? 'is-active' : ''}" data-legacy="1" ${pressed(legacyOn)}>👪 Next generation at ${esc(oldTeam.name)}</button><button class="pill ${!legacyOn ? 'is-active' : ''}" data-legacy="0" ${pressed(!legacyOn)}>🌱 A brand new career</button></div>
+          ${legacyOn ? `<p>${oldStar ? `<strong>${esc(oldStar.name)}</strong> hangs up their boots and becomes the coach (a bonus training point every mini season). ` : ''}A new squad of Under 5s starts at ${esc(oldTeam.name)}, and the club remembers what it won.</p>
+          ${oldStar ? `<div class="field"><span>Your new Star is ${esc(oldStar.name)}'s</span><div class="pills">${(Object.keys(LEGACY_RELATIONS) as LegacyRelation[]).map((r) => `<button class="pill ${relation === r ? 'is-active' : ''}" data-relation="${r}" ${pressed(relation === r)}>${LEGACY_RELATIONS[r]}</button>`).join('')}</div></div>` : ''}` : ''}
+        </div>` : ''}
         <div class="card options">
           <h3>1. Your Star</h3>
-          <div class="pills"><button class="pill ${starChoice === 'existing' ? 'is-active' : ''}" data-star="existing" ${pressed(starChoice === 'existing')}>👟 Choose a player</button><button class="pill ${starChoice === 'create' ? 'is-active' : ''}" data-star="create" ${pressed(starChoice === 'create')}>✏️ Create your own</button></div>
-          ${starChoice === 'existing' ? `
+          ${legacyOn ? '' : `<div class="pills"><button class="pill ${starChoice === 'existing' ? 'is-active' : ''}" data-star="existing" ${pressed(starChoice === 'existing')}>👟 Choose a player</button><button class="pill ${starChoice === 'create' ? 'is-active' : ''}" data-star="create" ${pressed(starChoice === 'create')}>✏️ Create your own</button></div>`}
+          ${starChoice === 'existing' && !legacyOn ? `
             <label class="field"><span>From the team</span><select id="c-source">${sources.map((x) => `<option value="${esc(x.id)}" ${x.id === sourceId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
             <div class="star-pick-grid">${source().players.map((p) => playerTile(source(), p)).join('')}</div>
             ${s ? '' : '<p class="muted small">Tap a player to make them your Star.</p>'}` : `
@@ -68,7 +81,7 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
             <div class="field"><span>Hair style</span><div class="pills">${HAIR_STYLES.map((h) => `<button class="pill ${made.hairStyle === h ? 'is-active' : ''}" data-hairstyle="${h}" ${pressed(made.hairStyle === h)}>${HAIR_STYLE_LABELS[h]}</button>`).join('')}</div></div>
             <div class="field"><span>Hair colour</span><div class="swatches">${HAIR_COLOURS.map((c) => `<button class="swatch round ${made.hair === c ? 'is-active' : ''}" style="background:${c}" data-hair="${c}" aria-label="Hair colour" ${pressed(made.hair === c)}></button>`).join('')}</div></div>`}
         </div>
-        <div class="card options">
+        ${legacyOn ? '' : `<div class="card options">
           <h3>2. Your team</h3>
           <div class="team-choices">
             ${teamTile('random', random, '🎲 Random team')}
@@ -83,7 +96,7 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
           <h3>3. How to start</h3>
           <div class="pills"><button class="pill ${!twist ? 'is-active' : ''}" data-twist="" ${pressed(!twist)}>🌱 The usual way</button>${TWIST_IDS.map((id) => `<button class="pill ${twist === id ? 'is-active' : ''}" data-twist="${id}" ${pressed(twist === id)}>${TWISTS[id].emoji} ${esc(TWISTS[id].name)}</button>`).join('')}</div>
           <p class="muted small">${twist ? `${esc(TWISTS[twist].blurb)} Finish it for its own sticker.` : 'Start in the Under 5s in the Acorn League. Want a different story? Try a twist.'}</p>
-        </div>
+        </div>`}
         <div class="card options">
           <div class="field"><span>The journey</span><div class="age-ladder">${CAREER_AGES.map((a) => `<span class="rung-age">${a}</span>`).join('<span class="rung-arrow">→</span>')}</div><p class="muted small">${SEASONS_PER_YEAR} mini seasons a year · promotion and relegation between tiers carry over · stars grow up to each age group's cap.</p></div>
           <div class="field"><span>Computer difficulty</span>
@@ -116,6 +129,12 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
     root.querySelectorAll<HTMLElement>('[data-hairstyle]').forEach((b) => b.addEventListener('click', () => { made.hairStyle = b.dataset.hairstyle as HairStyle; render(); }));
     root.querySelectorAll<HTMLElement>('[data-hair]').forEach((b) => b.addEventListener('click', () => { made.hair = b.dataset.hair!; render(); }));
     root.querySelectorAll<HTMLElement>('[data-team]').forEach((b) => b.addEventListener('click', () => { teamChoice = b.dataset.team as TeamChoice; if (teamChoice !== 'club' && twist === 'town') twist = null; render(); }));
+    root.querySelectorAll<HTMLElement>('[data-legacy]').forEach((b) => b.addEventListener('click', () => { legacyOn = b.dataset.legacy === '1'; render(); }));
+    root.querySelectorAll<HTMLElement>('[data-relation]').forEach((b) => b.addEventListener('click', () => {
+      relation = b.dataset.relation as LegacyRelation;
+      if (relation !== 'cousin') { made.gender = relation === 'brother' ? 'boy' : 'girl'; if (genderOfName(made.name) && genderOfName(made.name) !== made.gender) made.name = randomPlayerName(made.gender); }
+      render();
+    }));
     root.querySelectorAll<HTMLElement>('[data-twist]').forEach((b) => b.addEventListener('click', () => { twist = (b.dataset.twist || null) as Twist | null; if (twist === 'town') teamChoice = 'club'; render(); }));
     root.querySelector('#c-reroll')?.addEventListener('click', () => { random = generateOpponent('U5', club.kit); render(); });
     root.querySelector<HTMLSelectElement>('#c-mine')?.addEventListener('change', (e) => { mineId = (e.target as HTMLSelectElement).value; render(); });
@@ -126,11 +145,12 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
       if (!chosen || !chosen.name.trim() || !isNameOk(chosen.name)) return;
       if (getCareer() && !(await askConfirm({ tone: 'warn', title: 'Start a new career?', body: 'Your current career goes into the Hall of Fame, with its Star, trophies and scrapbook.\n\nThe team stays in My Teams.', yes: 'Start new career', no: 'Keep my career' }))) return;
       updateSettings({ beginnerHelp: help, halfLengthSeconds: halfSeconds });
+      const legacy = legacyOn && finished && oldTeam ? legacyAfter(finished, oldTeam, relation) : null;
       if (getCareer() && retireCareer()) recordCareer({ hall: getHall().length });
-      const { career, team: you } = createCareer(team(), halfSeconds, { ...chosen, name: chosen.name.trim() }, twist);
+      const { career, team: you } = createCareer(team(), halfSeconds, { ...chosen, name: chosen.name.trim() }, legacy ? null : twist, legacy);
       saveTeam(you);
       setCareer(career);
-      recordCareer({ started: true });
+      recordCareer({ started: true, legacy: legacy?.level });
       router.go({ name: 'career' });
     });
     restoreFocus(root, focused);
