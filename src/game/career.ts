@@ -5,7 +5,7 @@ import { applyLeagueResult, computeTable, createLeague, resultLines, seasonOver,
 import type { MatchResult } from './MatchScene';
 import { freshMatchStats, type PlayerMatchStats } from './sim';
 import type { SimOutcome } from './background';
-import { TIER_COUNT, activeIds, ageUpWorld, allTables, buildWorld, checkRival, clubById, endSeasons, opponentNudge, playOtherTiers, playoffFor, recordFixture, seasonIndex, startSeasons, tierOf, type CareerWorld, type WorldClub } from './careerWorld';
+import { TIER_COUNT, activeIds, addNews, ageUpWorld, allTables, buildWorld, checkRival, clubById, endSeasons, opponentNudge, playOtherTiers, playoffFor, recordFixture, seasonIndex, startSeasons, tierOf, type CareerWorld, type WorldClub } from './careerWorld';
 
 /**
  * Career mode: one team starts in the Under 5s and plays a year in each age
@@ -528,6 +528,7 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
       ageUpWorld(w, team.ageGroup, si);
       // Someone moves on first, so the growth spurt below is only for the players who stay.
       c.trialDay = startTrialDay(c, team);
+      for (const l of c.trialDay.left) addNews(w, si, '👋', `${l.name} has left ${team.name} for a new club. Good luck, ${l.name}!`);
       // Banked progress turns into stars now that the cap has risen.
       c.pendingGrowth = team.players.flatMap((p) => levelUp(p, team.ageGroup));
     }
@@ -626,6 +627,7 @@ export function signTriallist(c: CareerState, team: Team, playerId: string): Pla
   }
   team.players.push(p);
   c.trialDay = null;
+  addNews(c.world, seasonIndex(c.year, c.season) - 1, '✍️', `${team.name} signed ${p.name} at the Trial Day!`);
   return p;
 }
 
