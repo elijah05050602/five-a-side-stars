@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAREER_YEARS, SEASONS_PER_YEAR, TRAINING_STEP, advanceCareer, applyCareerMatch, careerAge, careerSeasonOver, careerStar, chooseLeavers, createCareer, freshSeasonStats, pickStar, signTriallist, startTrialDay, trainStar } from '../game/career';
+import { CAREER_YEARS, SEASONS_PER_YEAR, STAR_MILESTONES, TRAINING_STEP, advanceCareer, applyCareerMatch, careerAge, careerSeasonOver, careerStar, chooseLeavers, createCareer, freshSeasonStats, pickStar, signTriallist, startTrialDay, trainStar } from '../game/career';
 import { makePlayer } from '../data/defaults';
 import { nextFixture } from '../game/league';
 import { STAR_BUDGET, STAR_CAP, skillKeys } from '../data/skills';
@@ -260,5 +260,23 @@ describe('starting a career with a Star', () => {
     expect(you.players).toHaveLength(8);
     expect(you.players.some((p) => p.name === 'S3')).toBe(false);
   });
-});
 
+  it('has 24 Star milestones, with Top Scorer given at the end of a season and Big Stage in the top tier', () => {
+    expect(STAR_MILESTONES).toHaveLength(24);
+    expect(new Set(STAR_MILESTONES.map((m) => m.id)).size).toBe(24);
+    const { career: c, team: you } = createCareer(team('src', 'Milestoners', 'U8'), 60);
+    const star = you.players.find((p) => p.position === 'ATT')!;
+    pickStar(c, you, star.id);
+    while (!careerSeasonOver(c)) play(c, you, 3, 0);
+    const before = c.trainingPoints;
+    const adv = advanceCareer(c, you);
+    // The helper's attackers score in every match, more than anyone else in the league.
+    expect(adv.milestones.map((m) => m.id)).toEqual(['top-scorer']);
+    expect(c.milestones).toContain('top-scorer');
+    expect(c.trainingPoints).toBe(before + 1);
+    expect(c.milestones).not.toContain('big-stage');
+    c.league.tier = 1;
+    play(c, you, 1, 0);
+    expect(c.milestones).toContain('big-stage');
+  });
+});

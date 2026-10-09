@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createLeague, nextFixture, type LeagueState } from '../game/league';
 import { applyResult, createTournament } from '../game/tournament';
-import { cupTrophy, leagueTrophy, levelForTier, playoffTrophy, trophyLook } from '../game/trophy';
+import { cupTrophy, finalTrophy, leagueTrophy, levelForTier, playoffTrophy, trophyLook } from '../game/trophy';
 import { SHOWS } from '../game/ceremony';
 import type { MatchResult } from '../game/MatchScene';
 import type { Team } from '../data/types';
@@ -142,5 +142,17 @@ describe('winning a play-off', () => {
     expect(playoffTrophy(3, true, null, you, result(you, them, [1, 1]))).toBeNull();
     expect(playoffTrophy(3, true, { won: true }, you, result(you, them, [2, 1]))).toBeNull();
     expect(playoffTrophy(3, true, { won: true }, you, result(you, them, [5, 4], 'shootout'))).toBeNull();
+  });
+});
+
+describe('winning a one-off final', () => {
+  const them = team('them', 'Them');
+
+  it('the winner of the match or its shoot-out lifts the big gold cup, on whichever side they played', () => {
+    expect(finalTrophy(you, result(you, them, [2, 0]))).toMatchObject({ level: 5, kind: 'cup', title: 'Cup winners', side: 0 });
+    expect(finalTrophy(you, result(them, you, [3, 4], 'shootout'))).toMatchObject({ side: 1 });
+    expect(finalTrophy(you, result(you, them, [1, 1]))).toBeNull();
+    expect(finalTrophy(you, result(them, you, [1, 0]))).toBeNull();
+    expect(finalTrophy(you, { ...result(you, them, [2, 0]), mode: 'training' })).toBeNull();
   });
 });

@@ -81,3 +81,15 @@ export function playoffTrophy(tier: number, up: boolean, played: { won: boolean 
   if (h === a || (h > a) !== (side === 0)) return null;
   return win(levelForTier(tier), 'Play-off winners', side);
 }
+
+/**
+ * Does this match win a one-off final for `you`, such as the career's yearly cup? The match or the shoot-out
+ * that settles a draw, won by `you`: the big gold cup, like every cup final.
+ */
+export function finalTrophy(you: Team, r: MatchResult, title = 'Cup winners'): TrophyWin | null {
+  if (r.mode !== 'match' && r.mode !== 'shootout') return null;
+  const side: Side = r.home.id === you.id ? 0 : 1;
+  const [h, a] = r.score;
+  if (h === a || (h > a) !== (side === 0)) return null;
+  return win(5, title, side);
+}

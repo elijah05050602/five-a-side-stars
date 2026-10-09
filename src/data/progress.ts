@@ -69,10 +69,17 @@ export const STICKERS: Sticker[] = [
   { id: 'rival-master', emoji: '☄️', name: 'Rival Master', how: 'Beat your career rival five times.' },
   { id: 'playoff-hero', emoji: '🎟️', name: 'Play-off Hero', how: 'Win a career play-off to go up.' },
   { id: 'great-escape', emoji: '🛟', name: 'Great Escape', how: 'Win a career play-off to stay up.' },
+  { id: 'living-legend', emoji: '🌌', name: 'Living Legend', how: 'Your career Star reaches 16 milestones.', unlocks: '🌌' },
+  { id: 'goat', emoji: '🪐', name: 'Greatest of All Time', how: 'Your career Star reaches all 24 milestones.', unlocks: '🪐' },
+  { id: 'front-page', emoji: '📰', name: 'Front Page', how: 'One of your players makes the Gazette headline 10 times.' },
+  { id: 'new-adventure', emoji: '✈️', name: 'New Adventure', how: 'Your career Star joins a new club.' },
+  { id: 'loyal-club', emoji: '🛡️', name: 'Loyal Club', how: 'Finish a career with your Star staying at the same club at every transfer window.' },
+  { id: 'hall-of-famer', emoji: '🏛️', name: 'Hall of Famer', how: 'Put three careers in the Hall of Fame.', unlocks: '🏛️' },
+  { id: 'clean-sweep', emoji: '🧹', name: 'Clean Sweep', how: 'Do all three season goals in a career mini season.', unlocks: '🧹' },
 ];
 
 /** Stickers that can be won again, with a count on them in the album. */
-export const COUNTED_STICKERS = ['tier5-champ', 'tier4-champ', 'tier3-champ', 'tier2-champ', 'tier1-champ', 'rival-beaten', 'playoff-hero', 'great-escape'];
+export const COUNTED_STICKERS = ['clean-sweep', 'tier5-champ', 'tier4-champ', 'tier3-champ', 'tier2-champ', 'tier1-champ', 'rival-beaten', 'playoff-hero', 'great-escape'];
 
 export function getProgress(): Progress {
   const save = loadSave();
@@ -175,6 +182,16 @@ export interface CareerMilestones {
   /** A win over the rival, and how many there have been. */
   rivalWins?: number;
   playoff?: 'up' | 'stayed' | null;
+  /** All three season goals done. */
+  sweep?: boolean;
+  /** One of your players made the Gazette headline. */
+  headline?: boolean;
+  /** The Star joined another club. */
+  joined?: boolean;
+  /** A career finished with the Star at the same club all the way. */
+  loyal?: boolean;
+  /** Careers in the Hall of Fame, after one was added. */
+  hall?: number;
 }
 
 export function recordCareer(m: CareerMilestones): Sticker[] {
@@ -190,6 +207,16 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.finished) award(p, 'career-done', out);
   if (m.starMilestones && m.starMilestones >= 1) award(p, 'star-moment', out);
   if (m.starMilestones && m.starMilestones >= 8) award(p, 'star-legend', out);
+  if (m.starMilestones && m.starMilestones >= 16) award(p, 'living-legend', out);
+  if (m.starMilestones && m.starMilestones >= 24) award(p, 'goat', out);
+  if (m.joined) award(p, 'new-adventure', out);
+  if (m.loyal) award(p, 'loyal-club', out);
+  if (m.hall && m.hall >= 3) award(p, 'hall-of-famer', out);
+  if (m.headline) {
+    p.counts ??= {};
+    p.counts.headlines = (p.counts.headlines ?? 0) + 1;
+    if (p.counts.headlines >= 10) award(p, 'front-page', out);
+  }
   if (m.tierTitle) award(p, `tier${m.tierTitle}-champ`, out);
   if (m.allTheWayUp) award(p, 'all-the-way-up', out);
   if (m.everyYear) award(p, 'every-year', out);
@@ -197,6 +224,7 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.rivalWins && m.rivalWins >= 5) award(p, 'rival-master', out);
   if (m.playoff === 'up') award(p, 'playoff-hero', out);
   if (m.playoff === 'stayed') award(p, 'great-escape', out);
+  if (m.sweep) award(p, 'clean-sweep', out);
   persist();
   return out;
 }

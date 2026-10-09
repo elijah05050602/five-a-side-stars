@@ -1,8 +1,9 @@
 import { AGE_STATS } from '../../data/ageGroups';
-import { getCareer, getTeam, saveTeam, setCareer } from '../../data/storage';
+import { getCareer, getHall, getTeam, retireCareer, saveTeam, setCareer } from '../../data/storage';
+import { scrapbookHtml } from './hallOfFame';
 import { POSITION_LABELS } from '../../data/types';
 import { STAR_CAP, skillKeys, skillLabel, starsText } from '../../data/skills';
-import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, signTriallist, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
+import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, joinClub, signTriallist, stayAtClub, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
 import { recordCareer } from '../../data/progress';
 import { computeTable, nextFixture, tierInfo } from '../../game/league';
 import { clubById, seasonIndex, tierOf } from '../../game/careerWorld';
@@ -10,6 +11,7 @@ import { esc } from '../hud';
 import { badgeSvg, kitChip } from '../kitPreview';
 import { careerTableNote, nextMatchHtml, playNextMatch, tableCard } from './leagueParts';
 import { matchPreview } from '../../game/news';
+import { goalText } from '../../game/seasonGoals';
 import { previewHtml } from './newsParts';
 import { ladderHtml, openClubPage, statsHtml, teamStatsHtml, worldLookup } from './worldParts';
 import { topBar, wire, ordinal, growthList, stickerBanner } from './shared';
@@ -41,6 +43,26 @@ function trialCard(c: CareerState, you: Team): string {
       <div class="psc-skills">${skillKeys(p.position).map((k) => { const l = skillLabel(p.position, k); return `<span title="${esc(l.label)}">${l.emoji} <span class="stars">${starsText(p.skills[k], cap)}</span></span>`; }).join('')}</div>
       <button class="btn btn-primary" data-sign="${esc(p.id)}">✍️ Sign ${esc(p.name)}</button>
     </div>`).join('')}</div>
+  </div>`;
+}
+
+/** Transfer offers after moving up an age group: join one of the clubs, or stay and be captain. */
+function offersCard(c: CareerState, you: Team): string {
+  const star = careerStar(c, you)!;
+  const w = c.world;
+  return `<div class="card star-pick offers-card">
+    <h3>✈️ Transfer window!</h3>
+    <p>Other clubs have seen what <strong>${esc(star.name)}</strong> can do. ${esc(star.name)} can join one of them (on their own: the team-mates stay at ${esc(you.name)}), or stay and be made captain.</p>
+    <div class="stat-cards">${c.offers!.map((o) => {
+      const club = clubById(w, o.clubId);
+      if (!club) return '';
+      return `<div class="card player-stat-card offer">
+        <div class="psc-top">${badgeSvg(club.team.badge, 40)}<div><strong>${esc(club.team.name)}</strong><br/><span class="muted small">Tier ${club.tier} · ${esc(tierInfo(club.tier).name)}</span>${o.clubId === w.rivalId ? '<br/><span class="chip chip-rival">🔥 Your rival</span>' : ''}</div></div>
+        <p class="small">${esc(o.why)}</p>
+        <div class="row"><button class="btn btn-ghost" data-club="${esc(o.clubId)}">📋 Club page</button><button class="btn btn-primary" data-join="${esc(o.clubId)}">✈️ Join</button></div>
+      </div>`;
+    }).join('')}</div>
+    <button class="btn btn-blue btn-big" id="k-stay">🛡️ Stay at ${esc(you.name)} and be captain</button>
   </div>`;
 }
 
@@ -82,7 +104,8 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
   const age = careerAge(c);
   const star = careerStar(c, you);
   const choosing = !star || !c.starPicked;
-  const trial = !c.done && !choosing && !!c.trialDay;
+  const offering = !c.done && !choosing && !!c.offers?.length;
+  const trial = !c.done && !choosing && !offering && !!c.trialDay;
   const tier = tierInfo(c.league.tier);
   const table = computeTable(c.league, you);
   const over = !c.done && careerSeasonOver(c);
@@ -122,6 +145,15 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     }));
   };
   const preview = choosing || trial || c.done ? '' : next ? previewFor(next.youAreHome ? next.away : next.home, next.youAreHome) : po && poWaiting ? previewFor(po.opponent.team, true, po.up ? 'up' : 'stay') : '';
+  const goalsDone = c.goals.filter((g) => g.done).length;
+  const goalsCard = c.done || !c.goals.length ? '' : `<div class="card goals-card">
+    <h3>🎯 Season goals <span class="muted small">${goalsDone} of ${c.goals.length} done · 1 training point each</span></h3>
+    <ul class="plain-list season-goals">${c.goals.map((g) => {
+      const t = goalText(g, star?.name ?? '');
+      return `<li class="${g.done ? 'is-done' : ''}"><span class="sg-level sg-${g.level}">${['Easy', 'Medium', 'Hard'][g.level]}</span><span class="sg-text">${t.emoji} ${esc(t.text)}</span>${g.done ? '<span class="sg-tick">✅</span>' : g.target > 1 ? `<span class="sg-count">${g.progress}/${g.target}</span>` : ''}${g.target > 1 && !g.done ? `<span class="xp-bar"><i style="width:${Math.round((g.progress / g.target) * 100)}%"></i></span>` : ''}</li>`;
+    }).join('')}</ul>
+    ${goalsDone === c.goals.length ? '<p><strong>🧹 Clean sweep!</strong> Every goal done this season.</p>' : ''}
+  </div>`;
   let tab: 'table' | 'stats' | 'tiers' = 'table';
   let statScope: 'season' | 'career' = 'season';
   const tabs = () => `<div class="pills table-tabs">${(['table', 'stats', 'tiers'] as const).map((t) => `<button class="pill ${t === tab ? 'is-active' : ''}" data-tab="${t}">${t === 'table' ? '📋 Table' : t === 'stats' ? '📊 Stats' : '🪜 All leagues'}</button>`).join('')}</div>`;
@@ -135,6 +167,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       <h4>Teams</h4>${teamStatsHtml(yourIds, c.league.rounds, clubs, you, (id) => (id === you.id ? w.you : clubById(w, id)?.rec))}
     </div>`;
   };
+  const hallCount = getHall().length;
   const sum = Object.values(c.careerStats);
   const totals = { played: Math.max(0, ...sum.map((x) => x.played)), goals: sum.reduce((n, x) => n + x.goals, 0) };
   let scope: 'season' | 'career' = 'season';
@@ -164,14 +197,16 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       ${outcome ? `<div class="card outcome-card outcome-${outcome.outcome}"><h3>Season over</h3><p>${esc(outcomeText)}</p></div>` : ''}
       ${news.length ? `<div class="card news-card"><h3>${summer ? '☀️ Summer News' : '📰 League news'}</h3><ul class="plain-list">${news.map((n) => `<li>${n.emoji} ${esc(n.text)}</li>`).join('')}</ul>${summer && w.ladder ? `<details><summary>Last season's final tables</summary><div class="ladder">${w.ladder.map((ids, i) => `<div class="ladder-tier"><h4>Tier ${i + 1} · ${esc(tierInfo(i + 1).name)}</h4><ol>${ids.map((id) => `<li class="${id === you.id ? 'is-you' : ''}">${esc(clubs(id)?.name ?? '')}</li>`).join('')}</ol></div>`).join('')}</div></details>` : ''}</div>` : ''}
       ${choosing && !c.done ? starPicker(c, you) : ''}
+      ${offering ? offersCard(c, you) : ''}
       ${trial ? trialCard(c, you) : ''}
       ${star && !choosing ? starCard(c, you, justGrew) : ''}
       ${preview}
+      ${choosing ? '' : goalsCard}
       ${c.done ? `<div class="card trophy-card"><div class="trophy">🎓</div><h2>All grown up!</h2><p class="muted">${esc(you.name)} played ${totals.played} matches from the Under 5s to the Under 10s, scored ${totals.goals} goals and won ${c.titles} mini-season title${c.titles === 1 ? '' : 's'}. What a journey.</p></div>` : ''}
       <div class="league-body">
         ${c.done ? '' : `<div class="table-area">${tableArea()}</div>`}
         <div class="card next-card">
-          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : trial ? '<p class="muted">Sign a new player to kick off.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play', rivalNext ? '<span class="chip chip-rival">🔥 Rival match!</span>' : '') : po && poWaiting ? `
+          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : offering ? '<p class="muted">Choose: join a new club, or stay and be captain.</p>' : trial ? '<p class="muted">Sign a new player to kick off.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play', (rivalNext ? '<span class="chip chip-rival">🔥 Rival match!</span>' : '') + (c.goals.length ? `<span class="muted small">🎯 ${goalsDone} of ${c.goals.length} season goals done</span>` : '')) : po && poWaiting ? `
             <span class="muted">${po.up ? '🎟️ Play-off to go up' : '🛟 Play-off to stay up'}</span>
             <div class="fx-team is-you">${badgeSvg(you.badge, 40)}<span class="fx-name">${esc(you.name)}</span></div>
             <div class="vs-mid">VS</div>
@@ -181,9 +216,11 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
             <button class="btn btn-primary btn-big" id="k-next">${lastSeason ? (lastYear ? '🎓 Finish the career' : `🎒 Move up to ${CAREER_AGES[c.year]}`) : '▶️ Next mini season'}</button>`}
           <button class="btn btn-blue" id="k-edit">👕 Team looks</button>
           ${c.history.length ? `<details class="history"><summary>Past seasons</summary><ul class="plain-list muted">${c.history.map((h) => `<li>${esc(h.age)} ${esc(SEASON_NAMES[(h.miniSeason - 1) % SEASONS_PER_YEAR])}: ${ordinal(h.position)} in ${esc(tierInfo(h.tier).name)}${h.playoff ? ` (play-off ${h.playoff})` : ''}${h.topScorer ? ` · top scorer ${esc(h.topScorer.name)} (${h.topScorer.goals})` : ''}</li>`).join('')}</ul></details>` : ''}
-          <button class="btn btn-ghost" id="k-quit">Leave this career</button>
+          ${hallCount ? `<button class="btn btn-ghost" id="k-hall">🏛️ Hall of Fame <span class="muted small">(${hallCount})</span></button>` : ''}
+          <button class="btn btn-ghost" id="k-quit">🏛️ Retire this career</button>
         </div>
       </div>
+      ${c.scrapbook.length ? `<details class="card scrap-card" ${c.done ? 'open' : ''}><summary><strong>📖 Scrapbook</strong> <span class="muted small">${c.scrapbook.length} big moment${c.scrapbook.length === 1 ? '' : 's'}</span></summary>${scrapbookHtml(c.scrapbook)}</details>` : ''}
       <div class="card stat-cards-wrap">
         <div class="row space-between">
           <h3>Player cards</h3>
@@ -224,6 +261,29 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     setCareer(c);
     renderCareer(root, router);
   }));
+  root.querySelector('#k-stay')?.addEventListener('click', () => {
+    const milestones = stayAtClub(c, you);
+    setCareer(c);
+    const stickers = recordCareer({ starMilestones: c.milestones.length });
+    renderCareer(root, router);
+    const note = (milestones.length ? `<div class="star-note"><h3>©️ Captain!</h3><p>${esc(careerStar(c, you)?.name ?? '')} is the new captain of ${esc(you.name)}. <span class="muted">(+1 point)</span></p></div>` : '') + stickerBanner(stickers);
+    if (note) root.querySelector('.career-banner')?.insertAdjacentHTML('afterend', `<div class="card outcome-card">${note}</div>`);
+  });
+  root.querySelectorAll<HTMLElement>('[data-join]').forEach((b) => b.addEventListener('click', async () => {
+    const club = clubById(c.world, b.dataset.join!);
+    const star = careerStar(c, you);
+    if (!club || !star) return;
+    const rivals = club.team.id === c.world.rivalId;
+    if (!(await askConfirm({ title: `Join ${club.team.name}?`, body: `${star.name} moves to ${club.team.name} and plays for them from now on. ${you.name} stay in My Teams${rivals ? ', and become your new rivals' : ''}.`, yes: 'Join', no: 'Not yet' }))) return;
+    const fresh = joinClub(c, you, club.team.id);
+    if (!fresh) return;
+    saveTeam(you);
+    saveTeam(fresh);
+    setCareer(c);
+    const stickers = recordCareer({ joined: true });
+    renderCareer(root, router);
+    root.querySelector('.career-banner')?.insertAdjacentHTML('afterend', `<div class="card outcome-card"><h3>✈️ Welcome to ${esc(fresh.name)}!</h3><p>${esc(star.name)} pulls on a new shirt. A new club, a new tier, a new adventure.</p>${stickerBanner(stickers)}</div>`);
+  }));
   root.querySelectorAll<HTMLElement>('[data-sign]').forEach((b) => b.addEventListener('click', () => {
     if (!signTriallist(c, you, b.dataset.sign!)) return;
     saveTeam(you);
@@ -245,12 +305,19 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     saveTeam(you);
     setCareer(c);
     const playoff = adv.record.playoff === 'won' ? (adv.record.outcome === 'promoted' ? 'up' : 'stayed') : null;
-    recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0, tierTitle: adv.titleTier, allTheWayUp: adv.allTheWayUp, everyYear: adv.everyYear, playoff });
+    const stickers = recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0, tierTitle: adv.titleTier, allTheWayUp: adv.allTheWayUp, everyYear: adv.everyYear, playoff, loyal: adv.finished && c.starPicked && c.moves === 0, starMilestones: adv.milestones.length ? c.milestones.length : 0 });
     renderCareer(root, router);
+    const note = (adv.milestones.length ? `<div class="star-note"><h3>🌟 Milestone!</h3><ul class="plain-list">${adv.milestones.map((m) => `<li>${m.emoji} <strong>${esc(m.name)}</strong>: ${esc(m.how)} <span class="muted">(+1 point)</span></li>`).join('')}</ul></div>` : '') + stickerBanner(stickers);
+    if (note) root.querySelector('.career-banner')?.insertAdjacentHTML('afterend', `<div class="card outcome-card">${note}</div>`);
   });
+  root.querySelector('#k-hall')?.addEventListener('click', () => router.go({ name: 'hall' }));
   root.querySelector('#k-edit')?.addEventListener('click', () => router.go({ name: 'builder', teamId: you.id }));
   root.querySelector('#k-new')?.addEventListener('click', () => router.go({ name: 'setup', homeId: you.id, mode: 'career' }));
   root.querySelector('#k-quit')?.addEventListener('click', async () => {
-    if (await askConfirm({ title: 'Leave this career?', body: 'Your seasons and stats will be deleted.\n\nThe team stays in My Teams.', yes: 'Leave career', no: 'Keep playing' })) { setCareer(null); router.go({ name: 'menu' }); }
+    if (!(await askConfirm({ title: 'Retire this career?', body: 'It goes into the Hall of Fame, with its Star, trophies and scrapbook, and you can start a new one.\n\nThe team stays in My Teams.', yes: 'Retire career', no: 'Keep playing' }))) return;
+    const kept = retireCareer();
+    const stickers = kept ? recordCareer({ hall: getHall().length }) : [];
+    router.go(kept ? { name: 'hall' } : { name: 'menu' });
+    if (stickers.length) document.querySelector('.hof-banner')?.insertAdjacentHTML('afterend', `<div class="card outcome-card">${stickerBanner(stickers)}</div>`);
   });
 }

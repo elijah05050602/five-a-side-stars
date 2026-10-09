@@ -1,4 +1,5 @@
-import { deleteTeam, getCareer, getLeague, getTeam, getTeams, setCareer, setLeague } from '../../data/storage';
+import { deleteTeam, getCareer, getHall, getLeague, getTeam, getTeams, retireCareer, setLeague } from '../../data/storage';
+import { recordCareer } from '../../data/progress';
 import { esc } from '../hud';
 import { badgeSvg, kitChip } from '../kitPreview';
 import { askConfirm } from '../dialog';
@@ -34,14 +35,15 @@ export function renderTeams(root: HTMLElement, router: Router): void {
     if (!t) return;
     const inLeague = getLeague()?.teamId === t.id;
     const inCareer = getCareer()?.teamId === t.id;
-    const extra = inLeague ? '\n\nYour league with this team will end too.' : inCareer ? '\n\nYour career with this team will end too.' : '';
+    const extra = inLeague ? '\n\nYour league with this team will end too.' : inCareer ? '\n\nYour career with this team will end too. It stays in the Hall of Fame.' : '';
     const sure = await askConfirm({
       title: `Delete ${t.name}?`, body: `This team will be gone for good.${extra}`, yes: 'Yes, delete', no: 'Keep it',
       preview: `${badgeSvg(t.badge, 44)}${kitChip(t.kit, 36)}<strong>${esc(t.name)}</strong>`,
     });
     if (!sure || !getTeam(t.id)) return;
     if (inLeague) setLeague(null);
-    if (inCareer) setCareer(null);
+    // The career is kept in the Hall of Fame before its team goes.
+    if (inCareer && retireCareer()) recordCareer({ hall: getHall().length });
     deleteTeam(t.id);
     renderTeams(root, router);
   }));

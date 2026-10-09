@@ -8,6 +8,7 @@ import { inBackground, type CupAhead, type SimOutcome } from '../../game/backgro
 import { cupTrophy, leagueTrophy, playoffTrophy, type TrophyWin } from '../../game/trophy';
 import { aroundTheLeague, matchReport, type MatchReport } from '../../game/news';
 import { reportHtml } from './newsParts';
+import { goalText } from '../../game/seasonGoals';
 import { esc } from '../hud';
 import { badgeSvg } from '../kitPreview';
 import { topBar, wire, ordinal, stickerBanner, growthList } from './shared';
@@ -28,6 +29,9 @@ export interface ResultSummary {
   star?: { name: string; points: number; milestones: StarMilestone[] };
   /** The Gazette's front page (league and career matches). */
   report?: MatchReport;
+  /** Season goals done in this match, and whether that made a clean sweep. */
+  goals?: { emoji: string; text: string }[];
+  sweep?: boolean;
   /** A drawn play-off: the shoot-out to play next. */
   shootout?: StartOptions;
 }
@@ -93,14 +97,16 @@ export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[]
       if (s) {
         const motm3 = Object.values(c.careerStats).some((st) => st.motm >= 3);
         const boot = Object.values(c.seasonStats).some((st) => st.goals >= 8);
-        summary.stickers.push(...recordCareer({ starUp: s.growth.length > 0, fiveStar: s.fiveStar, motm3, goldenBoot: boot, starMilestones: s.milestones.length ? c.milestones.length : 0, rivalWins: s.rivalWin ? c.world.rivalWins : 0 }));
-        summary.growth = s.growth;
+        summary.stickers.push(...recordCareer({ starUp: s.growth.length > 0, fiveStar: s.fiveStar, motm3, goldenBoot: boot, starMilestones: s.milestones.length ? c.milestones.length : 0, rivalWins: s.rivalWin ? c.world.rivalWins : 0, sweep: s.sweep }));
         const star = careerStar(c, you);
+        if (s.goalsDone?.length) { summary.goals = s.goalsDone.map((g) => goalText(g, star?.name ?? '')); summary.sweep = s.sweep; }
+        summary.growth = s.growth;
         if (star && s.points > 0) summary.star = { name: star.name, points: s.points, milestones: s.milestones };
       }
       const played = c.league.rounds[c.league.round - 1];
       const name = (id: string) => (id === you.id ? you.name : c.league.teams.find((t) => t.id === id)?.name ?? '');
       summary.report = matchReport(r, you.id, r.mode === 'match' ? playerOfTheMatch(r) : null, playoff || !played ? [] : aroundTheLeague(played, you.id, name));
+      if (summary.report.hero) summary.stickers.push(...recordCareer({ headline: true }));
       const po = c.world.playoff;
       if (playoff && po) {
         summary.tableNote = po.won === null ? 'All square in the play-off! Penalties decide it.' : po.won ? (po.up ? '🎟️ Play-off won: you are going up!' : '🛟 Play-off won: you are staying up!') : (po.up ? 'Play-off lost. Next season you go again!' : 'Play-off lost: down a tier next season. You will bounce back!');
@@ -117,6 +123,7 @@ export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[]
       setLeague(ls);
       const name = (id: string) => (id === you.id ? you.name : ls.teams.find((t) => t.id === id)?.name ?? '');
       summary.report = matchReport(r, you.id, playerOfTheMatch(r), aroundTheLeague(ls.rounds[ls.round - 1] ?? [], you.id, name));
+      if (summary.report.hero) summary.stickers.push(...recordCareer({ headline: true }));
       summary.tableNote = `${tierInfo(ls.tier).name} · round ${Math.min(ls.round, ls.rounds.length)} of ${ls.rounds.length} played · you are ${ordinal(yourPosition(ls, you))}`;
     }
   }
@@ -159,6 +166,7 @@ export function renderResults(root: HTMLElement, router: Router, r: MatchResult,
         ${summary.report ? reportHtml(summary.report) : ''}
         ${leagueNote}
         ${starNote}
+        ${summary.goals?.length ? `<div class="star-note goals-note"><h3>🎯 Season goal${summary.goals.length === 1 ? '' : 's'} done!</h3><ul class="plain-list">${summary.goals.map((g) => `<li>${g.emoji} ${esc(g.text)} <span class="muted">(+1 point)</span></li>`).join('')}</ul>${summary.sweep ? '<p><strong>🧹 Clean sweep!</strong> All three goals done this season.</p>' : ''}</div>` : ''}
         ${growthNote}
         ${stickerBanner(stickers)}
         <div class="row">

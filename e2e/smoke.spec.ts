@@ -373,3 +373,46 @@ test('winning the cup final ends with the trophy lift, which skips with a tap an
   await expect(heading(page)).toHaveText('Full Time');
   expect(errors).toEqual([]);
 });
+
+test('the career and the Hall of Fame fit a phone screen', async ({ page }) => {
+  const errors: string[] = [];
+  await page.setViewportSize({ width: 375, height: 740 });
+  // A save with one retired career in the Hall of Fame.
+  await page.addInitScript(() => {
+    if (localStorage.getItem('five-a-side-stars:v1')) return;
+    const entry = {
+      no: 1, ended: 1, finished: true, team: { name: 'Puddle Jumpers With A Long Name', badge: { shape: 'shield', icon: '🦊', colour1: '#ff7a00', colour2: '#ffffff' } },
+      star: { name: 'Mia', number: 9, position: 'ATT', skin: '#e0ac69', hair: '#3b2a1a', hairStyle: 'short', skills: { speed: 5, control: 4, passing: 3, shooting: 5, tackling: 2, stamina: 4, strength: 3 } },
+      age: 'U10', seasons: 24, titles: 6, tierTitles: [1, 1, 2, 1, 1], bestTier: 1, playoffsWon: 2,
+      totals: { played: 120, goals: 88, assists: 30, saves: 0, cleanSheets: 20, motm: 25 }, milestones: ['first-goal', 'hat-trick'],
+      rival: { name: 'Thunder Cats', w: 5, d: 2, l: 3 }, best: { when: 'U10 Summer', tier: 1, position: 1 },
+      scrapbook: [{ at: 1, emoji: '🌱', text: 'Puddle Jumpers kick off in the Acorn League.' }, { at: 2, emoji: '⚽', text: 'Mia: First Goal, against Thunder Cats!' }],
+    };
+    localStorage.setItem('five-a-side-stars:v1', JSON.stringify({ teams: [], settings: {}, hall: [entry] }));
+  });
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto('/?debug');
+  // A save that is not new skips the first-visit tutorial.
+  const skip = page.getByText('Skip tutorial');
+  await expect(heading(page).or(skip)).toBeVisible();
+  if (await skip.isVisible()) await skip.click();
+  await expect(heading(page)).toContainText('GOAL');
+  const fits = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+  await page.locator('#m-hall').click();
+  await expect(heading(page)).toContainText('Hall of Fame');
+  await expect(page.locator('.hof-card')).toHaveCount(1);
+  await expect(page.locator('.hof-card')).toContainText('Mia');
+  expect(await fits()).toBe(true);
+  await page.locator('[data-book="0"]').click();
+  await expect(page.locator('.scrapbook')).toContainText('First Goal');
+  await page.getByRole('button', { name: 'Close' }).click();
+  await page.locator('[data-back]').first().click();
+  await page.locator('#m-career').click();
+  await page.locator('[data-player]').first().click();
+  await page.locator('#c-go').click();
+  await expect(heading(page)).toContainText('Career');
+  await expect(page.locator('#k-hall')).toBeVisible();
+  await expect(page.locator('.scrap-card')).toContainText('Scrapbook');
+  expect(await fits()).toBe(true);
+  expect(errors).toEqual([]);
+});

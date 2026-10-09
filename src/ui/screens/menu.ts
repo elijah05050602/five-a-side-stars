@@ -1,4 +1,4 @@
-import { cupInProgress, getCareer, getLeague, getTeams } from '../../data/storage';
+import { cupInProgress, getCareer, getHall, getLeague, getTeams } from '../../data/storage';
 import { careerAge, seasonName } from '../../game/career';
 import { STICKERS, getProgress } from '../../data/progress';
 import { esc } from '../hud';
@@ -10,6 +10,7 @@ import type { Router } from '../screens';
 export function renderMenu(root: HTMLElement, router: Router): void {
   const league = getLeague();
   const career = getCareer();
+  const hall = getHall().length;
   const cup = cupInProgress();
   const progress = getProgress();
   const teams = getTeams();
@@ -42,6 +43,7 @@ export function renderMenu(root: HTMLElement, router: Router): void {
             <button class="portal portal-sky" id="m-train"><span class="portal-icon">🎯</span><span class="portal-text"><small>Skill challenge</small><strong>TRAINING</strong><span>Score as many as you can</span></span></button>
             <button class="portal portal-white" id="m-teams"><span class="portal-icon">👕</span><span class="portal-text"><small>Locker room</small><strong>MY SQUAD</strong><span>Badges, kits and players</span></span></button>
             <button class="portal portal-white" id="m-album"><span class="portal-icon">📒</span><span class="portal-text"><small>Collector · ${progress.stickers.length} / ${STICKERS.length}</small><strong>STICKERS</strong><span class="mini-bar"><i style="width:${Math.round((progress.stickers.length / STICKERS.length) * 100)}%"></i></span></span></button>
+            <button class="portal portal-gold" id="m-hall"><span class="portal-icon">🏛️</span><span class="portal-text"><small>${hall ? `${hall} career${hall === 1 ? '' : 's'}` : 'Your careers'}</small><strong>HALL OF FAME</strong><span>Stars, trophies and scrapbooks</span></span></button>
           </div>
         </div>
       </div>
@@ -58,6 +60,7 @@ export function renderMenu(root: HTMLElement, router: Router): void {
   root.querySelector('#m-train')!.addEventListener('click', () => router.go({ name: 'setup', mode: 'training' }));
   root.querySelector('#m-teams')!.addEventListener('click', () => router.go({ name: 'teams' }));
   root.querySelector('#m-album')!.addEventListener('click', () => router.go({ name: 'album' }));
+  root.querySelector('#m-hall')!.addEventListener('click', () => router.go({ name: 'hall' }));
   root.querySelector('#m-howto')!.addEventListener('click', () => router.startTutorial());
   root.querySelector('[data-club]')?.addEventListener('click', () => router.go({ name: 'club' }));
   // Space kicks off from the lobby (never mid-match: Space is the shoot key there).

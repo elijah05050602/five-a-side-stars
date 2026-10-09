@@ -1,11 +1,14 @@
 import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, uid } from './defaults';
 import type { LeagueFixture, LeagueState, Tally } from '../game/league';
-import { defaultStar, worldForOldCareer, type CareerState, type TrialDay } from '../game/career';
+import { defaultStar, newGoals, worldForOldCareer, type CareerState, type TransferOffer, type TrialDay } from '../game/career';
+import { goalDef, type SeasonGoal } from '../game/seasonGoals';
+import { HALL_KEEP, SCRAPBOOK_KEEP, addToHall, hallEntry, scrapsFromHistory, worthKeeping, type HallEntry, type ScrapLine } from '../game/hallOfFame';
+import { tierInfo } from '../game/league';
 import { TIER_COUNT, freshRecord, type CareerWorld, type ClubRecord, type HeadToHead, type Playoff, type TierSeason, type WorldClub, type WorldNews } from '../game/careerWorld';
 import type { TournamentState } from '../game/tournament';
 import { ensureSkills, fitSkills } from './skills';
 import { freshProgress, type Progress } from './progress';
-import { AGE_GROUPS, BADGE_SHAPES, BOOT_STYLES, BUILDS, HAIR_STYLES, KIT_PATTERNS, POSITIONS, SPECIALS, type AgeGroup, type Kit, type Player, type Position, type Team } from './types';
+import { AGE_GROUPS, BADGE_SHAPES, GENDERS, BOOT_STYLES, BUILDS, HAIR_STYLES, KIT_PATTERNS, POSITIONS, SPECIALS, type AgeGroup, type Gender, type Kit, type Player, type Position, type Team } from './types';
 import { FORMATIONS } from './formations';
 import { isNameOk } from './wordFilter';
 import type { GraphicsQuality } from '../game/graphics';
@@ -42,6 +45,8 @@ interface SaveFile {
   league?: LeagueState | null;
   career?: CareerState | null;
   tournament?: TournamentState | null;
+  /** Careers that were retired or finished, newest first. */
+  hall?: HallEntry[];
 }
 
 let cache: SaveFile | null = null;
@@ -103,9 +108,11 @@ function readSave(raw: string): { save: SaveFile; repaired: boolean } {
   if (parsed.progress !== undefined && !progress) repaired = true;
   const league = readOptional(parsed.league, isLeague);
   const career = readOptional(parsed.career, isCareer);
-  if (career && career !== 'broken') { mendStar(career, teams); mendWorld(career, teams); }
+  if (career && career !== 'broken') { mendStar(career, teams); mendWorld(career, teams); mendGoals(career, teams); mendScrapbook(career); mendOffers(career); }
   const tournament = readOptional(parsed.tournament, isTournament);
   if ([league, career, tournament].some((x) => x === 'broken')) repaired = true;
+  const hall = readHall(parsed.hall);
+  if (hall.dropped) repaired = true;
   return {
     save: {
       teams: teams.length ? teams : starterTeams(),
@@ -114,6 +121,7 @@ function readSave(raw: string): { save: SaveFile; repaired: boolean } {
       league: league === 'broken' ? null : league,
       career: career === 'broken' ? null : career,
       tournament: tournament === 'broken' ? null : tournament,
+      ...(hall.list.length ? { hall: hall.list } : {}),
     },
     repaired,
   };
@@ -329,6 +337,94 @@ function readWorld(v: unknown, youId: string): CareerWorld | null {
   };
 }
 
+/**
+ * Season goals (added after the living league): a career saved before them gets three for the
+ * mini season it is in, and a goal the game no longer knows is left out.
+ */
+function mendGoals(c: CareerState, teams: Team[]): void {
+  const raw = c as Partial<CareerState>;
+  c.sweeps = count(raw.sweeps);
+  const goals: SeasonGoal[] = Array.isArray(raw.goals)
+    ? raw.goals.filter((g): g is SeasonGoal => isObj(g) && typeof g.id === 'string' && !!goalDef(g.id)).map((g) => {
+      const target = Math.max(1, count(g.target));
+      const progress = Math.min(target, count(g.progress));
+      return { id: g.id, level: goalDef(g.id)!.level, target, progress, done: progress >= target };
+    })
+    : [];
+  const team = teams.find((t) => t.id === c.teamId);
+  c.goals = goals.length || !team || !c.world ? goals : newGoals(c, team);
+}
+
+const readScraps = (v: unknown): ScrapLine[] => (Array.isArray(v) ? v : [])
+  .filter((x): x is ScrapLine => isObj(x) && typeof x.at === 'number' && Number.isFinite(x.at) && typeof x.emoji === 'string' && typeof x.text === 'string')
+  .slice(-SCRAPBOOK_KEEP)
+  .map((x) => ({ at: Math.max(1, Math.floor(x.at)), emoji: Array.from(x.emoji).slice(0, 4).join(''), text: Array.from(x.text).slice(0, 200).join('') }));
+
+/** Transfer offers (added with transfers): kept only for clubs still in the world; none in an older save. */
+function mendOffers(c: CareerState): void {
+  const raw = (c as Partial<CareerState>).offers;
+  const list = Array.isArray(raw) ? raw.filter((o): o is TransferOffer => isObj(o) && typeof o.clubId === 'string' && typeof o.why === 'string' && !!c.world?.clubs.some((cl) => cl.team.id === o.clubId)).slice(0, 4) : [];
+  c.moves = count((c as Partial<CareerState>).moves);
+  c.offers = list.length ? list.map((o) => ({ clubId: o.clubId, why: Array.from(o.why).slice(0, 200).join('') })) : null;
+}
+
+/** The scrapbook (added with the Hall of Fame): a career saved before it starts one from its past seasons. */
+function mendScrapbook(c: CareerState): void {
+  const raw = (c as Partial<CareerState>).scrapbook;
+  c.scrapbook = Array.isArray(raw) ? readScraps(raw) : scrapsFromHistory(c, (t) => tierInfo(t).name);
+}
+
+/**
+ * The Hall of Fame, entry by entry: a summary that does not add up is left out (the backup keeps
+ * it), and the rest are mended to the shape the screen draws.
+ */
+function readHall(v: unknown): { list: HallEntry[]; dropped: boolean } {
+  if (v === undefined) return { list: [], dropped: false };
+  if (!Array.isArray(v)) return { list: [], dropped: true };
+  const list: HallEntry[] = [];
+  let dropped = false;
+  for (const e of v.slice(0, HALL_KEEP)) {
+    try {
+      const entry = readHallEntry(e);
+      if (entry) list.push(entry); else dropped = true;
+    } catch { dropped = true; }
+  }
+  return { list, dropped };
+}
+
+function readHallEntry(e: unknown): HallEntry | null {
+  if (!isObj(e) || !isObj(e.team) || typeof e.team.name !== 'string' || !isObj(e.totals)) return null;
+  const badgeIn = (isObj(e.team.badge) ? e.team.badge : {}) as Partial<Team['badge']>;
+  const badge = makeBadge(colour(badgeIn.colour1, '#2a6fdb'), colour(badgeIn.colour2, '#ffffff'), typeof badgeIn.icon === 'string' && badgeIn.icon.length <= 16 ? badgeIn.icon : '⚽', oneOf(BADGE_SHAPES, badgeIn.shape, 'shield'));
+  if (typeof badgeIn.image === 'string' && LOGO.test(badgeIn.image) && badgeIn.image.length < 60_000) badge.image = badgeIn.image;
+  const st = isObj(e.star) ? e.star : null;
+  const star: HallEntry['star'] = st && typeof st.name === 'string' ? {
+    name: text(st.name, 'Star', 24), number: Math.max(1, Math.min(99, count(st.number) || 10)), position: oneOf(POSITIONS, st.position, 'ATT'),
+    ...(GENDERS.includes(st.gender as never) ? { gender: st.gender as Gender } : {}),
+    skin: colour(st.skin, '#e0ac69'), hair: colour(st.hair, '#3b2a1a'), hairStyle: oneOf(HAIR_STYLES, st.hairStyle, 'short'),
+    skills: isObj(st.skills) ? Object.fromEntries(Object.entries(st.skills).filter(([, n]) => typeof n === 'number').map(([k, n]) => [k, Math.max(1, Math.min(5, Math.round(n as number)))])) : {},
+  } : null;
+  const t = e.totals;
+  const rv = isObj(e.rival) && typeof e.rival.name === 'string' ? e.rival : null;
+  const best = isObj(e.best) && typeof e.best.when === 'string' ? e.best : null;
+  const tiers = Array.isArray(e.tierTitles) ? e.tierTitles : [];
+  return {
+    no: Math.max(1, count(e.no)), ended: count(e.ended), finished: e.finished === true,
+    team: { name: text(e.team.name, 'My Team', 24), badge },
+    star,
+    age: oneOf(AGE_GROUPS, e.age, 'U5'),
+    seasons: count(e.seasons), titles: count(e.titles),
+    tierTitles: Array.from({ length: TIER_COUNT }, (_, i) => count(tiers[i])),
+    bestTier: Math.max(1, Math.min(TIER_COUNT, count(e.bestTier) || TIER_COUNT)),
+    playoffsWon: count(e.playoffsWon),
+    totals: { played: count(t.played), goals: count(t.goals), assists: count(t.assists), saves: count(t.saves), cleanSheets: count(t.cleanSheets), motm: count(t.motm) },
+    milestones: Array.isArray(e.milestones) ? e.milestones.filter((m): m is string => typeof m === 'string') : [],
+    rival: rv ? { name: text(rv.name, 'Rivals', 24), w: count(rv.w), d: count(rv.d), l: count(rv.l) } : null,
+    best: best ? { when: text(best.when, '', 12), tier: Math.max(1, Math.min(TIER_COUNT, count(best.tier) || TIER_COUNT)), position: Math.max(1, count(best.position) || 1) } : null,
+    scrapbook: readScraps(e.scrapbook),
+  };
+}
+
 /** A career saved before the living league (or with a world that cannot be read) gets one built on load, keeping the clubs it is playing now. */
 function mendWorld(c: CareerState, teams: Team[]): void {
   const team = teams.find((t) => t.id === c.teamId);
@@ -458,6 +554,31 @@ export function getCareer(): CareerState | null {
 export function setCareer(career: CareerState | null): void {
   loadSave().career = career;
   persist();
+}
+
+/** Careers in the Hall of Fame, newest first. */
+export function getHall(): HallEntry[] {
+  return loadSave().hall ?? [];
+}
+
+/**
+ * End the career in progress, keeping it in the Hall of Fame (once a match has been played in it).
+ * Every way a career ends goes through here: retiring it, starting another, deleting its team.
+ * Returns the new entry, or null when there was nothing to keep.
+ */
+export function retireCareer(): HallEntry | null {
+  const save = loadSave();
+  const c = save.career;
+  const team = c && save.teams.find((t) => t.id === c.teamId);
+  let entry: HallEntry | null = null;
+  if (c && team && worthKeeping(c)) {
+    const hall = save.hall ?? [];
+    entry = hallEntry(c, team, (hall[0]?.no ?? 0) + 1);
+    save.hall = addToHall(hall, entry);
+  }
+  save.career = null;
+  persist();
+  return entry;
 }
 
 /** The cup in progress (or just finished), so leaving the cup screen never loses a cup run. */

@@ -134,6 +134,25 @@ describe('save file', () => {
     expect(getProgress().counts).toEqual({});
   });
 
+  it('gives a career saved before season goals three goals for its mini season, and drops a goal it does not know', () => {
+    resetAll();
+    const { career, team: you } = createCareer(team('src', 'Goal Less', 'U8'), 60);
+    saveTeam(you);
+    const save = JSON.parse(localStorage.getItem(KEY)!);
+    save.career = { ...structuredClone(career) };
+    delete save.career.goals;
+    delete save.career.sweeps;
+    localStorage.setItem(KEY, JSON.stringify(save));
+    reloadSave();
+    expect(getCareer()!.goals.map((g) => g.level)).toEqual([0, 1, 2]);
+    expect(getCareer()!.sweeps).toBe(0);
+    const again = JSON.parse(localStorage.getItem(KEY)!);
+    again.career.goals = [{ id: 'win-1', level: 0, target: 1, progress: 1, done: true }, { id: 'fly-to-the-moon', target: 1, progress: 0 }];
+    localStorage.setItem(KEY, JSON.stringify(again));
+    reloadSave();
+    expect(getCareer()!.goals).toEqual([{ id: 'win-1', level: 0, target: 1, progress: 1, done: true }]);
+  });
+
   it('keeps a saved world, and rebuilds one that does not add up without losing the career', () => {
     resetAll();
     const { career, team: you } = createCareer(team('src', 'World Keeper', 'U8'), 60);
