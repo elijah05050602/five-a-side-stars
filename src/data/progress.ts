@@ -72,6 +72,8 @@ export const STICKERS: Sticker[] = [
   { id: 'living-legend', emoji: '🌌', name: 'Living Legend', how: 'Your career Star reaches 16 milestones.', unlocks: '🌌' },
   { id: 'goat', emoji: '🪐', name: 'Greatest of All Time', how: 'Your career Star reaches all 24 milestones.', unlocks: '🪐' },
   { id: 'front-page', emoji: '📰', name: 'Front Page', how: 'One of your players makes the Gazette headline 10 times.' },
+  { id: 'cup-winners', emoji: '🏵️', name: 'Cup Winners', how: 'Win the yearly cup in a career.' },
+  { id: 'cup-kings', emoji: '🫅', name: 'Cup Kings', how: 'Win the yearly career cup three times.', unlocks: '🫅' },
   { id: 'new-adventure', emoji: '✈️', name: 'New Adventure', how: 'Your career Star joins a new club.' },
   { id: 'loyal-club', emoji: '🛡️', name: 'Loyal Club', how: 'Finish a career with your Star staying at the same club at every transfer window.' },
   { id: 'hall-of-famer', emoji: '🏛️', name: 'Hall of Famer', how: 'Put three careers in the Hall of Fame.', unlocks: '🏛️' },
@@ -79,7 +81,7 @@ export const STICKERS: Sticker[] = [
 ];
 
 /** Stickers that can be won again, with a count on them in the album. */
-export const COUNTED_STICKERS = ['clean-sweep', 'tier5-champ', 'tier4-champ', 'tier3-champ', 'tier2-champ', 'tier1-champ', 'rival-beaten', 'playoff-hero', 'great-escape'];
+export const COUNTED_STICKERS = ['cup-winners', 'clean-sweep', 'tier5-champ', 'tier4-champ', 'tier3-champ', 'tier2-champ', 'tier1-champ', 'rival-beaten', 'playoff-hero', 'great-escape'];
 
 export function getProgress(): Progress {
   const save = loadSave();
@@ -186,6 +188,8 @@ export interface CareerMilestones {
   sweep?: boolean;
   /** One of your players made the Gazette headline. */
   headline?: boolean;
+  /** Won the career's yearly cup. */
+  cupWon?: boolean;
   /** The Star joined another club. */
   joined?: boolean;
   /** A career finished with the Star at the same club all the way. */
@@ -209,6 +213,10 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.starMilestones && m.starMilestones >= 8) award(p, 'star-legend', out);
   if (m.starMilestones && m.starMilestones >= 16) award(p, 'living-legend', out);
   if (m.starMilestones && m.starMilestones >= 24) award(p, 'goat', out);
+  if (m.cupWon) {
+    award(p, 'cup-winners', out);
+    if ((p.counts?.['cup-winners'] ?? 0) >= 3) award(p, 'cup-kings', out);
+  }
   if (m.joined) award(p, 'new-adventure', out);
   if (m.loyal) award(p, 'loyal-club', out);
   if (m.hall && m.hall >= 3) award(p, 'hall-of-famer', out);

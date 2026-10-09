@@ -2,6 +2,7 @@ import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, ui
 import type { LeagueFixture, LeagueState, Tally } from '../game/league';
 import { defaultStar, newGoals, worldForOldCareer, type CareerState, type TransferOffer, type TrialDay } from '../game/career';
 import { goalDef, type SeasonGoal } from '../game/seasonGoals';
+import { CUP_ROUNDS, CUP_SIZE, type CareerCup, type CupTie } from '../game/careerCup';
 import { HALL_KEEP, SCRAPBOOK_KEEP, addToHall, hallEntry, scrapsFromHistory, worthKeeping, type HallEntry, type ScrapLine } from '../game/hallOfFame';
 import { tierInfo } from '../game/league';
 import { TIER_COUNT, freshRecord, type CareerWorld, type ClubRecord, type HeadToHead, type Playoff, type TierSeason, type WorldClub, type WorldNews } from '../game/careerWorld';
@@ -108,7 +109,7 @@ function readSave(raw: string): { save: SaveFile; repaired: boolean } {
   if (parsed.progress !== undefined && !progress) repaired = true;
   const league = readOptional(parsed.league, isLeague);
   const career = readOptional(parsed.career, isCareer);
-  if (career && career !== 'broken') { mendStar(career, teams); mendWorld(career, teams); mendGoals(career, teams); mendScrapbook(career); mendOffers(career); }
+  if (career && career !== 'broken') { mendStar(career, teams); mendWorld(career, teams); mendGoals(career, teams); mendScrapbook(career); mendOffers(career); mendCup(career); }
   const tournament = readOptional(parsed.tournament, isTournament);
   if ([league, career, tournament].some((x) => x === 'broken')) repaired = true;
   const hall = readHall(parsed.hall);
@@ -360,6 +361,40 @@ const readScraps = (v: unknown): ScrapLine[] => (Array.isArray(v) ? v : [])
   .slice(-SCRAPBOOK_KEEP)
   .map((x) => ({ at: Math.max(1, Math.floor(x.at)), emoji: Array.from(x.emoji).slice(0, 4).join(''), text: Array.from(x.text).slice(0, 200).join('') }));
 
+const score = (v: unknown): [number, number] | null => (Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0) ? [Math.floor(v[0]), Math.floor(v[1])] : null);
+
+/**
+ * The yearly cup (added with the career cup): one in progress is kept if every club in it is still
+ * in the world and the bracket adds up, and dropped otherwise (the league carries on). Past cup
+ * runs are kept line by line.
+ */
+function mendCup(c: CareerState): void {
+  const raw = c as Partial<CareerState>;
+  c.cupRuns = Array.isArray(raw.cupRuns)
+    ? raw.cupRuns.filter((r): r is CareerState['cupRuns'][number] => isObj(r) && AGE_GROUPS.includes(r.age as AgeGroup) && typeof r.reached === 'number').map((r) => ({ age: r.age, reached: Math.max(0, Math.min(3, Math.floor(r.reached))) }))
+    : [];
+  c.cup = readCup(raw.cup, c);
+}
+
+function readCup(v: unknown, c: CareerState): CareerCup | null {
+  if (!isObj(v) || !Array.isArray(v.rounds) || typeof v.round !== 'number' || !AGE_GROUPS.includes(v.age as AgeGroup) || !c.world) return null;
+  const known = (id: unknown) => typeof id === 'string' && (id === c.teamId || c.world.clubs.some((x) => x.team.id === id));
+  const rounds: CupTie[][] = [];
+  for (const [i, r] of v.rounds.entries()) {
+    if (!Array.isArray(r) || r.length !== CUP_SIZE / 2 ** (i + 1)) return null;
+    const ties: CupTie[] = [];
+    for (const t of r) {
+      if (!isObj(t) || !known(t.homeId) || !known(t.awayId)) return null;
+      const winnerId = t.winnerId === t.homeId || t.winnerId === t.awayId ? t.winnerId as string : null;
+      ties.push({ homeId: t.homeId as string, awayId: t.awayId as string, score: score(t.score), pens: score(t.pens), winnerId });
+    }
+    rounds.push(ties);
+  }
+  const round = Math.floor(v.round);
+  if (!rounds.length || rounds.length > CUP_ROUNDS.length || round < 0 || round > CUP_ROUNDS.length || round !== Math.min(rounds.length - 1 + (rounds.length === CUP_ROUNDS.length && rounds[CUP_ROUNDS.length - 1][0].winnerId ? 1 : 0), CUP_ROUNDS.length)) return null;
+  return { year: count(v.year) || c.year, age: v.age as AgeGroup, rounds, round, out: v.out === true };
+}
+
 /** Transfer offers (added with transfers): kept only for clubs still in the world; none in an older save. */
 function mendOffers(c: CareerState): void {
   const raw = (c as Partial<CareerState>).offers;
@@ -417,6 +452,7 @@ function readHallEntry(e: unknown): HallEntry | null {
     tierTitles: Array.from({ length: TIER_COUNT }, (_, i) => count(tiers[i])),
     bestTier: Math.max(1, Math.min(TIER_COUNT, count(e.bestTier) || TIER_COUNT)),
     playoffsWon: count(e.playoffsWon),
+    cups: count(e.cups),
     totals: { played: count(t.played), goals: count(t.goals), assists: count(t.assists), saves: count(t.saves), cleanSheets: count(t.cleanSheets), motm: count(t.motm) },
     milestones: Array.isArray(e.milestones) ? e.milestones.filter((m): m is string => typeof m === 'string') : [],
     rival: rv ? { name: text(rv.name, 'Rivals', 24), w: count(rv.w), d: count(rv.d), l: count(rv.l) } : null,

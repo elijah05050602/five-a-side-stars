@@ -3,10 +3,11 @@ import { getCareer, getHall, getTeam, retireCareer, saveTeam, setCareer } from '
 import { scrapbookHtml } from './hallOfFame';
 import { POSITION_LABELS } from '../../data/types';
 import { STAR_CAP, skillKeys, skillLabel, starsText } from '../../data/skills';
-import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, joinClub, signTriallist, stayAtClub, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
+import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, cupWaiting, joinClub, signTriallist, stayAtClub, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
 import { recordCareer } from '../../data/progress';
 import { computeTable, nextFixture, tierInfo } from '../../game/league';
 import { clubById, seasonIndex, tierOf } from '../../game/careerWorld';
+import { CUP_ROUNDS, cupName, cupOver, yourTie, type CupTie } from '../../game/careerCup';
 import { esc } from '../hud';
 import { badgeSvg, kitChip } from '../kitPreview';
 import { careerTableNote, nextMatchHtml, playNextMatch, tableCard } from './leagueParts';
@@ -43,6 +44,28 @@ function trialCard(c: CareerState, you: Team): string {
       <div class="psc-skills">${skillKeys(p.position).map((k) => { const l = skillLabel(p.position, k); return `<span title="${esc(l.label)}">${l.emoji} <span class="stars">${starsText(p.skills[k], cap)}</span></span>`; }).join('')}</div>
       <button class="btn btn-primary" data-sign="${esc(p.id)}">✍️ Sign ${esc(p.name)}</button>
     </div>`).join('')}</div>
+  </div>`;
+}
+
+/** The yearly cup: the draw round by round, with your tie to play (or its shoot-out). */
+function cupCard(c: CareerState, you: Team): string {
+  const cup = c.cup!;
+  const name = (id: string) => (id === you.id ? you.name : clubById(c.world, id)?.team.name ?? '');
+  const badge = (id: string) => { const t = id === you.id ? you : clubById(c.world, id)?.team; return t ? badgeSvg(t.badge, 22) : ''; };
+  const tie = yourTie(cup, you.id);
+  const over = cupOver(cup);
+  const winner = over ? cup.rounds[CUP_ROUNDS.length - 1][0].winnerId : null;
+  const side = (t: CupTie, id: string) => `<span class="cup-side ${id === you.id ? 'is-you' : ''} ${t.winnerId === id ? 'is-through' : t.winnerId ? 'is-out' : ''}">${badge(id)} ${esc(name(id))}</span>`;
+  const rounds = cup.rounds.map((r, i) => `<div class="cup-round"><h4>${CUP_ROUNDS[i]}${r.length > 1 ? 's' : ''}</h4>${r.map((t) => `<div class="cup-tie">${side(t, t.homeId)}<strong class="cup-score">${t.score ? `${t.score[0]}–${t.score[1]}` : 'v'}${t.pens ? `<small> (${t.pens[0]}–${t.pens[1]} pens)</small>` : ''}</strong>${side(t, t.awayId)}</div>`).join('')}</div>`).join('');
+  const opp = tie ? (tie.homeId === you.id ? tie.awayId : tie.homeId) : '';
+  return `<div class="card cup-card">
+    <h3>🏆 ${esc(cupName(cup))}</h3>
+    <p class="muted small">Eight clubs, one match a round. A draw goes to penalties. The league waits for the cup.</p>
+    ${winner ? `<p class="cup-result">${winner === you.id ? `🏆 <strong>Cup winners!</strong> ${esc(you.name)} won the ${esc(cupName(cup))}!` : `${esc(name(winner))} won the cup.`}</p>` : cup.out ? '<p class="cup-result">Out of the cup this time. On with the league!</p>' : ''}
+    <div class="cup-bracket">${rounds}</div>
+    ${tie ? `<div class="cup-next"><span class="muted">${CUP_ROUNDS[cup.round]}${clubById(c.world, opp)?.team.id === c.world.rivalId ? ' · 🔥 against your rival!' : ''}</span>
+      <p><strong>${esc(you.name)}</strong> v <strong>${esc(name(opp))}</strong> <span class="muted small">(Tier ${tierOf(c.world, opp)})</span></p>
+      ${tie.score ? '<button class="btn btn-primary btn-big" id="k-cup-pens">🥅 Penalty shoot-out!</button>' : `<button class="btn btn-primary btn-big" id="k-cup">⚽ Play the ${CUP_ROUNDS[cup.round].toLowerCase()}</button>`}</div>` : ''}
   </div>`;
 }
 
@@ -106,6 +129,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
   const choosing = !star || !c.starPicked;
   const offering = !c.done && !choosing && !!c.offers?.length;
   const trial = !c.done && !choosing && !offering && !!c.trialDay;
+  const cupDay = !c.done && !choosing && !offering && !trial && cupWaiting(c, you);
   const tier = tierInfo(c.league.tier);
   const table = computeTable(c.league, you);
   const over = !c.done && careerSeasonOver(c);
@@ -144,7 +168,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       round: c.league.round + 1, rounds: c.league.rounds.length, playoff,
     }));
   };
-  const preview = choosing || trial || c.done ? '' : next ? previewFor(next.youAreHome ? next.away : next.home, next.youAreHome) : po && poWaiting ? previewFor(po.opponent.team, true, po.up ? 'up' : 'stay') : '';
+  const preview = choosing || trial || offering || cupDay || c.done ? '' : next ? previewFor(next.youAreHome ? next.away : next.home, next.youAreHome) : po && poWaiting ? previewFor(po.opponent.team, true, po.up ? 'up' : 'stay') : '';
   const goalsDone = c.goals.filter((g) => g.done).length;
   const goalsCard = c.done || !c.goals.length ? '' : `<div class="card goals-card">
     <h3>🎯 Season goals <span class="muted small">${goalsDone} of ${c.goals.length} done · 1 training point each</span></h3>
@@ -199,6 +223,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       ${choosing && !c.done ? starPicker(c, you) : ''}
       ${offering ? offersCard(c, you) : ''}
       ${trial ? trialCard(c, you) : ''}
+      ${c.cup && !choosing ? cupCard(c, you) : ''}
       ${star && !choosing ? starCard(c, you, justGrew) : ''}
       ${preview}
       ${choosing ? '' : goalsCard}
@@ -206,7 +231,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       <div class="league-body">
         ${c.done ? '' : `<div class="table-area">${tableArea()}</div>`}
         <div class="card next-card">
-          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : offering ? '<p class="muted">Choose: join a new club, or stay and be captain.</p>' : trial ? '<p class="muted">Sign a new player to kick off.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play', (rivalNext ? '<span class="chip chip-rival">🔥 Rival match!</span>' : '') + (c.goals.length ? `<span class="muted small">🎯 ${goalsDone} of ${c.goals.length} season goals done</span>` : '')) : po && poWaiting ? `
+          ${choosing && !c.done ? '<p class="muted">Pick your Star to kick off.</p>' : offering ? '<p class="muted">Choose: join a new club, or stay and be captain.</p>' : trial ? '<p class="muted">Sign a new player to kick off.</p>' : cupDay ? '<p class="muted">🏆 Cup day! Play your cup tie first, then the league carries on.</p>' : next ? nextMatchHtml(next, `Match ${c.league.round + 1} of ${c.league.rounds.length}`, 'k-play', (rivalNext ? '<span class="chip chip-rival">🔥 Rival match!</span>' : '') + (c.goals.length ? `<span class="muted small">🎯 ${goalsDone} of ${c.goals.length} season goals done</span>` : '')) : po && poWaiting ? `
             <span class="muted">${po.up ? '🎟️ Play-off to go up' : '🛟 Play-off to stay up'}</span>
             <div class="fx-team is-you">${badgeSvg(you.badge, 40)}<span class="fx-name">${esc(you.name)}</span></div>
             <div class="vs-mid">VS</div>
@@ -248,6 +273,15 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     if (!po) return;
     playNextMatch(router, { home: you, away: po.opponent.team, youAreHome: true }, { halfSeconds: mode === 'shootout' ? 60 : c.halfSeconds, career: true, cpuLevel: po.cpuLevel, starId: c.starId, big: 'playoff', mode });
   };
+  const cupStart = (mode: 'match' | 'shootout') => {
+    const tie = c.cup && yourTie(c.cup, you.id);
+    const opp = tie && clubById(w, tie.homeId === you.id ? tie.awayId : tie.homeId);
+    if (!tie || !opp) return;
+    const home = tie.homeId === you.id;
+    playNextMatch(router, { home: home ? you : opp.team, away: home ? opp.team : you, youAreHome: home }, { halfSeconds: mode === 'shootout' ? 60 : c.halfSeconds, career: true, cpuLevel: tierInfo(opp.tier).level + careerNudge(c, opp.team.id), starId: c.starId, big: c.cup!.round === CUP_ROUNDS.length - 1 ? 'cup-final' : 'cup', mode });
+  };
+  root.querySelector('#k-cup')?.addEventListener('click', () => cupStart('match'));
+  root.querySelector('#k-cup-pens')?.addEventListener('click', () => cupStart('shootout'));
   root.querySelector('#k-playoff')?.addEventListener('click', () => playoffStart('match'));
   root.querySelector('#k-pens')?.addEventListener('click', () => playoffStart('shootout'));
   root.querySelectorAll<HTMLElement>('[data-scope]').forEach((b) => b.addEventListener('click', () => {

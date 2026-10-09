@@ -1070,3 +1070,20 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .offers-card .offer p { margin: 0; }
 .offers-card .offer .row { flex-wrap: wrap; gap: 8px; margin-top: auto; }
 .offers-card #k-stay { margin-top: 12px; }
+
+/* The career's yearly cup */
+.cup-card { max-width: 900px; margin: 0 auto 14px; }
+.cup-card h3 { margin: 0 0 4px; }
+.cup-bracket { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 10px; margin: 8px 0; }
+.cup-round h4 { margin: 0 0 6px; }
+.cup-tie { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 6px; padding: 5px 8px; margin-bottom: 6px; border-radius: 12px; background: var(--surface-low); font-size: 14px; }
+.cup-tie .cup-side:last-child { text-align: right; justify-content: flex-end; }
+.cup-side { display: flex; align-items: center; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.cup-side.is-you { font-weight: 800; }
+.cup-side.is-out { opacity: 0.5; }
+.cup-side.is-through { color: var(--green-ink); }
+.cup-score { white-space: nowrap; text-align: center; }
+.cup-score small { font-weight: 600; }
+.cup-next { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding-top: 8px; border-top: 2px dashed #cbd5e1; }
+.cup-next p { margin: 0; }
+.cup-result { font-size: 18px; margin: 6px 0; }
