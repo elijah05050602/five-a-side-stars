@@ -22,7 +22,7 @@ import { batchStatic } from './batchStatic';
 import { graphicsProfile, type GraphicsProfile } from './graphics';
 import { EXPOSURE, TONE_MAPPING, disposeObject } from './renderer';
 import { BallTrail, Puffs, SuperAura } from './effects';
-import { SUPERS, type SuperKind } from './supers';
+import { SUPERS, superLook, type SuperKind } from './supers';
 import { lastingSuper, puffsFor, startedSupers, type FxPlayer } from './fxView';
 import { P1_RING, P2_RING, teamRingColours } from './ringColours';
 import { GROUNDS, crowdFill, groundFor, type Ground, type GroundId, type Occasion } from './grounds';
@@ -489,7 +489,7 @@ export class MatchScene {
       if (!first && !this.calm) {
         for (const i of startedSupers(r.frames[shown].players.map(replayFx), fx)) {
           const k = fx[i].superKind;
-          if (k) this.aura.burst(fx[i].x, fx[i].z, SUPERS[k].hex);
+          if (k) this.aura.burst(fx[i].x, fx[i].z, superLook(k, this.sim.players[i]?.info).hex);
         }
       }
       this.effects(dt * speed, fx, f.ball.owned, Math.hypot(f.ball.vx, f.ball.vz), f.ball.superShot, f.ball.superPass);
@@ -638,7 +638,7 @@ export class MatchScene {
         boards.show('GOAL!', this.sim.teams[ev.side].kit.shirt, this.sim.shootout ? 3 : Infinity);
         this.extras.life.goal();
       } else if (ev.type === 'kickoff' || ev.type === 'fulltime') boards.clear();
-      else if (ev.type === 'super' && ev.superKind && !boards.showing) boards.show(SUPERS[ev.superKind].name.toUpperCase(), SUPERS[ev.superKind].css, 3);
+      else if (ev.type === 'super' && ev.superKind && !boards.showing) { const look = superLook(ev.superKind, ev.player); boards.show(look.name.toUpperCase(), look.css, 3); }
       else if (ev.type === 'foul' && ev.kind === 'penalty' && !boards.showing) boards.show('PENALTY!', '#e63946', 3);
     } catch (e) {
       // The boards are only decoration: never let them stop the match.
@@ -848,7 +848,7 @@ export class MatchScene {
       const yours = this.sim.isHuman(s.side);
       const quick = this.superMode === 'quick' || this.cutsBroken;
       this.hud.superStart(s.kind, s.p.info, yours, this.sim.teams[s.side].short, quick);
-      if (!this.calm) this.aura.burst(s.p.pos.x, s.p.pos.z, SUPERS[s.kind].hex);
+      if (!this.calm) this.aura.burst(s.p.pos.x, s.p.pos.z, superLook(s.kind, s.p.info).hex);
       if (quick) return;
       const from = this.camera.position.clone();
       this.cut = {
@@ -1037,8 +1037,9 @@ export class MatchScene {
     if (colour !== this.trailColour) { this.trailColour = colour; this.trail.setColour(colour); }
     this.trail.update(dt, this.ball.group.position, !this.calm && !owned && (colour !== null || ballSpeed > this.sim.stats.power * 1.05));
     // While a super lasts (a dash, a slide, the gloves), its glow stays with the player.
-    const lasting = players[lastingSuper(players)];
-    this.aura.follow(lasting?.x ?? 0, lasting?.z ?? 0, !!lasting && !this.calm, lasting?.superKind ? SUPERS[lasting.superKind].hex : 0xffffff);
+    const at = lastingSuper(players);
+    const lasting = players[at];
+    this.aura.follow(lasting?.x ?? 0, lasting?.z ?? 0, !!lasting && !this.calm, lasting?.superKind ? superLook(lasting.superKind, this.sim.players[at]?.info).hex : 0xffffff);
     this.aura.update(dt);
     if (lasting && !this.calm && (lasting.superKind === 'turbo' || lasting.superKind === 'bulldozer') && lasting.speed > 1) {
       this.puffs.burst(lasting.x, lasting.z, 1, 0.35 * this.sim.stats.scale + 0.2); // dust kicked up behind them

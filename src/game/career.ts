@@ -3,6 +3,7 @@ import { STAR_CAP, randomSkills, skillKeys, skillLabel } from '../data/skills';
 import { FIRST_NAMES, makePlayer, pick, startingFive, uid } from '../data/defaults';
 import { applyLeagueResult, computeTable, createLeague, resultLines, seasonOver, tallyMatch, tierInfo, type LeagueState, type SeasonRecord } from './league';
 import { addScrap, type ScrapLine } from './hallOfFame';
+import { SIGNATURES, SIGNATURE_AT, type SignatureId } from './supers';
 import { awardsNight, type Award, type AwardsNight } from './awards';
 import { CUP_ROUNDS, createCup, cupName, cupOver, cupReached, recordCupResult, yourTie, type CareerCup } from './careerCup';
 import { AGE_STATS } from '../data/ageGroups';
@@ -1005,6 +1006,18 @@ export function transferOffers(c: CareerState, team: Team): TransferOffer[] {
  * The Star stays: no transfer, and the club makes them captain (the Captain milestone and its
  * training point). Returns the milestones reached.
  */
+/** The Star can pick (or change) a signature super look once they reach Legend in the Making. */
+export const canPickSignature = (c: CareerState): boolean => c.milestones.length >= SIGNATURE_AT;
+
+/** Give the Star their signature super look. Returns false when it is not unlocked yet. */
+export function pickSignature(c: CareerState, team: Team, id: SignatureId): boolean {
+  const star = careerStar(c, team);
+  if (!star || !canPickSignature(c) || !SIGNATURES[id]) return false;
+  if (!star.signature) addScrap(c.scrapbook, seasonIndex(c.year, c.season), SIGNATURES[id].icon, `${star.name} unlocked a signature super: ${SIGNATURES[id].word}!`);
+  star.signature = id;
+  return true;
+}
+
 export function stayAtClub(c: CareerState, team: Team): StarMilestone[] {
   if (!c.offers) return [];
   c.offers = null;

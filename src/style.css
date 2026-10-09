@@ -851,6 +851,11 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .milestones { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
 .milestone { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 1.6rem; padding: 6px 4px; border-radius: 12px; background: #eef2ff; filter: grayscale(1); opacity: .45; text-align: center; }
 .milestone small { font-size: .7rem; font-weight: 700; color: var(--navy); line-height: 1.1; }
+.sig-pick { margin-top: 12px; }
+.sig-pick h4 { margin: 0 0 4px; }
+.sig-pill { border-color: var(--sig); }
+.sig-pill.is-active { background: var(--sig); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+.sig-locked { margin-top: 10px; }
 .milestone.is-got { filter: none; opacity: 1; background: #fff3c4; border: 2px solid var(--yellow-deep); }
 .star-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
 .star-pick-btn { display: flex; align-items: center; gap: 10px; text-align: left; justify-content: flex-start; min-height: 64px; }

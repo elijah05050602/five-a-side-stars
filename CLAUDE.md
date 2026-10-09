@@ -25,7 +25,7 @@ npm run typecheck && npm run lint && npm test && npm run build && npm run e2e
   sinks into the netting) and the drawn net in `Pitch.ts` (`GoalNet`), which follows the ball in live play (not in replays).
 - `src/game/flight.ts`: how a free ball flies (gravity, bounce, friction, drag), used by the sim to move it and by shots, lobs,
   crosses and keeper kicks to work out the launch that lands where they mean. Change the ball's physics here, not in `sim.ts`.
-- `src/game/supers.ts`: the super skills' names, colours and timings. Their rules are in `sim.ts` (`superFor`, `runSuper`), and the cutscene is in `MatchScene.ts` (`startCut`). Super code runs inside `safely()` and the cutscene inside try/catch, so a bug there switches supers off for the match instead of stopping it.
+- `src/game/supers.ts`: the super skills' names, colours and timings. Their rules are in `sim.ts` (`superFor`, `runSuper`), and the cutscene is in `MatchScene.ts` (`startCut`). Show a super's name and colour with `superLook(kind, player)`, so a career Star's signature look is used. Super code runs inside `safely()` and the cutscene inside try/catch, so a bug there switches supers off for the match instead of stopping it.
 - `src/game/trophy.ts`: whether a match wins a trophy (a cup final, a league or career season's title, a promotion play-off) and how
   grand its lift is (level 1 for the Acorn League to 5 for the Star Premier League and cup finals). The lift itself
   is `src/game/ceremony.ts` with `fireworks.ts`, run by `MatchScene.ts` at the final whistle (inside try/catch,

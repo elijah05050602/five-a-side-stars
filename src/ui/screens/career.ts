@@ -4,7 +4,7 @@ import { scrapbookHtml } from './hallOfFame';
 import { cabinetHtml } from './cabinet';
 import { POSITION_LABELS } from '../../data/types';
 import { STAR_CAP, skillKeys, skillLabel, starsText } from '../../data/skills';
-import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, TWISTS, advanceCareer, canTrain, cupWaiting, joinClub, signTriallist, stayAtClub, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
+import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, TWISTS, advanceCareer, canPickSignature, canTrain, pickSignature, cupWaiting, joinClub, signTriallist, stayAtClub, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
 import { recordCareer } from '../../data/progress';
 import { computeTable, nextFixture, tierInfo } from '../../game/league';
 import { clubById, seasonIndex, tierOf } from '../../game/careerWorld';
@@ -17,7 +17,8 @@ import { goalText } from '../../game/seasonGoals';
 import { previewHtml } from './newsParts';
 import { ladderHtml, openClubPage, statsHtml, teamStatsHtml, worldLookup } from './worldParts';
 import { topBar, wire, ordinal, growthList, stickerBanner } from './shared';
-import type { SkillKey, Team } from '../../data/types';
+import type { Player, Position, SkillKey, Team } from '../../data/types';
+import { SIGNATURE_AT, SIGNATURE_IDS, superLook, type SignatureId, type SuperKind } from '../../game/supers';
 import type { CareerState } from '../../game/career';
 import type { Router } from '../screens';
 import { askConfirm } from '../dialog';
@@ -91,6 +92,17 @@ function offersCard(c: CareerState, you: Team): string {
 }
 
 /** The Star's card: training points to spend, ratings with progress to the next star, and milestones. */
+/** The super each position is best known for, to show off a signature. */
+const SIGNATURE_SHOWN: Record<Position, SuperKind> = { ATT: 'rocket', WING: 'turbo', MID: 'magic', DEF: 'slide', GK: 'gloves' };
+
+function signatureHtml(c: CareerState, star: Player): string {
+  if (!canPickSignature(c)) return `<p class="muted small sig-locked">🌠 Reach ${SIGNATURE_AT} milestones (Legend in the Making) to unlock a signature super.</p>`;
+  const kind = SIGNATURE_SHOWN[star.position];
+  return `<div class="sig-pick"><h4>🌠 Signature super</h4>
+    <p class="muted small">${star.signature ? `Your supers glow in ${esc(star.name)}'s own colour. Change it any time.` : `Legend in the Making! Pick how ${esc(star.name)}'s supers look and sound.`}</p>
+    <div class="pills">${SIGNATURE_IDS.map((id) => { const look = superLook(kind, { signature: id }); return `<button class="pill sig-pill ${star.signature === id ? 'is-active' : ''}" style="--sig:${look.css}" data-signature="${id}" aria-pressed="${star.signature === id}">${look.icon} ${esc(look.name)}</button>`; }).join('')}</div></div>`;
+}
+
 function starCard(c: CareerState, you: Team, justGrew: GrowthEvent[]): string {
   const star = careerStar(c, you)!;
   const cap = STAR_CAP[careerAge(c)];
@@ -114,6 +126,7 @@ function starCard(c: CareerState, you: Team, justGrew: GrowthEvent[]): string {
     <div class="psc-stats"><span><strong>${st.played}</strong> played</span><span><strong>${st.goals}</strong> goals</span><span><strong>${st.assists}</strong> assists</span>${star.position === 'GK' ? `<span><strong>${st.saves}</strong> saves</span>` : `<span><strong>${st.tackles}</strong> tackles</span>`}<span><strong>${st.motm}</strong> 🏆</span></div>
     <h4>Milestones <span class="muted small">${c.milestones.length} of ${STAR_MILESTONES.length}</span></h4>
     <div class="milestones">${STAR_MILESTONES.map((m) => { const got = c.milestones.includes(m.id); return `<span class="milestone ${got ? 'is-got' : ''}" title="${esc(m.name)}: ${esc(m.how)}">${m.emoji}<small>${esc(m.name)}</small></span>`; }).join('')}</div>
+    ${signatureHtml(c, star)}
   </div>`;
 }
 
@@ -296,6 +309,13 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     if (!pickStar(c, you, b.dataset.star!)) return;
     setCareer(c);
     renderCareer(root, router);
+  }));
+  root.querySelectorAll<HTMLElement>('[data-signature]').forEach((b) => b.addEventListener('click', () => {
+    if (!pickSignature(c, you, b.dataset.signature as SignatureId)) return;
+    saveTeam(you);
+    setCareer(c);
+    renderCareer(root, router);
+    root.querySelector<HTMLElement>(`[data-signature="${b.dataset.signature}"]`)?.focus();
   }));
   root.querySelector('#k-stay')?.addEventListener('click', () => {
     const milestones = stayAtClub(c, you);
