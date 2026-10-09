@@ -1,6 +1,7 @@
 import { AGE_STATS } from '../../data/ageGroups';
 import { getCareer, getHall, getTeam, retireCareer, saveTeam, setCareer } from '../../data/storage';
 import { scrapbookHtml } from './hallOfFame';
+import { cabinetHtml } from './cabinet';
 import { POSITION_LABELS } from '../../data/types';
 import { STAR_CAP, skillKeys, skillLabel, starsText } from '../../data/skills';
 import { CAREER_AGES, SEASONS_PER_YEAR, SEASON_NAMES, STAR_MILESTONES, TRAINING_STEP, advanceCareer, canTrain, cupWaiting, joinClub, signTriallist, stayAtClub, careerAge, careerNudge, careerPlayoff, careerRival, careerSeasonOutcome, careerSeasonOver, careerStar, freshSeasonStats, pickStar, playoffWaiting, seasonName, statRows, trainStar, yourTierIds, type GrowthEvent } from '../../game/career';
@@ -227,6 +228,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       ${star && !choosing ? starCard(c, you, justGrew) : ''}
       ${preview}
       ${choosing ? '' : goalsCard}
+      ${choosing ? '' : cabinetHtml(c)}
       ${c.done ? `<div class="card trophy-card"><div class="trophy">🎓</div><h2>All grown up!</h2><p class="muted">${esc(you.name)} played ${totals.played} matches from the Under 5s to the Under 10s, scored ${totals.goals} goals and won ${c.titles} mini-season title${c.titles === 1 ? '' : 's'}. What a journey.</p></div>` : ''}
       <div class="league-body">
         ${c.done ? '' : `<div class="table-area">${tableArea()}</div>`}
