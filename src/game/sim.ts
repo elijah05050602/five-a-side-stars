@@ -33,9 +33,15 @@ export interface PlayerMatchStats {
   /** Tackles that won the ball. */
   tackles: number;
   saves: number;
+  /** Skill moves that beat the defender. */
+  tricks: number;
+  /** Super skills used. */
+  supers: number;
+  /** Goals scored with a super skill. */
+  superGoals: number;
 }
 
-export const freshMatchStats = (): PlayerMatchStats => ({ goals: 0, assists: 0, shots: 0, passes: 0, tackles: 0, saves: 0 });
+export const freshMatchStats = (): PlayerMatchStats => ({ goals: 0, assists: 0, shots: 0, passes: 0, tackles: 0, saves: 0, tricks: 0, supers: 0, superGoals: 0 });
 
 /** Star ratings turned into multipliers on the age-group base values. */
 export interface SkillMuls {
@@ -238,6 +244,8 @@ export interface GoalEvent {
   side: Side; scorer: Player; minute: number; ownGoal: boolean;
   /** Where the ball crossed the goal line: its height, and how far across the goal (0 is the middle). */
   at?: { y: number; z: number };
+  /** Scored with a super skill (a Rocket Shot, or while a super was running). */
+  super?: boolean;
 }
 
 export interface SimEvent {
@@ -1013,6 +1021,7 @@ export class MatchSim {
     const b = this.ball;
     p.superKind = kind;
     p.superTime = SUPER_TIME[kind];
+    p.match.supers++;
     if (kind === 'rocket' || kind === 'magic') {
       p.superTime = 0.5; // long enough for the effects to see it
       if (b.owner !== p) return;
@@ -2895,7 +2904,10 @@ export class MatchSim {
     else kind = Math.random() < 0.55 ? 'stepover' : 'feint';
     p.trickKind = kind;
     p.trickDir = kind === 'elastico' || kind === 'roulette' ? (side >= 0 ? 1 : -1) * (Math.abs(side) > 0.3 ? 1 : Math.random() < 0.5 ? -1 : 1) : Math.random() < 0.5 ? -1 : 1;
-    const say = (ok: boolean) => this.events.push({ type: 'trick', kind, side: p.side, player: p.info, ok });
+    const say = (ok: boolean) => {
+      if (ok) p.match.tricks++;
+      this.events.push({ type: 'trick', kind, side: p.side, player: p.info, ok });
+    };
 
     if (kind === 'nutmeg' && victim) {
       p.kickAnim = 0.7; // a little poke
@@ -3304,9 +3316,11 @@ export class MatchSim {
       const touch = b.owner ?? b.lastKick ?? b.lastTouch ?? this.teamOf(scoringSide)[0];
       const ownGoal = touch.side !== scoringSide;
       const scorer = touch.info;
-      this.goals.push({ side: scoringSide, scorer, minute: this.minute, ownGoal, at: this.crossedAt ?? { y: b.y, z: b.pos.z } });
+      const superGoal = !ownGoal && (b.superShot || touch.superKind !== null);
+      this.goals.push({ side: scoringSide, scorer, minute: this.minute, ownGoal, at: this.crossedAt ?? { y: b.y, z: b.pos.z }, ...(superGoal ? { super: true } : {}) });
       if (!ownGoal && this.mode === 'match') {
         touch.match.goals++;
+        if (superGoal) touch.match.superGoals++;
         const a = b.assist;
         if (a && a.side === scoringSide && a !== touch) a.match.assists++;
       }

@@ -9,6 +9,8 @@ import { clubById, seasonIndex, tierOf } from '../../game/careerWorld';
 import { esc } from '../hud';
 import { badgeSvg, kitChip } from '../kitPreview';
 import { careerTableNote, nextMatchHtml, playNextMatch, tableCard } from './leagueParts';
+import { matchPreview } from '../../game/news';
+import { previewHtml } from './newsParts';
 import { ladderHtml, openClubPage, statsHtml, teamStatsHtml, worldLookup } from './worldParts';
 import { topBar, wire, ordinal, growthList, stickerBanner } from './shared';
 import type { SkillKey, Team } from '../../data/types';
@@ -111,6 +113,15 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
   const h2h = rival ? w.h2h[rival.team.id] : undefined;
   const rivalNext = !!next && !!rival && (next.home.id === rival.team.id || next.away.id === rival.team.id);
   const opponentId = next ? (next.youAreHome ? next.away.id : next.home.id) : '';
+  const previewFor = (opp: Team, youAreHome: boolean, playoff?: 'up' | 'stay') => {
+    const club = clubById(w, opp.id);
+    return previewHtml(matchPreview({
+      you, opponent: opp, youAreHome, table: yourIds, forms: { you: w.you.form, opponent: club?.rec.form ?? '' }, tally: c.league.tally,
+      opponentStar: club?.starId, yourStar: c.starId, h2h: w.h2h[opp.id], rival: opp.id === w.rivalId,
+      round: c.league.round + 1, rounds: c.league.rounds.length, playoff,
+    }));
+  };
+  const preview = choosing || trial || c.done ? '' : next ? previewFor(next.youAreHome ? next.away : next.home, next.youAreHome) : po && poWaiting ? previewFor(po.opponent.team, true, po.up ? 'up' : 'stay') : '';
   let tab: 'table' | 'stats' | 'tiers' = 'table';
   let statScope: 'season' | 'career' = 'season';
   const tabs = () => `<div class="pills table-tabs">${(['table', 'stats', 'tiers'] as const).map((t) => `<button class="pill ${t === tab ? 'is-active' : ''}" data-tab="${t}">${t === 'table' ? '📋 Table' : t === 'stats' ? '📊 Stats' : '🪜 All leagues'}</button>`).join('')}</div>`;
@@ -155,6 +166,7 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
       ${choosing && !c.done ? starPicker(c, you) : ''}
       ${trial ? trialCard(c, you) : ''}
       ${star && !choosing ? starCard(c, you, justGrew) : ''}
+      ${preview}
       ${c.done ? `<div class="card trophy-card"><div class="trophy">🎓</div><h2>All grown up!</h2><p class="muted">${esc(you.name)} played ${totals.played} matches from the Under 5s to the Under 10s, scored ${totals.goals} goals and won ${c.titles} mini-season title${c.titles === 1 ? '' : 's'}. What a journey.</p></div>` : ''}
       <div class="league-body">
         ${c.done ? '' : `<div class="table-area">${tableArea()}</div>`}

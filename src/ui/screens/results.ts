@@ -6,6 +6,8 @@ import { applyLeagueResult, roundJobs, tierInfo, yourPosition } from '../../game
 import { applyResult, cupAheadRequest, currentFixture, type TournamentState } from '../../game/tournament';
 import { inBackground, type CupAhead, type SimOutcome } from '../../game/background';
 import { cupTrophy, leagueTrophy, playoffTrophy, type TrophyWin } from '../../game/trophy';
+import { aroundTheLeague, matchReport, type MatchReport } from '../../game/news';
+import { reportHtml } from './newsParts';
 import { esc } from '../hud';
 import { badgeSvg } from '../kitPreview';
 import { topBar, wire, ordinal, stickerBanner, growthList } from './shared';
@@ -24,6 +26,8 @@ export interface ResultSummary {
   growth?: GrowthEvent[];
   /** What the career's Star earned in this match. */
   star?: { name: string; points: number; milestones: StarMilestone[] };
+  /** The Gazette's front page (league and career matches). */
+  report?: MatchReport;
   /** A drawn play-off: the shoot-out to play next. */
   shootout?: StartOptions;
 }
@@ -94,6 +98,9 @@ export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[]
         const star = careerStar(c, you);
         if (star && s.points > 0) summary.star = { name: star.name, points: s.points, milestones: s.milestones };
       }
+      const played = c.league.rounds[c.league.round - 1];
+      const name = (id: string) => (id === you.id ? you.name : c.league.teams.find((t) => t.id === id)?.name ?? '');
+      summary.report = matchReport(r, you.id, r.mode === 'match' ? playerOfTheMatch(r) : null, playoff || !played ? [] : aroundTheLeague(played, you.id, name));
       const po = c.world.playoff;
       if (playoff && po) {
         summary.tableNote = po.won === null ? 'All square in the play-off! Penalties decide it.' : po.won ? (po.up ? '🎟️ Play-off won: you are going up!' : '🛟 Play-off won: you are staying up!') : (po.up ? 'Play-off lost. Next season you go again!' : 'Play-off lost: down a tier next season. You will bounce back!');
@@ -108,6 +115,8 @@ export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[]
       const others = ahead.round?.index === ls.round ? ahead.round.outcomes : undefined;
       applyLeagueResult(ls, you, r, others);
       setLeague(ls);
+      const name = (id: string) => (id === you.id ? you.name : ls.teams.find((t) => t.id === id)?.name ?? '');
+      summary.report = matchReport(r, you.id, playerOfTheMatch(r), aroundTheLeague(ls.rounds[ls.round - 1] ?? [], you.id, name));
       summary.tableNote = `${tierInfo(ls.tier).name} · round ${Math.min(ls.round, ls.rounds.length)} of ${ls.rounds.length} played · you are ${ordinal(yourPosition(ls, you))}`;
     }
   }
@@ -147,6 +156,7 @@ export function renderResults(root: HTMLElement, router: Router, r: MatchResult,
           ${r.goals.map((g) => `<li>${g.side === 0 ? '⚽ ' : ''}<strong>${esc(g.scorer.name)}</strong> #${g.scorer.number}${g.ownGoal ? ' (og)' : ''} <span class="muted">${g.minute}'</span>${g.side === 1 ? ' ⚽' : ''}</li>`).join('')}
         </ul>` : ''}
         ${motm ? `<div class="motm">🏆 Player of the match: <strong>${esc(motm.name)}</strong> #${motm.number}</div>` : ''}
+        ${summary.report ? reportHtml(summary.report) : ''}
         ${leagueNote}
         ${starNote}
         ${growthNote}
