@@ -112,6 +112,8 @@ export interface MatchReport {
   standfirst: string;
   /** Player of the Match: name and the side they played for. */
   motm: { name: string; team: string } | null;
+  /** The headline is about one of your players (a hat-trick, a super goal, a winner). */
+  hero: boolean;
   /** The rest of the round, already played. */
   around: { home: string; away: string; score: [number, number] }[];
 }
@@ -143,15 +145,17 @@ export function matchReport(r: MatchResult, youId: string, motm: Player | null, 
   for (const g of r.goals) { if (g.side === 0) h++; else a++; if ((me === 0 ? a - h : h - a) > 0) behind = true; }
   const won = gf > ga, lost = gf < ga;
   const late = mine.length ? mine[mine.length - 1] : null;
-  let headline: string, standfirst: string;
+  let headline: string, standfirst: string, hero = false;
   if (r.mode === 'shootout') {
     headline = won ? steady([`🥅 Spot-kick heroes! ${you.name} win on penalties!`, `🥅 Nerves of steel! ${you.name} win the shoot-out!`], key) : `🥅 Heartbreak on penalties for ${you.name}.`;
     standfirst = `It finished ${gf}–${ga} in the shoot-out.`;
   } else if (hatTrick && won) {
     headline = `🎩 Hat-trick hero ${hatTrick.name}!`;
+    hero = true;
     standfirst = `${hatTrick.name} scored ${hatTrick.n} as ${you.name} beat ${them.name} ${gf}–${ga}.`;
   } else if (superGoal && won) {
     headline = steady([`⚡ SUPER! ${superGoal.scorer.name}'s super skill wins it!`, `⚡ What a super goal from ${superGoal.scorer.name}!`], key);
+    hero = true;
     standfirst = `${you.name} beat ${them.name} ${gf}–${ga}.`;
   } else if (won && behind) {
     headline = steady([`🔁 What a comeback by ${you.name}!`, `🔁 ${you.name} never gave up!`], key);
@@ -164,6 +168,7 @@ export function matchReport(r: MatchResult, youId: string, motm: Player | null, 
     standfirst = `${gf}–0, and the defence did not let one in.`;
   } else if (won && gf - ga === 1 && lastGoalWinner(r, me)) {
     headline = steady([`⏱️ ${late!.scorer.name} grabs the winner!`, `⏱️ Winner! ${late!.scorer.name} settles it.`], key);
+    hero = true;
     standfirst = `${you.name} beat ${them.name} ${gf}–${ga}.`;
   } else if (won) {
     headline = steady([`✅ Win for ${you.name}!`, `✅ ${you.name} beat ${them.name}!`, `✅ Three points for ${you.name}!`], key);
@@ -176,7 +181,7 @@ export function matchReport(r: MatchResult, youId: string, motm: Player | null, 
     standfirst = gf === 0 ? 'The keepers were on top today.' : 'Goals at both ends!';
   }
   const motmTeam = motm ? (r.home.players.some((p) => p.id === motm.id) ? r.home : r.away).name : '';
-  return { headline, standfirst, motm: motm ? { name: motm.name, team: motmTeam } : null, around };
+  return { headline, standfirst, hero, motm: motm ? { name: motm.name, team: motmTeam } : null, around };
 }
 
 /** The rest of a round as Around the League lines (the player's own match left out). */

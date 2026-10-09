@@ -110,6 +110,18 @@ export const STAR_MILESTONES: StarMilestone[] = [
   { id: 'motm-5', emoji: '🎤', name: 'Crowd Favourite', how: 'Be Player of the Match five times.' },
   { id: 'games-20', emoji: '👟', name: 'Regular', how: 'Play 20 matches.' },
   { id: 'games-60', emoji: '🏅', name: 'Club Legend', how: 'Play 60 matches.' },
+  { id: 'goals-50', emoji: '🎯', name: 'Fifty!', how: 'Score 50 goals in your career (a keeper: make 50 saves).' },
+  { id: 'goals-100', emoji: '💯', name: 'Hundred Club', how: 'Score 100 goals in your career (a keeper: make 100 saves).' },
+  { id: 'assists-10', emoji: '🎁', name: 'Playmaker', how: 'Set up 10 goals for your team-mates.' },
+  { id: 'assists-25', emoji: '🧠', name: 'Master Passer', how: 'Set up 25 goals for your team-mates.' },
+  { id: 'clean-10', emoji: '🔒', name: 'Lock the Door', how: 'Play in 10 clean sheets.' },
+  { id: 'super-goal', emoji: '💫', name: 'Super Goal', how: 'Score with a super skill.' },
+  { id: 'skill-show', emoji: '🪄', name: 'Skill Show', how: 'Beat defenders with 10 skill moves.' },
+  { id: 'captain', emoji: '©️', name: 'Captain', how: 'Be made captain of your club.' },
+  { id: 'games-100', emoji: '🏟️', name: 'Century', how: 'Play 100 matches.' },
+  { id: 'top-scorer', emoji: '👟', name: 'Top Scorer', how: 'Score the most goals in your league in a mini season.' },
+  { id: 'player-of-year', emoji: '🌟', name: 'Player of the Year', how: 'Win Player of the Year at the end-of-year awards.' },
+  { id: 'big-stage', emoji: '🎭', name: 'Big Stage', how: 'Play a match in the Star Premier League.' },
 ];
 
 /** Training points after a match: one for playing, one for a win, one for Player of the Match. */
@@ -363,6 +375,16 @@ function newMilestones(c: CareerState, star: Player, s: PlayerSeasonStats, m: Pl
     'motm-5': s.motm >= 5,
     'games-20': s.played >= 20,
     'games-60': s.played >= 60,
+    'goals-50': keeper ? s.saves >= 50 : s.goals >= 50,
+    'goals-100': keeper ? s.saves >= 100 : s.goals >= 100,
+    'assists-10': s.assists >= 10,
+    'assists-25': s.assists >= 25,
+    'clean-10': s.cleanSheets >= 10,
+    'super-goal': (s.superGoals ?? 0) >= 1,
+    'skill-show': (s.tricks ?? 0) >= 10,
+    'games-100': s.played >= 100,
+    'big-stage': c.league.tier === 1,
+    // 'captain', 'top-scorer' and 'player-of-year' come from the club and the season's end, not a match (see seasonMilestones).
   };
   return STAR_MILESTONES.filter((ms) => reached[ms.id] && !c.milestones.includes(ms.id));
 }
@@ -524,6 +546,8 @@ const TEAMS_PER_TABLE = 6;
 
 export interface SeasonAdvance {
   record: CareerSeasonRecord;
+  /** Star milestones reached at the end of the season (Top Scorer). */
+  milestones: StarMilestone[];
   /** The tier you won this mini season (1 to 5), if you won it. */
   titleTier: number | null;
   /** You won a title in every age group, from the Under 5s to now. */
@@ -551,6 +575,7 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
     c.titles++;
     if (!w.titleAges.includes(careerAge(c))) w.titleAges.push(careerAge(c));
   }
+  const milestones = seasonMilestones(c, team);
   const end = endSeasons(w, team.id, team.name, computeTable(c.league, team).map((row) => row.team.id), si);
   const tier = end.tier;
   let movedUp = false, finished = false;
@@ -583,7 +608,25 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
     c.goals = newGoals(c, team);
   }
   const everyYear = !!titleTier && CAREER_AGES.every((a) => w.titleAges.includes(a));
-  return { record, movedUp, finished, titleTier, everyYear, allTheWayUp: w.tierTitles.every((n) => n > 0) };
+  return { record, milestones, movedUp, finished, titleTier, everyYear, allTheWayUp: w.tierTitles.every((n) => n > 0) };
+}
+
+/** Milestones from a whole mini season: the Star scored the most goals in the league. Each is a training point. */
+function seasonMilestones(c: CareerState, team: Team): StarMilestone[] {
+  const star = careerStar(c, team);
+  if (!star) return [];
+  const mine = c.league.tally[star.id]?.g ?? 0;
+  const best = Math.max(0, ...Object.values(c.league.tally).map((t) => t.g));
+  const reached = mine > 0 && mine >= best ? ['top-scorer'] : [];
+  return markMilestones(c, reached);
+}
+
+/** Note milestones reached outside a match (Top Scorer, Captain, Player of the Year), with their training points. */
+export function markMilestones(c: CareerState, ids: string[]): StarMilestone[] {
+  const fresh = STAR_MILESTONES.filter((m) => ids.includes(m.id) && !c.milestones.includes(m.id));
+  c.milestones.push(...fresh.map((m) => m.id));
+  c.trainingPoints += fresh.length * TRAINING.milestone;
+  return fresh;
 }
 
 /** Your rival club, if there is one. */

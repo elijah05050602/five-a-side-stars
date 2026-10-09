@@ -68,4 +68,12 @@ describe('progress and stickers', () => {
     expect(recordCareer({ rivalWins: 5 }).map((s) => s.id)).toEqual(['rival-master']);
     expect(getProgress().counts).toMatchObject({ 'tier5-champ': 2, 'tier4-champ': 1, 'rival-beaten': 2, 'playoff-hero': 1 });
   });
+
+  it('counts Gazette headlines towards Front Page, and big milestone counts to Living Legend and Greatest of All Time', () => {
+    resetAll();
+    for (let i = 0; i < 9; i++) expect(recordCareer({ headline: true })).toEqual([]);
+    expect(recordCareer({ headline: true }).map((s) => s.id)).toEqual(['front-page']);
+    expect(recordCareer({ starMilestones: 16 }).map((s) => s.id)).toEqual(['star-moment', 'star-legend', 'living-legend']);
+    expect(recordCareer({ starMilestones: 24 }).map((s) => s.id)).toEqual(['goat']);
+  });
 });

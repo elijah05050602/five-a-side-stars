@@ -87,6 +87,7 @@ export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[]
       const played = c.league.rounds[c.league.round - 1];
       const name = (id: string) => (id === you.id ? you.name : c.league.teams.find((t) => t.id === id)?.name ?? '');
       summary.report = matchReport(r, you.id, r.mode === 'match' ? playerOfTheMatch(r) : null, playoff || !played ? [] : aroundTheLeague(played, you.id, name));
+      if (summary.report.hero) summary.stickers.push(...recordCareer({ headline: true }));
       const po = c.world.playoff;
       if (playoff && po) {
         summary.tableNote = po.won === null ? 'All square in the play-off! Penalties decide it.' : po.won ? (po.up ? '🎟️ Play-off won: you are going up!' : '🛟 Play-off won: you are staying up!') : (po.up ? 'Play-off lost. Next season you go again!' : 'Play-off lost: down a tier next season. You will bounce back!');
@@ -103,6 +104,7 @@ export function finishMatch(r: MatchResult, o: StartOptions, stickers: Sticker[]
       setLeague(ls);
       const name = (id: string) => (id === you.id ? you.name : ls.teams.find((t) => t.id === id)?.name ?? '');
       summary.report = matchReport(r, you.id, playerOfTheMatch(r), aroundTheLeague(ls.rounds[ls.round - 1] ?? [], you.id, name));
+      if (summary.report.hero) summary.stickers.push(...recordCareer({ headline: true }));
       summary.tableNote = `${tierInfo(ls.tier).name} · round ${Math.min(ls.round, ls.rounds.length)} of ${ls.rounds.length} played · you are ${ordinal(yourPosition(ls, you))}`;
     }
   }
