@@ -1,6 +1,6 @@
 import { HAIR_COLOURS, SKIN_TONES, generateOpponent, makePlayer, randomPlayerName } from '../../data/defaults';
 import { CLUB_TEAM_ID, davaoStrikersTeam } from '../../data/club';
-import { getCareer, getSettings, getTeam, getTeams, saveTeam, setCareer, updateSettings } from '../../data/storage';
+import { getCareer, getHall, getSettings, getTeam, getTeams, retireCareer, saveTeam, setCareer, updateSettings } from '../../data/storage';
 import { GENDERS, HAIR_STYLES, HAIR_STYLE_LABELS, POSITIONS, POSITION_LABELS, type Gender, type HairStyle, type Player, type Position, type Team } from '../../data/types';
 import { isNameOk } from '../../data/wordFilter';
 import { recordCareer } from '../../data/progress';
@@ -117,8 +117,9 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
     root.querySelector('#c-go')!.addEventListener('click', async () => {
       const chosen = star();
       if (!chosen || !chosen.name.trim() || !isNameOk(chosen.name)) return;
-      if (getCareer() && !(await askConfirm({ tone: 'warn', title: 'Start a new career?', body: 'Your current career will be deleted.\n\nThe team stays in My Teams.', yes: 'Start new career', no: 'Keep my career' }))) return;
+      if (getCareer() && !(await askConfirm({ tone: 'warn', title: 'Start a new career?', body: 'Your current career goes into the Hall of Fame, with its Star, trophies and scrapbook.\n\nThe team stays in My Teams.', yes: 'Start new career', no: 'Keep my career' }))) return;
       updateSettings({ beginnerHelp: help, halfLengthSeconds: halfSeconds });
+      if (getCareer() && retireCareer()) recordCareer({ hall: getHall().length });
       const { career, team: you } = createCareer(team(), halfSeconds, { ...chosen, name: chosen.name.trim() });
       saveTeam(you);
       setCareer(career);

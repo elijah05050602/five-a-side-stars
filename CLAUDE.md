@@ -26,7 +26,7 @@ npm run typecheck && npm run lint && npm test && npm run build && npm run e2e
 - `src/game/flight.ts`: how a free ball flies (gravity, bounce, friction, drag), used by the sim to move it and by shots, lobs,
   crosses and keeper kicks to work out the launch that lands where they mean. Change the ball's physics here, not in `sim.ts`.
 - `src/game/supers.ts`: the super skills' names, colours and timings. Their rules are in `sim.ts` (`superFor`, `runSuper`), and the cutscene is in `MatchScene.ts` (`startCut`). Super code runs inside `safely()` and the cutscene inside try/catch, so a bug there switches supers off for the match instead of stopping it.
-- `src/game/league.ts`, `tournament.ts` and `career.ts`: the saved modes. `careerWorld.ts` is the career's 30 clubs: tiers, play-offs, the rival, and the other tiers worked out at once from club strength.
+- `src/game/league.ts`, `tournament.ts` and `career.ts`: the saved modes. `careerWorld.ts` is the career's 30 clubs: tiers, play-offs, the rival, and the other tiers worked out at once from club strength. `hallOfFame.ts` is the scrapbook and the Hall of Fame summaries; a career ends through `retireCareer()` in `storage.ts`, which keeps it in the Hall.
 - `src/ui/screens.ts` routes between screens. Each screen is `src/ui/screens/<name>.ts`, with
   shared helpers in `screens/shared.ts`. The console bar and dock are in `src/ui/shell.ts`, and
   the in-match overlay is in `src/ui/hud.ts`.
