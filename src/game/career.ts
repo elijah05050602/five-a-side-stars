@@ -4,6 +4,7 @@ import { FIRST_NAMES, makePlayer, pick, startingFive, uid } from '../data/defaul
 import { applyLeagueResult, computeTable, createLeague, resultLines, seasonOver, tallyMatch, tierInfo, type LeagueState, type SeasonRecord } from './league';
 import { addScrap, type ScrapLine } from './hallOfFame';
 import { SIGNATURES, SIGNATURE_AT, type SignatureId } from './supers';
+import { SEASON_AWARDS, seasonAwards, type SeasonAwardId } from './seasonAwards';
 import { awardsNight, type Award, type AwardsNight } from './awards';
 import { CUP_ROUNDS, createCup, cupName, cupOver, cupReached, recordCupResult, yourTie, type CareerCup } from './careerCup';
 import { AGE_STATS } from '../data/ageGroups';
@@ -147,7 +148,11 @@ export const STAR_MILESTONES: StarMilestone[] = [
   { id: 'skill-show', emoji: '🪄', name: 'Skill Show', how: 'Beat defenders with 10 skill moves.' },
   { id: 'captain', emoji: '©️', name: 'Captain', how: 'Be made captain of your club.' },
   { id: 'games-100', emoji: '🏟️', name: 'Century', how: 'Play 100 matches.' },
-  { id: 'top-scorer', emoji: '👟', name: 'Top Scorer', how: 'Score the most goals in your league in a mini season.' },
+  { id: 'top-scorer', emoji: '👟', name: 'Golden Boot', how: 'Win the Golden Boot: the most goals in your league in a mini season.' },
+  { id: 'best-mid', emoji: '🎯', name: 'Best Midfielder', how: 'Be Best Midfielder at the end of a mini season.' },
+  { id: 'best-def', emoji: '🛡️', name: 'Best Defender', how: 'Be Best Defender at the end of a mini season (clean sheets count most).' },
+  { id: 'best-keeper', emoji: '🧤', name: 'Best Goalkeeper', how: 'Be Best Goalkeeper at the end of a mini season (clean sheets count most).' },
+  { id: 'award-collector', emoji: '🏅', name: 'Award Collector', how: 'Win three end-of-season awards.' },
   { id: 'player-of-year', emoji: '🌟', name: 'Player of the Year', how: 'Win Player of the Year at the end-of-year awards.' },
   { id: 'big-stage', emoji: '🎭', name: 'Big Stage', how: 'Play a match in the Star Premier League.' },
 ];
@@ -723,7 +728,7 @@ export function careerSeasonOutcome(c: CareerState, team: Team): CareerSeasonRec
     if (position === 2 && po === true) outcome = 'promoted';
     if (position === 5 && po === false) outcome = 'relegated';
   }
-  const rec: SeasonRecord = { season: c.league.season, tier, position, outcome };
+  const rec: SeasonRecord = { season: c.league.season, tier, position, outcome, awards: seasonAwards(c.league.tally, yourTierIds(c, team)) };
   let top: CareerSeasonRecord['topScorer'] = null;
   for (const p of team.players) {
     const g = c.seasonStats[p.id]?.goals ?? 0;
@@ -769,6 +774,7 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
     if (!w.titleAges.includes(careerAge(c))) w.titleAges.push(careerAge(c));
   }
   const milestones = seasonMilestones(c, team);
+  for (const a of record.awards ?? []) if (a.playerId === c.starId) addScrap(c.scrapbook, si, SEASON_AWARDS[a.id].emoji, `${a.name} won the league's ${SEASON_AWARDS[a.id].title} (${a.line})!`);
   let awards: Award[] | null = null;
   const end = endSeasons(w, team.id, team.name, computeTable(c.league, team).map((row) => row.team.id), si);
   const tier = end.tier;
@@ -859,6 +865,11 @@ function seasonMilestones(c: CareerState, team: Team): StarMilestone[] {
   const mine = c.league.tally[star.id]?.g ?? 0;
   const best = Math.max(0, ...Object.values(c.league.tally).map((t) => t.g));
   const reached = mine > 0 && mine >= best ? ['top-scorer'] : [];
+  // The end-of-season awards (this season's record is already in the history).
+  const won = c.history.flatMap((h) => h.awards ?? []).filter((a) => a.playerId === star.id);
+  const ids: Record<SeasonAwardId, string> = { 'golden-boot': 'top-scorer', 'best-mid': 'best-mid', 'best-def': 'best-def', 'best-keeper': 'best-keeper' };
+  for (const a of won) reached.push(ids[a.id]);
+  if (won.length >= 3) reached.push('award-collector');
   return markMilestones(c, reached);
 }
 

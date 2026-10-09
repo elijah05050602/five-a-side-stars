@@ -2,6 +2,7 @@ import type { MatchResult } from '../game/MatchScene';
 import { loadSave, persist } from './storage';
 import type { AgeGroup } from './types';
 import type { SeasonRecord } from '../game/league';
+import { SEASON_AWARD_IDS, awardsFor, type SeasonAwardId } from '../game/seasonAwards';
 
 /** Everything the sticker album and unlockables are built from. Lives in the save file. */
 export interface Progress {
@@ -85,6 +86,11 @@ export const STICKERS: Sticker[] = [
   { id: 'new-adventure', emoji: '✈️', name: 'New Adventure', how: 'Your career Star joins a new club.' },
   { id: 'loyal-club', emoji: '🛡️', name: 'Loyal Club', how: 'Finish a career with your Star staying at the same club at every transfer window.' },
   { id: 'hall-of-famer', emoji: '🏛️', name: 'Hall of Famer', how: 'Put three careers in the Hall of Fame.', unlocks: '🏛️' },
+  { id: 'season-boot', emoji: '👟', name: 'Golden Boot Winner', how: 'One of your players wins the Golden Boot at the end of a league or career season.' },
+  { id: 'season-mid', emoji: '🎯', name: 'Midfield Maestro', how: 'One of your players is Best Midfielder at the end of a league or career season.' },
+  { id: 'season-def', emoji: '🛡️', name: 'Rock at the Back', how: 'One of your players is Best Defender at the end of a league or career season.' },
+  { id: 'season-keeper', emoji: '🧤', name: 'Safe Hands', how: 'Your keeper is Best Goalkeeper at the end of a league or career season.' },
+  { id: 'award-sweep', emoji: '🏅', name: 'Award Sweep', how: 'Your players win all four end-of-season awards in one season.', unlocks: '🏅' },
   { id: 'clean-sweep', emoji: '🧹', name: 'Clean Sweep', how: 'Do all three season goals in a career mini season.', unlocks: '🧹' },
 ];
 
@@ -164,11 +170,12 @@ export function recordResult(r: MatchResult): Sticker[] {
 }
 
 /** Record the end of a league season and return any new stickers. */
-export function recordSeason(rec: SeasonRecord): Sticker[] {
+export function recordSeason(rec: SeasonRecord, youId?: string): Sticker[] {
   const p = getProgress();
   const out: Sticker[] = [];
   if (rec.outcome === 'promoted') award(p, 'promoted', out);
   if (rec.outcome === 'champion') award(p, 'league-champ', out);
+  if (youId) seasonAwardStickers(p, awardsFor(rec.awards, youId).map((a) => a.id), out);
   persist();
   return out;
 }
@@ -200,6 +207,8 @@ export interface CareerMilestones {
   legacy?: number;
   /** A career that started with a twist was finished. */
   twistDone?: string | null;
+  /** End-of-season awards your players won. */
+  seasonAwards?: SeasonAwardId[];
   /** The Star won an award at awards night. */
   starAward?: boolean;
   /** Won the career's yearly cup. */
@@ -210,6 +219,12 @@ export interface CareerMilestones {
   loyal?: boolean;
   /** Careers in the Hall of Fame, after one was added. */
   hall?: number;
+}
+
+const SEASON_AWARD_STICKERS: Record<SeasonAwardId, string> = { 'golden-boot': 'season-boot', 'best-mid': 'season-mid', 'best-def': 'season-def', 'best-keeper': 'season-keeper' };
+function seasonAwardStickers(p: Progress, won: readonly SeasonAwardId[], out: Sticker[]): void {
+  for (const id of won) award(p, SEASON_AWARD_STICKERS[id], out);
+  if (SEASON_AWARD_IDS.every((id) => won.includes(id))) award(p, 'award-sweep', out);
 }
 
 export function recordCareer(m: CareerMilestones): Sticker[] {
@@ -231,6 +246,7 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.legacy && m.legacy >= 3) award(p, 'legacy-3', out);
   if (m.twistDone) award(p, `twist-${m.twistDone}`, out);
   if (m.starAward) award(p, 'award-night', out);
+  if (m.seasonAwards) seasonAwardStickers(p, m.seasonAwards, out);
   if (m.cupWon) {
     award(p, 'cup-winners', out);
     if ((p.counts?.['cup-winners'] ?? 0) >= 3) award(p, 'cup-kings', out);

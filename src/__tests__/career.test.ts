@@ -261,9 +261,9 @@ describe('starting a career with a Star', () => {
     expect(you.players.some((p) => p.name === 'S3')).toBe(false);
   });
 
-  it('has 24 Star milestones, with Top Scorer given at the end of a season and Big Stage in the top tier', () => {
-    expect(STAR_MILESTONES).toHaveLength(24);
-    expect(new Set(STAR_MILESTONES.map((m) => m.id)).size).toBe(24);
+  it('has 28 Star milestones, with the Golden Boot given at the end of a season and Big Stage in the top tier', () => {
+    expect(STAR_MILESTONES).toHaveLength(28);
+    expect(new Set(STAR_MILESTONES.map((m) => m.id)).size).toBe(28);
     const { career: c, team: you } = createCareer(team('src', 'Milestoners', 'U8'), 60);
     const star = you.players.find((p) => p.position === 'ATT')!;
     pickStar(c, you, star.id);

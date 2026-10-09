@@ -4,6 +4,7 @@ import { POSITION_LABELS, type Team } from '../../data/types';
 import { CAREER_AGES, SEASON_NAMES, SEASONS_PER_YEAR, type CareerState } from '../../game/career';
 import { activeIds, clubById, tierOf, tierTable, type ClubRecord, type CareerWorld } from '../../game/careerWorld';
 import { tierInfo, type LeagueFixture, type LeagueState, type Tally } from '../../game/league';
+import { SEASON_AWARDS, type SeasonAward } from '../../game/seasonAwards';
 import { openPop } from '../dialog';
 import { esc } from '../hud';
 import { badgeSvg } from '../kitPreview';
@@ -132,4 +133,14 @@ export function openLeagueTeamPage(ls: LeagueState, you: Team, id: string): void
     ${results.length ? `<ul class="plain-list">${results.join('')}</ul>` : '<p class="muted small">No matches yet.</p>'}
   </div>`;
   void openPop<void>({ icon: '📋', title: team.name, tone: 'oops', preview, buttons: [{ label: 'Close', value: undefined, kind: 'primary' }], focus: 0, cancel: undefined });
+}
+
+/** The league's end-of-season awards: who won, for which club, and why. Your players stand out. */
+export function seasonAwardsHtml(awards: readonly SeasonAward[] | undefined, clubs: ClubLookup, you: Team, starId?: string): string {
+  if (!awards?.length) return '';
+  return `<div class="season-awards"><h4>🏅 End-of-season awards</h4><ul class="plain-list">${awards.map((a) => {
+    const info = SEASON_AWARDS[a.id];
+    const club = clubs(a.club);
+    return `<li class="${a.club === you.id ? 'is-you' : ''}"><span class="aw-emoji">${info.emoji}</span><span><strong>${esc(info.title)}</strong><br/>${a.playerId === starId ? '🌟 ' : ''}${esc(a.name)} ${club ? `<span class="muted small">${badgeSvg(club.badge, 14)} ${esc(club.name)}</span>` : ''} <span class="muted small">· ${esc(a.line)}</span></span></li>`;
+  }).join('')}</ul></div>`;
 }
