@@ -1071,3 +1071,9 @@ kbd { font-family: var(--font); font-weight: 700; font-size: 12px; background: v
 .cup-next { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding-top: 8px; border-top: 2px dashed #cbd5e1; }
 .cup-next p { margin: 0; }
 .cup-result { font-size: 18px; margin: 6px 0; }
+
+/* Awards night */
+.awards-night ul { display: grid; gap: 8px; }
+.awards-night li { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 14px; background: var(--surface-low); }
+.awards-night li.is-star { background: #fff1c2; box-shadow: inset 0 0 0 2px var(--yellow-deep); }
+.aw-emoji { font-size: 28px; flex: none; }

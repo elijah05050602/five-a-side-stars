@@ -53,6 +53,8 @@ export interface HallEntry {
   playoffsWon: number;
   /** Yearly cups won. */
   cups: number;
+  /** End-of-year awards the Star won. */
+  awards: number;
   /** The Star's career numbers. */
   totals: { played: number; goals: number; assists: number; saves: number; cleanSheets: number; motm: number };
   milestones: string[];
@@ -95,6 +97,7 @@ export function hallEntry(c: CareerState, team: Team, no: number, ended = Date.n
     bestTier: Math.min(c.league.tier, ...c.history.map((h) => h.tier)),
     playoffsWon: c.history.filter((h) => h.playoff === 'won').length,
     cups: (c.cupRuns ?? []).filter((r) => r.reached === 3).length,
+    awards: (c.awards ?? []).reduce((n, y) => n + y.awards.filter((a) => a.playerId === c.starId).length, 0),
     totals: { played: st?.played ?? 0, goals: st?.goals ?? 0, assists: st?.assists ?? 0, saves: st?.saves ?? 0, cleanSheets: st?.cleanSheets ?? 0, motm: st?.motm ?? 0 },
     milestones: [...c.milestones],
     rival: rival ? { name: rival.team.name, w: h2h?.w ?? 0, d: h2h?.d ?? 0, l: h2h?.l ?? 0 } : null,
