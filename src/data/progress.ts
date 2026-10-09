@@ -69,6 +69,9 @@ export const STICKERS: Sticker[] = [
   { id: 'rival-master', emoji: '☄️', name: 'Rival Master', how: 'Beat your career rival five times.' },
   { id: 'playoff-hero', emoji: '🎟️', name: 'Play-off Hero', how: 'Win a career play-off to go up.' },
   { id: 'great-escape', emoji: '🛟', name: 'Great Escape', how: 'Win a career play-off to stay up.' },
+  { id: 'living-legend', emoji: '🌌', name: 'Living Legend', how: 'Your career Star reaches 16 milestones.', unlocks: '🌌' },
+  { id: 'goat', emoji: '🪐', name: 'Greatest of All Time', how: 'Your career Star reaches all 24 milestones.', unlocks: '🪐' },
+  { id: 'front-page', emoji: '📰', name: 'Front Page', how: 'One of your players makes the Gazette headline 10 times.' },
   { id: 'clean-sweep', emoji: '🧹', name: 'Clean Sweep', how: 'Do all three season goals in a career mini season.', unlocks: '🧹' },
 ];
 
@@ -178,6 +181,8 @@ export interface CareerMilestones {
   playoff?: 'up' | 'stayed' | null;
   /** All three season goals done. */
   sweep?: boolean;
+  /** One of your players made the Gazette headline. */
+  headline?: boolean;
 }
 
 export function recordCareer(m: CareerMilestones): Sticker[] {
@@ -193,6 +198,13 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.finished) award(p, 'career-done', out);
   if (m.starMilestones && m.starMilestones >= 1) award(p, 'star-moment', out);
   if (m.starMilestones && m.starMilestones >= 8) award(p, 'star-legend', out);
+  if (m.starMilestones && m.starMilestones >= 16) award(p, 'living-legend', out);
+  if (m.starMilestones && m.starMilestones >= 24) award(p, 'goat', out);
+  if (m.headline) {
+    p.counts ??= {};
+    p.counts.headlines = (p.counts.headlines ?? 0) + 1;
+    if (p.counts.headlines >= 10) award(p, 'front-page', out);
+  }
   if (m.tierTitle) award(p, `tier${m.tierTitle}-champ`, out);
   if (m.allTheWayUp) award(p, 'all-the-way-up', out);
   if (m.everyYear) award(p, 'every-year', out);
