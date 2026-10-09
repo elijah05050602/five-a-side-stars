@@ -3,6 +3,7 @@ import { STAR_CAP, randomSkills, skillKeys, skillLabel } from '../data/skills';
 import { FIRST_NAMES, makePlayer, pick, startingFive, uid } from '../data/defaults';
 import { applyLeagueResult, computeTable, createLeague, resultLines, seasonOver, tallyMatch, tierInfo, type LeagueState, type SeasonRecord } from './league';
 import { addScrap, type ScrapLine } from './hallOfFame';
+import { CUP_ROUNDS, createCup, cupName, cupOver, cupReached, recordCupResult, yourTie, type CareerCup } from './careerCup';
 import { AGE_STATS } from '../data/ageGroups';
 import type { MatchResult } from './MatchScene';
 import { freshMatchStats, type PlayerMatchStats } from './sim';
@@ -72,6 +73,10 @@ export interface CareerState {
   offers: TransferOffer[] | null;
   /** Times the Star has joined another club. */
   moves: number;
+  /** This year's cup, from the 3rd mini season until the year's 3rd season is over. Null the rest of the time. */
+  cup: CareerCup | null;
+  /** Every cup played: the age group and how far you got (0 quarter-finals, 1 semis, 2 final, 3 won). */
+  cupRuns: { age: AgeGroup; reached: number }[];
   /** The 30 clubs you play against all career, the tiers, your rival and everyone's stats. */
   world: CareerWorld;
   /** This mini season's three goals. */
@@ -181,7 +186,7 @@ export function createCareer(source: Team, halfSeconds: number, star?: Player): 
   const career: CareerState = {
     teamId: team.id, year: 1, season: 1, league, halfSeconds,
     seasonStats: {}, careerStats: {}, history: [], titles: 0, done: false, pendingGrowth: [],
-    starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null, offers: null, moves: 0, world,
+    starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null, offers: null, moves: 0, cup: null, cupRuns: [], world,
     goals: [], sweeps: 0, scrapbook: [],
   };
   career.goals = newGoals(career, team);
@@ -536,6 +541,72 @@ export function applyPlayoffMatch(c: CareerState, team: Team, r: MatchResult): C
 
 export const careerSeasonOver = (c: CareerState): boolean => seasonOver(c.league);
 
+/** The mini season the cup is played before (the 3rd of the year). */
+export const CUP_SEASON = 3;
+
+/** Your cup tie still to be played (or its shoot-out): the league waits until you are out or the cup is over. */
+export const cupWaiting = (c: CareerState, team: Team): boolean => !!c.cup && !!yourTie(c.cup, team.id);
+
+/**
+ * Record a cup match or its shoot-out. A draw waits for the shoot-out. The match counts for stats
+ * and growth like any other. When you go out, or win the final, the cup run is noted.
+ */
+export function applyCupMatch(c: CareerState, team: Team, r: MatchResult): (CareerMatchSummary & { cupDone: boolean }) | null {
+  const cup = c.cup;
+  if (!cup || !yourTie(cup, team.id)) return null;
+  const { gf, ga } = yourSide(team, r);
+  const shootout = r.mode === 'shootout';
+  let summary: CareerMatchSummary | null = null;
+  if (!shootout) {
+    if (yourTie(cup, team.id)!.score) return null;
+    const motm = playerOfTheMatch(r);
+    recordFixture(c.world, team.id, r.home.id, r.away.id, r.score);
+    tallyMatch([c.world.tally], r.home, r.away, r.score, resultLines(r), motm?.id ?? null);
+    const rivalWin = rivalCheck(c, team, r);
+    summary = { ...recordPlayers(c, team, r, motm), rivalWin };
+  }
+  const round = cup.round;
+  if (!recordCupResult(c.world, cup, team.id, gf, ga, shootout)) return null;
+  const done = cup.out || cupOver(cup);
+  if (done) finishCup(c, team, cup);
+  else if (cup.round > round) addScrap(c.scrapbook, seasonIndex(c.year, c.season), '🏆', `Through to the ${CUP_ROUNDS[cup.round].toLowerCase()} of the ${cupName(cup)}!`);
+  const base: CareerMatchSummary = summary ?? { growth: [], motm: null, fiveStar: false, points: 0, milestones: [] };
+  return { ...base, cupDone: done };
+}
+
+function finishCup(c: CareerState, team: Team, cup: CareerCup): void {
+  const reached = cupReached(cup, team.id);
+  c.cupRuns.push({ age: cup.age, reached });
+  const si = seasonIndex(c.year, c.season);
+  const name = cupName(cup);
+  if (reached === 3) {
+    addScrap(c.scrapbook, si, '🏆', `Won the ${name}!`);
+    addNews(c.world, si - 1, '🏆', `${team.name} won the ${name}!`);
+  } else {
+    addScrap(c.scrapbook, si, '🏆', `Cup run: out in the ${CUP_ROUNDS[reached].toLowerCase()} of the ${name}.`);
+    const winner = clubById(c.world, cup.rounds[CUP_ROUNDS.length - 1][0].winnerId ?? '');
+    if (winner) addNews(c.world, si - 1, '🏆', `${winner.team.name} won the ${name}.`);
+  }
+}
+
+/** The line under a cup result, and whether it just won the cup or needs a shoot-out. */
+export function cupResultNote(c: CareerState, team: Team, justDone: boolean): { text: string; won: boolean; pens: boolean } {
+  const cup = c.cup;
+  if (!cup) return { text: '', won: false, pens: false };
+  const name = cupName(cup);
+  const tie = yourTie(cup, team.id);
+  if (tie?.score && !tie.winnerId) return { text: `All square in the ${name}! Penalties decide it.`, won: false, pens: true };
+  if (justDone) {
+    const reached = cupReached(cup, team.id);
+    if (reached === 3) return { text: `🏆 ${team.name} win the ${name}!`, won: true, pens: false };
+    return { text: `Out of the ${name} in the ${CUP_ROUNDS[reached].toLowerCase()}. Well played! The league is next.`, won: false, pens: false };
+  }
+  return { text: `Through to the ${CUP_ROUNDS[cup.round].toLowerCase()} of the ${name}!`, won: false, pens: false };
+}
+
+/** Cups won this career. */
+export const cupsWon = (c: CareerState): number => c.cupRuns.filter((r) => r.reached === 3).length;
+
 /** This mini season's result for the career team, once all five matches are played. */
 export function careerSeasonOutcome(c: CareerState, team: Team): CareerSeasonRecord {
   const position = computeTable(c.league, team).findIndex((row) => row.isYou) + 1;
@@ -585,6 +656,7 @@ export interface SeasonAdvance {
  */
 export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
   const record = careerSeasonOutcome(c, team);
+  c.cup = null;
   c.history.push(record);
   const w = c.world;
   const si = seasonIndex(c.year, c.season);
@@ -631,6 +703,11 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
     league.history = [...c.league.history, record];
     c.league = league;
     c.goals = newGoals(c, team);
+    // The cup comes between the 2nd and 3rd mini seasons.
+    if (c.season === CUP_SEASON) {
+      c.cup = createCup(w, team.id, c.year, careerAge(c));
+      addNews(w, seasonIndex(c.year, c.season) - 1, '🏆', `The ${cupName(c.cup)} draw is out! Eight clubs, one cup.`);
+    }
   }
   const everyYear = !!titleTier && CAREER_AGES.every((a) => w.titleAges.includes(a));
   return { record, milestones, movedUp, finished, titleTier, everyYear, allTheWayUp: w.tierTitles.every((n) => n > 0) };

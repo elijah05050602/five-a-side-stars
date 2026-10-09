@@ -61,7 +61,8 @@ function enterMatch(): ReturnType<typeof gameRenderer> {
 /** What kind of match it is: where it is played and how full the stands are follow from it. */
 function occasionFor(o: StartOptions, mode: string): Occasion {
   if (o.tournament) return o.tournament.stage === 'final' ? 'final' : 'cup';
-  if (o.big === 'playoff') return 'final';
+  if (o.big === 'playoff' || o.big === 'cup-final') return 'final';
+  if (o.big === 'cup') return 'cup';
   if (o.big === 'rival') return 'cup';
   if (o.league || o.career) return 'league';
   return mode === 'training' ? 'training' : 'friendly';
