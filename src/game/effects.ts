@@ -33,6 +33,7 @@ export class BallTrail {
   private readonly points: THREE.Vector3[] = [];
   private life = 0;
   private size = 1;
+  private fresh = true;
 
   constructor(private readonly radius: number, n = 12) {
     for (let i = 0; i < n; i++) {
@@ -50,12 +51,21 @@ export class BallTrail {
     for (const d of this.dots) (d.material as THREE.SpriteMaterial).color.set(colour ?? 0xffe27a);
   }
 
+  /** Put the streak out at once, so the next one does not join up with where the ball was. */
+  clear(): void {
+    this.life = 0;
+    this.fresh = true;
+    for (const d of this.dots) d.visible = false;
+  }
+
   /** Each frame: where the ball is, and whether it is flying fast enough to streak. */
   update(dt: number, ball: THREE.Vector3, fast: boolean): void {
     this.life = fast ? 1 : Math.max(0, this.life - dt * 5);
     // Shift the history back a place and put the ball at the front (the vectors are reused, not made).
     const oldest = this.points.pop()!;
     this.points.unshift(oldest.copy(ball));
+    // After clear(), every point starts at the ball, so no streak is drawn from where it was before.
+    if (this.fresh) { this.fresh = false; for (const p of this.points) p.copy(ball); }
     const n = this.dots.length;
     for (let i = 0; i < n; i++) {
       const d = this.dots[i];
@@ -99,6 +109,11 @@ export class Puffs {
       (p.s.material as THREE.SpriteMaterial).color.set(i % 3 === 0 ? 0x8fbf5a : 0xd9c7a1); // grass and dust
       p.s.visible = true;
     }
+  }
+
+  /** Put every puff out at once. */
+  clear(): void {
+    for (const p of this.pool) { p.s.visible = false; p.t = p.life; }
   }
 
   update(dt: number): void {
@@ -182,10 +197,23 @@ export class SuperAura {
     for (const sp of this.sparks) this.spark(sp, true);
   }
 
-  /** While the super lasts: keep a gentler glow on the player (pass null when it is over). */
-  follow(x: number, z: number, on: boolean): void {
-    if (on) this.group.position.set(x, 0, z);
+  /** While the super lasts: keep a gentler glow, in its colour, on the player (on = false when it is over). */
+  follow(x: number, z: number, on: boolean, colour: number): void {
+    if (on) {
+      this.group.position.set(x, 0, z);
+      this.colour.set(colour);
+      this.group.visible = true; // a replay can start partway through a super, after its burst
+    }
     this.target = on ? 0.55 : 0;
+  }
+
+  /** Put the glow, rings and sparks out at once. */
+  clear(): void {
+    this.t = 10;
+    this.glow = 0;
+    this.target = 0;
+    for (const sp of this.sparks) sp.s.visible = false;
+    this.group.visible = false;
   }
 
   private spark(sp: Spark, first: boolean): void {

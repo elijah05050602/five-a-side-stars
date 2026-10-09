@@ -215,6 +215,54 @@ test('a goal carries into the net, then its replay plays and hands back to the m
   expect(errors).toEqual([]);
 });
 
+test("a super's glow follows its player in the goal replay, not where they stand now", async ({ page }) => {
+  const errors: string[] = [];
+  await toLobby(page, errors);
+  await page.locator('#m-play').click();
+  await page.locator('#s-go').click();
+  await expect.poll(() => page.evaluate(() => !!(window as DebugWindow).__match)).toBe(true);
+  type V = { x: number; z: number };
+  type AuraWindow = Window & { __match: {
+    replay: { t: number } | null; history: unknown[]; aura: { group: { visible: boolean; position: V } }; models: Map<object, { group: { position: V } }>;
+    sim: { phase: string; goalX: (s: number) => number; width: number; ball: { owner: unknown; pos: V; vel: V; y: number; vy: number; lastKick: unknown; lastTouch: unknown };
+      players: { side: number; isKeeper: boolean; pos: V; kickCooldown: number; superKind: string | null; superTime: number }[] };
+  } };
+  // A Turbo Dash lasting the whole clip, then a shot into the empty net.
+  await page.evaluate(() => {
+    const m = (window as unknown as AuraWindow).__match, s = m.sim;
+    s.phase = 'play';
+    const p = s.players.find((q) => q.side === 0 && !q.isKeeper)!;
+    p.superKind = 'turbo';
+    p.superTime = 999;
+    m.history.length = 0; // so the whole clip is filmed during the dash
+  });
+  await page.waitForTimeout(3000);
+  await page.evaluate(() => {
+    const s = (window as unknown as AuraWindow).__match.sim, b = s.ball, x = s.goalX(0);
+    const p = s.players.find((q) => q.side === 0 && !q.isKeeper)!;
+    s.phase = 'play';
+    for (const q of s.players) { q.pos = { x: -x * 0.3, z: 3 }; q.kickCooldown = 99; }
+    b.owner = null; b.lastKick = b.lastTouch = p;
+    b.pos = { x: x - 6, z: 0 }; b.y = 0.3; b.vy = 2.5; b.vel = { x: 16, z: 0.5 };
+  });
+  await expect.poll(() => page.evaluate(() => (window as unknown as AuraWindow).__match.sim.phase)).toBe('goal');
+  // Off by the far corner flag while the replay plays: the glow must stay with the player in the clip.
+  await page.evaluate(() => {
+    const s = (window as unknown as AuraWindow).__match.sim;
+    s.players.find((q) => q.side === 0 && !q.isKeeper)!.pos = { x: -s.goalX(0), z: s.width / 2 };
+  });
+  await expect.poll(() => page.evaluate(() => ((window as unknown as AuraWindow).__match.replay?.t ?? 0) > 0), { timeout: 60000 }).toBe(true);
+  const gap = await page.evaluate(() => {
+    const m = (window as unknown as AuraWindow).__match;
+    const p = m.sim.players.find((q) => q.side === 0 && !q.isKeeper)!;
+    const a = m.aura.group, model = m.models.get(p)!.group.position;
+    return a.visible ? Math.hypot(a.position.x - model.x, a.position.z - model.z) : -1;
+  });
+  expect(gap).toBeGreaterThanOrEqual(0);
+  expect(gap).toBeLessThan(0.5);
+  expect(errors).toEqual([]);
+});
+
 test('a tap on the goal replay skips it and kicks nothing', async ({ page }) => {
   const errors: string[] = [];
   await toLobby(page, errors);
