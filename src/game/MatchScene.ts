@@ -23,6 +23,7 @@ import { graphicsProfile, type GraphicsProfile } from './graphics';
 import { EXPOSURE, TONE_MAPPING, disposeObject } from './renderer';
 import { BallTrail, Puffs, SuperAura } from './effects';
 import { SUPERS, type SuperKind } from './supers';
+import { lastingSuper, puffsFor, startedSupers, type FxPlayer } from './fxView';
 import { P1_RING, P2_RING, teamRingColours } from './ringColours';
 import { GROUNDS, crowdFill, groundFor, type Ground, type GroundId, type Occasion } from './grounds';
 import { goalCamShot } from './replayCamera';
@@ -52,9 +53,14 @@ const REPLAY_SLOW = 90;
 
 /** One recorded frame of the match, used for the instant replay. */
 interface ReplayFrame {
-  players: { x: number; z: number; facing: number; speed: number; kick: number; dive: number; diveDir: number; stun: number; recover: number; trick: TrickKind | null; trickT: number; trickDir: number; trickFrom: number }[];
-  ball: { x: number; y: number; z: number; vx: number; vz: number };
+  players: { x: number; z: number; facing: number; speed: number; kick: number; dive: number; diveDir: number; stun: number; recover: number; trick: TrickKind | null; trickT: number; trickDir: number; trickFrom: number; tackle: number; superKind: SuperKind | null }[];
+  ball: { x: number; y: number; z: number; vx: number; vz: number; owned: boolean; superShot: boolean; superPass: boolean };
 }
+
+/** A live player, as the match effects see them. */
+const liveFx = (p: SimPlayer): FxPlayer => ({ x: p.pos.x, z: p.pos.z, speed: Math.hypot(p.vel.x, p.vel.z), superKind: p.superKind, puff: puffsFor(p.tackleTimer, p.diveAnim) });
+/** A player in a replay frame, as the match effects see them. */
+const replayFx = (p: ReplayFrame['players'][number]): FxPlayer => ({ x: p.x, z: p.z, speed: p.speed, superKind: p.superKind, puff: puffsFor(p.tackle, p.dive) });
 
 export interface MatchResult {
   mode: SimMode;
@@ -148,7 +154,7 @@ export class MatchScene {
   private readonly puffs = new Puffs();
   private readonly calm = getSettings().reduceMotion;
   /** Players already puffed for the tackle or dive they are in. */
-  private readonly puffed = new Set<SimPlayer>();
+  private readonly puffed = new Set<number>();
   /**
    * Super skills. Play freezes while the cutscene runs, then goes into slow motion for a moment as the
    * super lets rip. If a cutscene ever fails, the rest of the match's supers just show their banner.
@@ -412,8 +418,8 @@ export class MatchScene {
   private record(): void {
     const b = this.sim.ball;
     this.history.push({
-      players: this.sim.players.map((p) => ({ x: p.pos.x, z: p.pos.z, facing: p.facing, speed: Math.hypot(p.vel.x, p.vel.z), kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, recover: Math.min(1, p.recover / DIVE_RECOVER), trick: p.trickKind, trickT: p.trickAnim, trickDir: p.trickDir, trickFrom: p.trickFrom })),
-      ball: { x: b.pos.x, y: b.y, z: b.pos.z, vx: b.vel.x, vz: b.vel.z },
+      players: this.sim.players.map((p) => ({ x: p.pos.x, z: p.pos.z, facing: p.facing, speed: Math.hypot(p.vel.x, p.vel.z), kick: p.kickAnim, dive: p.diveAnim, diveDir: p.diveDir, stun: p.stunAnim, recover: Math.min(1, p.recover / DIVE_RECOVER), trick: p.trickKind, trickT: p.trickAnim, trickDir: p.trickDir, trickFrom: p.trickFrom, tackle: p.tackleTimer, superKind: p.superKind })),
+      ball: { x: b.pos.x, y: b.y, z: b.pos.z, vx: b.vel.x, vz: b.vel.z, owned: !!b.owner, superShot: b.superShot, superPass: b.superPass },
     });
     if (this.history.length > 300) this.history.shift();
   }
@@ -436,6 +442,8 @@ export class MatchScene {
       }
       const first = r.t === 0;
       if (first) {
+        // The live glow and dust belong to where the players are now, not to the replay.
+        this.clearEffects();
         const g = this.sim.goals[this.sim.goals.length - 1];
         this.hud.setReplay(true, {
           name: g ? g.scorer.name : '', team: g ? this.sim.teams[g.side].short : '', minute: g ? g.minute : 0, ownGoal: !!g?.ownGoal,
@@ -445,6 +453,7 @@ export class MatchScene {
       // Paused from the keyboard: the replay waits too.
       if (this.sim.phase === 'paused') dt = 0;
       const speed = Math.floor(r.t * 60) < r.slowFrom ? 1 : 0.55;
+      const shown = Math.min(r.frames.length - 1, Math.floor(r.t * 60));
       r.t += dt * speed;
       const idx = Math.min(r.frames.length - 1, Math.floor(r.t * 60));
       const f = r.frames[idx];
@@ -452,10 +461,20 @@ export class MatchScene {
         const m = this.models.get(p)!, fp = f.players[i];
         m.group.position.set(fp.x, 0, fp.z);
         m.setFacing(fp.facing);
-        m.animate(dt * speed, { speed: fp.speed, kick: fp.kick, dive: fp.dive, diveDir: fp.diveDir, stun: fp.stun, recover: fp.recover, trick: fp.trick, trickT: fp.trickT, trickDir: fp.trickDir, trickFrom: fp.trickFrom, tackle: 0, scale, wobble: 0, mood: 'focus', gazeX: 0, gazeY: 0, cheer: false });
+        m.animate(dt * speed, { speed: fp.speed, kick: fp.kick, dive: fp.dive, diveDir: fp.diveDir, stun: fp.stun, recover: fp.recover, trick: fp.trick, trickT: fp.trickT, trickDir: fp.trickDir, trickFrom: fp.trickFrom, tackle: fp.tackle, scale, wobble: 0, mood: 'focus', gazeX: 0, gazeY: 0, cheer: false });
         m.setSelected(false, 0xffffff);
       });
       this.ball.update(f.ball.x, f.ball.y, f.ball.z, this.sim.ball.radius, f.ball.vx, f.ball.vz, dt * speed);
+      // The super's glow, dust and streak play back with the players and the ball, and a super that
+      // starts during the clip bursts into light again where it started.
+      const fx = f.players.map(replayFx);
+      if (!first && !this.calm) {
+        for (const i of startedSupers(r.frames[shown].players.map(replayFx), fx)) {
+          const k = fx[i].superKind;
+          if (k) this.aura.burst(fx[i].x, fx[i].z, SUPERS[k].hex);
+        }
+      }
+      this.effects(dt * speed, fx, f.ball.owned, Math.hypot(f.ball.vx, f.ball.vz), f.ball.superShot, f.ball.superPass);
       const slow = idx >= r.slowFrom;
       const cutNow = slow && !r.slow;
       if (cutNow) { r.slow = true; this.hud.replayCut(); }
@@ -492,6 +511,7 @@ export class MatchScene {
     const was = this.replay && this.replay.t > 0;
     this.replay = null;
     try { this.hud.setReplay(false); } catch { /* the HUD is already gone */ }
+    if (was) this.clearEffects();
     if (this.camera.fov !== this.baseFov) { this.camera.fov = this.baseFov; this.camera.updateProjectionMatrix(); }
     if (was) {
       this.camPos.copy(this.cameraGoal(this.camTarget));
@@ -692,7 +712,6 @@ export class MatchScene {
     this.weather.update(dt);
     this.extras.boards.update(dt);
     this.extras.life.update(dt);
-    this.effects(dt);
     this.crowd.update(dt);
     // The nets follow the ball in live play only; a replay leaves them to settle.
     const b = this.sim.ball;
@@ -704,6 +723,7 @@ export class MatchScene {
       this.renderer.render(this.scene, this.camera);
       return;
     }
+    this.effects(dt, this.sim.players.map(liveFx), !!b.owner, Math.hypot(b.vel.x, b.vel.z), b.superShot, b.superPass);
     const wobble = getSettings().reduceMotion ? 0 : Math.max(0, 0.75 - this.sim.stats.control) * 2;
     const lastGoal = this.sim.goals[this.sim.goals.length - 1];
     // In a shoot-out only the winners celebrate (a goal that does not decide it is not celebrated).
@@ -875,28 +895,34 @@ export class MatchScene {
   }
 
   /** The ball's streak while a hard shot flies, and puffs as a tackle flies in or a keeper dives. */
-  private effects(dt: number): void {
+  private effects(dt: number, players: readonly FxPlayer[], owned: boolean, ballSpeed: number, superShot: boolean, superPass: boolean): void {
     this.puffs.update(dt);
-    const b = this.sim.ball;
     // A Rocket Shot streaks orange and a Magic Pass purple, bigger than the usual gold.
-    const colour = b.superShot ? SUPERS.rocket.hex : b.superPass ? SUPERS.magic.hex : null;
+    const colour = superShot ? SUPERS.rocket.hex : superPass ? SUPERS.magic.hex : null;
     if (colour !== this.trailColour) { this.trailColour = colour; this.trail.setColour(colour); }
-    this.trail.update(dt, this.ball.group.position, !this.calm && !b.owner && (colour !== null || Math.hypot(b.vel.x, b.vel.z) > this.sim.stats.power * 1.05));
+    this.trail.update(dt, this.ball.group.position, !this.calm && !owned && (colour !== null || ballSpeed > this.sim.stats.power * 1.05));
     // While a super lasts (a dash, a slide, the gloves), its glow stays with the player.
-    const lasting = this.sim.players.find((p) => p.superKind && p.superTime > 0 && p.superKind !== 'rocket' && p.superKind !== 'magic');
-    this.aura.follow(lasting?.pos.x ?? 0, lasting?.pos.z ?? 0, !!lasting && !this.calm);
+    const lasting = players[lastingSuper(players)];
+    this.aura.follow(lasting?.x ?? 0, lasting?.z ?? 0, !!lasting && !this.calm, lasting?.superKind ? SUPERS[lasting.superKind].hex : 0xffffff);
     this.aura.update(dt);
-    if (lasting && !this.calm && (lasting.superKind === 'turbo' || lasting.superKind === 'bulldozer') && Math.hypot(lasting.vel.x, lasting.vel.z) > 1) {
-      this.puffs.burst(lasting.pos.x, lasting.pos.z, 1, 0.35 * this.sim.stats.scale + 0.2); // dust kicked up behind them
+    if (lasting && !this.calm && (lasting.superKind === 'turbo' || lasting.superKind === 'bulldozer') && lasting.speed > 1) {
+      this.puffs.burst(lasting.x, lasting.z, 1, 0.35 * this.sim.stats.scale + 0.2); // dust kicked up behind them
     }
     if (this.calm) return;
-    for (const p of this.sim.players) {
-      const busy = p.tackleTimer > 0.25 || p.diveAnim > 0.4;
-      if (busy && !this.puffed.has(p)) {
-        this.puffed.add(p);
-        this.puffs.burst(p.pos.x, p.pos.z, p.diveAnim > 0.4 ? 7 : 4, 0.5 * this.sim.stats.scale + 0.2);
-      } else if (!busy) this.puffed.delete(p);
-    }
+    players.forEach((p, i) => {
+      if (p.puff > 0 && !this.puffed.has(i)) {
+        this.puffed.add(i);
+        this.puffs.burst(p.x, p.z, p.puff, 0.5 * this.sim.stats.scale + 0.2);
+      } else if (p.puff === 0) this.puffed.delete(i);
+    });
+  }
+
+  /** Put out the glow, dust and streak at once, when the picture cuts to or from a replay. */
+  private clearEffects(): void {
+    this.aura.clear();
+    this.puffs.clear();
+    this.trail.clear();
+    this.puffed.clear();
   }
 
   dispose(): void {
