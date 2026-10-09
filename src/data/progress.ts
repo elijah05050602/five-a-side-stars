@@ -74,6 +74,7 @@ export const STICKERS: Sticker[] = [
   { id: 'front-page', emoji: '📰', name: 'Front Page', how: 'One of your players makes the Gazette headline 10 times.' },
   { id: 'cup-winners', emoji: '🏵️', name: 'Cup Winners', how: 'Win the yearly cup in a career.' },
   { id: 'cup-kings', emoji: '🫅', name: 'Cup Kings', how: 'Win the yearly career cup three times.', unlocks: '🫅' },
+  { id: 'award-night', emoji: '🎤', name: 'Award Night', how: 'Your career Star wins an end-of-year award.' },
   { id: 'new-adventure', emoji: '✈️', name: 'New Adventure', how: 'Your career Star joins a new club.' },
   { id: 'loyal-club', emoji: '🛡️', name: 'Loyal Club', how: 'Finish a career with your Star staying at the same club at every transfer window.' },
   { id: 'hall-of-famer', emoji: '🏛️', name: 'Hall of Famer', how: 'Put three careers in the Hall of Fame.', unlocks: '🏛️' },
@@ -188,6 +189,8 @@ export interface CareerMilestones {
   sweep?: boolean;
   /** One of your players made the Gazette headline. */
   headline?: boolean;
+  /** The Star won an award at awards night. */
+  starAward?: boolean;
   /** Won the career's yearly cup. */
   cupWon?: boolean;
   /** The Star joined another club. */
@@ -213,6 +216,7 @@ export function recordCareer(m: CareerMilestones): Sticker[] {
   if (m.starMilestones && m.starMilestones >= 8) award(p, 'star-legend', out);
   if (m.starMilestones && m.starMilestones >= 16) award(p, 'living-legend', out);
   if (m.starMilestones && m.starMilestones >= 24) award(p, 'goat', out);
+  if (m.starAward) award(p, 'award-night', out);
   if (m.cupWon) {
     award(p, 'cup-winners', out);
     if ((p.counts?.['cup-winners'] ?? 0) >= 3) award(p, 'cup-kings', out);

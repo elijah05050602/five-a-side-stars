@@ -3,6 +3,7 @@ import { STAR_CAP, randomSkills, skillKeys, skillLabel } from '../data/skills';
 import { FIRST_NAMES, makePlayer, pick, startingFive, uid } from '../data/defaults';
 import { applyLeagueResult, computeTable, createLeague, resultLines, seasonOver, tallyMatch, tierInfo, type LeagueState, type SeasonRecord } from './league';
 import { addScrap, type ScrapLine } from './hallOfFame';
+import { awardsNight, type Award, type AwardsNight } from './awards';
 import { CUP_ROUNDS, createCup, cupName, cupOver, cupReached, recordCupResult, yourTie, type CareerCup } from './careerCup';
 import { AGE_STATS } from '../data/ageGroups';
 import type { MatchResult } from './MatchScene';
@@ -77,6 +78,12 @@ export interface CareerState {
   cup: CareerCup | null;
   /** Every cup played: the age group and how far you got (0 quarter-finals, 1 semis, 2 final, 3 won). */
   cupRuns: { age: AgeGroup; reached: number }[];
+  /** Everyone's numbers this career year, for awards night. */
+  yearStats: Record<string, PlayerSeasonStats>;
+  /** This year's Trial Day signing, for Best Young Player. */
+  newcomer: string | null;
+  /** Every awards night so far, oldest first. */
+  awards: AwardsNight[];
   /** The 30 clubs you play against all career, the tiers, your rival and everyone's stats. */
   world: CareerWorld;
   /** This mini season's three goals. */
@@ -186,7 +193,7 @@ export function createCareer(source: Team, halfSeconds: number, star?: Player): 
   const career: CareerState = {
     teamId: team.id, year: 1, season: 1, league, halfSeconds,
     seasonStats: {}, careerStats: {}, history: [], titles: 0, done: false, pendingGrowth: [],
-    starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null, offers: null, moves: 0, cup: null, cupRuns: [], world,
+    starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null, offers: null, moves: 0, cup: null, cupRuns: [], yearStats: {}, newcomer: null, awards: [], world,
     goals: [], sweeps: 0, scrapbook: [],
   };
   career.goals = newGoals(career, team);
@@ -448,7 +455,7 @@ function recordPlayers(c: CareerState, team: Team, r: MatchResult, motm: Player 
   const age = careerAge(c);
   for (const { player: p, share } of whoPlayed(team, r)) {
     const m = r.players?.[p.id] ?? freshMatchStats();
-    for (const bucket of [c.seasonStats, c.careerStats]) {
+    for (const bucket of [c.seasonStats, c.careerStats, c.yearStats]) {
       const s = bucket[p.id] ?? (bucket[p.id] = freshSeasonStats());
       s.played++; s.goals += m.goals; s.assists += m.assists; s.shots += m.shots; s.passes += m.passes; s.tackles += m.tackles; s.saves += m.saves;
       // Counted since season goals (a save from before has none yet).
@@ -647,6 +654,8 @@ export interface SeasonAdvance {
   movedUp: boolean;
   /** The whole career (Under 10s, season 4) is finished. */
   finished: boolean;
+  /** Awards night, at the end of each year. */
+  awards: Award[] | null;
 }
 
 /**
@@ -666,12 +675,17 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
     if (!w.titleAges.includes(careerAge(c))) w.titleAges.push(careerAge(c));
   }
   const milestones = seasonMilestones(c, team);
+  let awards: Award[] | null = null;
   const end = endSeasons(w, team.id, team.name, computeTable(c.league, team).map((row) => row.team.id), si);
   const tier = end.tier;
   let movedUp = false, finished = false;
   const yearEnd = c.season >= SEASONS_PER_YEAR;
   const oldRival = w.rivalId;
   checkRival(w, team.id, si, yearEnd);
+  if (yearEnd) {
+    awards = holdAwardsNight(c, team, si);
+    if (awards.some((a) => a.id === 'player-of-year' && a.playerId === c.starId)) milestones.push(...markMilestones(c, ['player-of-year']));
+  }
   seasonScraps(c, team, record, milestones, si, oldRival);
   if (yearEnd) {
     if (c.year >= CAREER_YEARS) {
@@ -710,7 +724,17 @@ export function advanceCareer(c: CareerState, team: Team): SeasonAdvance {
     }
   }
   const everyYear = !!titleTier && CAREER_AGES.every((a) => w.titleAges.includes(a));
-  return { record, milestones, movedUp, finished, titleTier, everyYear, allTheWayUp: w.tierTitles.every((n) => n > 0) };
+  return { record, milestones, movedUp, finished, titleTier, everyYear, allTheWayUp: w.tierTitles.every((n) => n > 0), awards };
+}
+
+/** The year's awards: kept for the trophy cabinet, a scrapbook line for each one the Star won, and a fresh year. */
+function holdAwardsNight(c: CareerState, team: Team, si: number): Award[] {
+  const awards = awardsNight(team, c.yearStats, c.newcomer);
+  c.awards.push({ age: careerAge(c), awards });
+  for (const a of awards) if (a.playerId === c.starId) addScrap(c.scrapbook, si, a.emoji, `Awards night: ${a.name} won ${a.title}!`);
+  c.yearStats = {};
+  c.newcomer = null;
+  return awards;
 }
 
 /** Scrapbook lines for the end of a mini season: a title, going up or down, a play-off, a new rival, the end of the career. */
@@ -723,7 +747,8 @@ function seasonScraps(c: CareerState, team: Team, rec: CareerSeasonRecord, miles
   else if (rec.playoff === 'won') addScrap(book, si, '🛟', `Won the play-off to stay in the ${here}.`);
   if (rec.position === 1 && rec.tier > 1) addScrap(book, si, '⬆️', `Up to the ${tierInfo(rec.tier - 1).name}!`);
   if (rec.outcome === 'relegated') addScrap(book, si, '⬇️', `Down to the ${tierInfo(rec.tier + 1).name}. Time to bounce back!`);
-  for (const ms of milestones) addScrap(book, si, ms.emoji, `${star?.name ?? 'Your Star'}: ${ms.name}!`);
+  // Player of the Year has its own line from awards night.
+  for (const ms of milestones) if (ms.id !== 'player-of-year') addScrap(book, si, ms.emoji, `${star?.name ?? 'Your Star'}: ${ms.name}!`);
   const rival = clubById(c.world, c.world.rivalId);
   if (rival && c.world.rivalId !== oldRival) addScrap(book, si, '🔥', `${rival.team.name} became your rivals.`);
   if (c.season >= SEASONS_PER_YEAR && c.year >= CAREER_YEARS) addScrap(book, si, '🎓', `${team.name} finished the Under 10s. Career complete!`);
@@ -829,6 +854,7 @@ export function signTriallist(c: CareerState, team: Team, playerId: string): Pla
   }
   team.players.push(p);
   c.trialDay = null;
+  c.newcomer = p.id;
   addNews(c.world, seasonIndex(c.year, c.season) - 1, '✍️', `${team.name} signed ${p.name} at the Trial Day!`);
   addScrap(c.scrapbook, seasonIndex(c.year, c.season), '✍️', `Signed ${p.name} at the Trial Day.`);
   return p;

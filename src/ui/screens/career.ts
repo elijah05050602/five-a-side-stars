@@ -339,9 +339,10 @@ export function renderCareer(root: HTMLElement, router: Router, justGrew: Growth
     saveTeam(you);
     setCareer(c);
     const playoff = adv.record.playoff === 'won' ? (adv.record.outcome === 'promoted' ? 'up' : 'stayed') : null;
-    const stickers = recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0, tierTitle: adv.titleTier, allTheWayUp: adv.allTheWayUp, everyYear: adv.everyYear, playoff, loyal: adv.finished && c.starPicked && c.moves === 0, starMilestones: adv.milestones.length ? c.milestones.length : 0 });
+    const stickers = recordCareer({ champion: adv.record.position === 1, movedUp: adv.movedUp, finished: adv.finished, starUp: c.pendingGrowth.length > 0, tierTitle: adv.titleTier, allTheWayUp: adv.allTheWayUp, everyYear: adv.everyYear, playoff, starAward: !!adv.awards?.some((a) => a.playerId === c.starId), loyal: adv.finished && c.starPicked && c.moves === 0, starMilestones: adv.milestones.length ? c.milestones.length : 0 });
     renderCareer(root, router);
-    const note = (adv.milestones.length ? `<div class="star-note"><h3>🌟 Milestone!</h3><ul class="plain-list">${adv.milestones.map((m) => `<li>${m.emoji} <strong>${esc(m.name)}</strong>: ${esc(m.how)} <span class="muted">(+1 point)</span></li>`).join('')}</ul></div>` : '') + stickerBanner(stickers);
+    const awards = adv.awards?.length ? `<div class="awards-night"><h3>🎤 Awards Night: ${esc(adv.record.age)}</h3><ul class="plain-list">${adv.awards.map((a) => `<li class="${a.playerId === c.starId ? 'is-star' : ''}"><span class="aw-emoji">${a.emoji}</span><span><strong>${esc(a.title)}</strong><br/>${a.playerId === c.starId ? '🌟 ' : ''}${esc(a.name)} <span class="muted small">${esc(a.line)}</span></span></li>`).join('')}</ul></div>` : '';
+    const note = awards + (adv.milestones.length ? `<div class="star-note"><h3>🌟 Milestone!</h3><ul class="plain-list">${adv.milestones.map((m) => `<li>${m.emoji} <strong>${esc(m.name)}</strong>: ${esc(m.how)} <span class="muted">(+1 point)</span></li>`).join('')}</ul></div>` : '') + stickerBanner(stickers);
     if (note) root.querySelector('.career-banner')?.insertAdjacentHTML('afterend', `<div class="card outcome-card">${note}</div>`);
   });
   root.querySelector('#k-hall')?.addEventListener('click', () => router.go({ name: 'hall' }));

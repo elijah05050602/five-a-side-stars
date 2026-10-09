@@ -2,6 +2,7 @@ import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, ui
 import type { LeagueFixture, LeagueState, Tally } from '../game/league';
 import { defaultStar, newGoals, worldForOldCareer, type CareerState, type TransferOffer, type TrialDay } from '../game/career';
 import { goalDef, type SeasonGoal } from '../game/seasonGoals';
+import type { Award, AwardsNight } from '../game/awards';
 import { CUP_ROUNDS, CUP_SIZE, type CareerCup, type CupTie } from '../game/careerCup';
 import { HALL_KEEP, SCRAPBOOK_KEEP, addToHall, hallEntry, scrapsFromHistory, worthKeeping, type HallEntry, type ScrapLine } from '../game/hallOfFame';
 import { tierInfo } from '../game/league';
@@ -109,7 +110,7 @@ function readSave(raw: string): { save: SaveFile; repaired: boolean } {
   if (parsed.progress !== undefined && !progress) repaired = true;
   const league = readOptional(parsed.league, isLeague);
   const career = readOptional(parsed.career, isCareer);
-  if (career && career !== 'broken') { mendStar(career, teams); mendWorld(career, teams); mendGoals(career, teams); mendScrapbook(career); mendOffers(career); mendCup(career); }
+  if (career && career !== 'broken') { mendStar(career, teams); mendWorld(career, teams); mendGoals(career, teams); mendScrapbook(career); mendOffers(career); mendCup(career); mendAwards(career); }
   const tournament = readOptional(parsed.tournament, isTournament);
   if ([league, career, tournament].some((x) => x === 'broken')) repaired = true;
   const hall = readHall(parsed.hall);
@@ -395,6 +396,22 @@ function readCup(v: unknown, c: CareerState): CareerCup | null {
   return { year: count(v.year) || c.year, age: v.age as AgeGroup, rounds, round, out: v.out === true };
 }
 
+const AWARD_IDS: Award['id'][] = ['golden-boot', 'best-keeper', 'player-of-year', 'young-player', 'goal-of-year'];
+
+/** Awards night (added with it): a career saved before starts its year's numbers now; an award that cannot be read is left out. */
+function mendAwards(c: CareerState): void {
+  const raw = c as Partial<CareerState>;
+  c.yearStats = isObj(raw.yearStats) ? raw.yearStats as CareerState['yearStats'] : {};
+  c.newcomer = typeof raw.newcomer === 'string' ? raw.newcomer : null;
+  c.awards = Array.isArray(raw.awards)
+    ? raw.awards.filter((n): n is AwardsNight => isObj(n) && AGE_GROUPS.includes(n.age as AgeGroup) && Array.isArray(n.awards)).map((n) => ({
+      age: n.age,
+      awards: n.awards.filter((a): a is Award => isObj(a) && AWARD_IDS.includes(a.id as Award['id']) && typeof a.playerId === 'string' && typeof a.name === 'string')
+        .map((a) => ({ id: a.id, emoji: text(a.emoji, '🏅', 4), title: text(a.title, 'Award', 30), playerId: a.playerId, name: text(a.name, 'Player', 24), line: text(a.line, '', 60) })),
+    }))
+    : [];
+}
+
 /** Transfer offers (added with transfers): kept only for clubs still in the world; none in an older save. */
 function mendOffers(c: CareerState): void {
   const raw = (c as Partial<CareerState>).offers;
@@ -453,6 +470,7 @@ function readHallEntry(e: unknown): HallEntry | null {
     bestTier: Math.max(1, Math.min(TIER_COUNT, count(e.bestTier) || TIER_COUNT)),
     playoffsWon: count(e.playoffsWon),
     cups: count(e.cups),
+    awards: count(e.awards),
     totals: { played: count(t.played), goals: count(t.goals), assists: count(t.assists), saves: count(t.saves), cleanSheets: count(t.cleanSheets), motm: count(t.motm) },
     milestones: Array.isArray(e.milestones) ? e.milestones.filter((m): m is string => typeof m === 'string') : [],
     rival: rv ? { name: text(rv.name, 'Rivals', 24), w: count(rv.w), d: count(rv.d), l: count(rv.l) } : null,
