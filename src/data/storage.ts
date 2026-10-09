@@ -1,6 +1,6 @@
 import { awayKitFor, makeBadge, makeKit, makePlayer, shortCode, starterTeams, uid } from './defaults';
 import type { LeagueFixture, LeagueState, Tally } from '../game/league';
-import { defaultStar, newGoals, worldForOldCareer, type CareerState, type TransferOffer, type TrialDay } from '../game/career';
+import { TWIST_IDS, defaultStar, newGoals, worldForOldCareer, type Twist, type CareerState, type TransferOffer, type TrialDay } from '../game/career';
 import { goalDef, type SeasonGoal } from '../game/seasonGoals';
 import type { Award, AwardsNight } from '../game/awards';
 import { CUP_ROUNDS, CUP_SIZE, type CareerCup, type CupTie } from '../game/careerCup';
@@ -417,6 +417,9 @@ function mendOffers(c: CareerState): void {
   const raw = (c as Partial<CareerState>).offers;
   const list = Array.isArray(raw) ? raw.filter((o): o is TransferOffer => isObj(o) && typeof o.clubId === 'string' && typeof o.why === 'string' && !!c.world?.clubs.some((cl) => cl.team.id === o.clubId)).slice(0, 4) : [];
   c.moves = count((c as Partial<CareerState>).moves);
+  // The twist the career started with (added with twist starts); an older career had none.
+  const twist = (c as Partial<CareerState>).twist;
+  c.twist = TWIST_IDS.includes(twist as Twist) ? twist as Twist : null;
   c.offers = list.length ? list.map((o) => ({ clubId: o.clubId, why: Array.from(o.why).slice(0, 200).join('') })) : null;
 }
 
@@ -471,6 +474,7 @@ function readHallEntry(e: unknown): HallEntry | null {
     playoffsWon: count(e.playoffsWon),
     cups: count(e.cups),
     awards: count(e.awards),
+    twist: typeof e.twist === 'string' ? text(e.twist, '', 30) || null : null,
     totals: { played: count(t.played), goals: count(t.goals), assists: count(t.assists), saves: count(t.saves), cleanSheets: count(t.cleanSheets), motm: count(t.motm) },
     milestones: Array.isArray(e.milestones) ? e.milestones.filter((m): m is string => typeof m === 'string') : [],
     rival: rv ? { name: text(rv.name, 'Rivals', 24), w: count(rv.w), d: count(rv.d), l: count(rv.l) } : null,

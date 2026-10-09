@@ -37,7 +37,7 @@ function cardHtml(e: HallEntry, i: number): string {
   const s = e.star;
   const keeper = s?.position === 'GK';
   return `<div class="card hof-card ${e.finished ? 'is-finished' : ''}">
-    <div class="hof-head">${badgeSvg(e.team.badge, 44)}<div><span class="muted small">Career ${e.no}</span><br/><strong>${esc(e.team.name)}</strong></div>
+    <div class="hof-head">${badgeSvg(e.team.badge, 44)}<div><span class="muted small">Career ${e.no}${e.twist ? ` · ${esc(e.twist)}` : ''}</span><br/><strong>${esc(e.team.name)}</strong></div>
       <span class="chip ${e.finished ? 'chip-done' : ''}">${e.finished ? '🎓 Finished' : `Retired at ${esc(e.age)}`}</span></div>
     ${s ? `<div class="hof-star"><span class="hof-face" style="--skin:${s.skin};--hair:${s.hair}" aria-hidden="true"><i></i></span><div><span class="muted small">🌟 Star</span><br/><strong>${esc(s.name)}</strong> <span class="muted">#${s.number}</span> <span class="chip chip-pos chip-${s.position.toLowerCase()}">${POSITION_LABELS[s.position]}</span></div></div>
       <div class="psc-skills">${Object.entries(s.skills).map(([k, n]) => { const l = skillLabel(s.position, k as never); return `<span title="${esc(l.label)}">${l.emoji} <span class="stars">${starsText(n, 5)}</span></span>`; }).join('')}</div>` : ''}

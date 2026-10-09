@@ -74,6 +74,8 @@ export interface CareerState {
   offers: TransferOffer[] | null;
   /** Times the Star has joined another club. */
   moves: number;
+  /** The story the career started with, or null for an ordinary start. */
+  twist: Twist | null;
   /** This year's cup, from the 3rd mini season until the year's 3rd season is over. Null the rest of the time. */
   cup: CareerCup | null;
   /** Every cup played: the age group and how far you got (0 quarter-finals, 1 semis, 2 final, 3 won). */
@@ -165,14 +167,56 @@ export const seasonName = (c: CareerState): string => SEASON_NAMES[(c.season - 1
 
 const zeroSkills = (): Skills => Object.fromEntries(SKILL_KEYS.map((k) => [k, 0])) as Skills;
 
+/** Career starts with a twist: a different story from the first match. */
+export type Twist = 'underdogs' | 'keeper' | 'town' | 'late' | 'big';
+export const TWISTS: Record<Twist, { emoji: string; name: string; blurb: string }> = {
+  underdogs: { emoji: '🐭', name: 'Underdogs', blurb: 'Your team-mates start a star weaker than usual. Can your Star carry them up?' },
+  keeper: { emoji: '🧤', name: "Keeper's Journey", blurb: 'Your Star goes in goal for the whole career.' },
+  town: { emoji: '🦊', name: 'Town Team', blurb: 'Play the whole career as Davao Strikers.' },
+  late: { emoji: '⏰', name: 'Start Late', blurb: 'Begin in the Under 7s for a shorter career: four years instead of six.' },
+  big: { emoji: '🏰', name: 'Big Club', blurb: 'Start two tiers up, in the Thunder League, where every team is tougher.' },
+};
+export const TWIST_IDS = Object.keys(TWISTS) as Twist[];
+/** Start Late begins in the Under 7s. */
+const LATE_START_YEAR = 3;
+/** Big Club starts in the Thunder League. */
+const BIG_CLUB_TIER = 3;
+
+/**
+ * Keeper's Journey: the Star goes in goal. The team's keeper swaps places with them (playing
+ * out on the pitch, with goal still their natural spot), or drops to the bench if the Star was a sub.
+ */
+function inGoal(team: Team, starId: string): void {
+  const star = team.players.find((p) => p.id === starId);
+  if (!star || star.position === 'GK') return;
+  const keeper = team.players.find((p) => p.starter && p.position === 'GK');
+  if (keeper) {
+    if (star.starter) { keeper.positions = ['GK']; keeper.position = star.position; keeper.skills = randomSkills(keeper.position, team.ageGroup); } else keeper.starter = false;
+  }
+  star.positions = [star.position];
+  star.position = 'GK';
+  star.starter = true;
+  star.skills = randomSkills('GK', team.ageGroup);
+}
+
+/** Underdogs: everyone but the Star starts a star down in one rating (never below one). */
+function underdogs(team: Team, starId: string | null): void {
+  for (const p of team.players) {
+    if (p.id === starId) continue;
+    const keys = skillKeys(p.position).filter((k) => p.skills[k] > 1);
+    if (keys.length) p.skills[pick(keys)]--;
+  }
+}
+
 /**
  * A fresh career: a copy of the chosen team sent back to the Under 5s, with
  * tiny stars that have room to grow. The copy is its own saved team so the
  * original is untouched. Give a `star` (one of the team's players, a player from
  * another team, or one made up for the career) and they join as the Star.
  */
-export function createCareer(source: Team, halfSeconds: number, star?: Player): { career: CareerState; team: Team } {
-  const age = CAREER_AGES[0];
+export function createCareer(source: Team, halfSeconds: number, star?: Player, twist: Twist | null = null): { career: CareerState; team: Team } {
+  const year = twist === 'late' ? LATE_START_YEAR : 1;
+  const age = CAREER_AGES[year - 1];
   const team: Team = {
     ...structuredClone(source),
     id: `career-${uid()}`,
@@ -188,16 +232,19 @@ export function createCareer(source: Team, halfSeconds: number, star?: Player): 
     const own = source.players.findIndex((p) => p.id === star.id);
     starId = own >= 0 ? team.players[own].id : joinSquad(team, star).id;
   }
-  const world = buildWorld(team, TIER_COUNT);
-  const league = createLeague(team, halfSeconds, TIER_COUNT, undefined, startSeasons(world, team.id, 1));
+  if (twist === 'keeper' && starId) inGoal(team, starId);
+  if (twist === 'underdogs') underdogs(team, starId);
+  const tier = twist === 'big' ? BIG_CLUB_TIER : TIER_COUNT;
+  const world = buildWorld(team, tier);
+  const league = createLeague(team, halfSeconds, tier, undefined, startSeasons(world, team.id, seasonIndex(year, 1)));
   const career: CareerState = {
-    teamId: team.id, year: 1, season: 1, league, halfSeconds,
+    teamId: team.id, year, season: 1, league, halfSeconds, twist,
     seasonStats: {}, careerStats: {}, history: [], titles: 0, done: false, pendingGrowth: [],
     starId: starId ?? defaultStar(team), starPicked: starId !== null, trainingPoints: 0, milestones: [], trialDay: null, offers: null, moves: 0, cup: null, cupRuns: [], yearStats: {}, newcomer: null, awards: [], world,
     goals: [], sweeps: 0, scrapbook: [],
   };
   career.goals = newGoals(career, team);
-  addScrap(career.scrapbook, 1, '🌱', `${team.name} kick off in the ${tierInfo(TIER_COUNT).name}.`);
+  addScrap(career.scrapbook, seasonIndex(year, 1), twist ? TWISTS[twist].emoji : '🌱', `${team.name} kick off in the ${tierInfo(tier).name}${twist ? `: ${TWISTS[twist].name}` : ''}.`);
   return { career, team };
 }
 

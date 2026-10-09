@@ -4,7 +4,7 @@ import { getCareer, getHall, getSettings, getTeam, getTeams, retireCareer, saveT
 import { GENDERS, HAIR_STYLES, HAIR_STYLE_LABELS, POSITIONS, POSITION_LABELS, type Gender, type HairStyle, type Player, type Position, type Team } from '../../data/types';
 import { isNameOk } from '../../data/wordFilter';
 import { recordCareer } from '../../data/progress';
-import { CAREER_AGES, SEASONS_PER_YEAR, createCareer } from '../../game/career';
+import { CAREER_AGES, SEASONS_PER_YEAR, TWISTS, TWIST_IDS, createCareer, type Twist } from '../../game/career';
 import { esc } from '../hud';
 import { badgeSvg, kitChip } from '../kitPreview';
 import { topBar, wire, pressed, focusKey, restoreFocus } from './shared';
@@ -33,9 +33,10 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
   let mineId = (homeId && mine.find((t) => t.id === homeId)?.id) || mine[0]?.id || '';
   let help = settings.beginnerHelp;
   let halfSeconds = settings.halfLengthSeconds;
+  let twist: Twist | null = null;
 
   const source = () => sources.find((t) => t.id === sourceId) ?? sources[0];
-  const team = (): Team => (teamChoice === 'club' ? club : teamChoice === 'mine' ? mine.find((t) => t.id === mineId) ?? random : random);
+  const team = (): Team => (teamChoice === 'club' || twist === 'town' ? club : teamChoice === 'mine' ? mine.find((t) => t.id === mineId) ?? random : random);
   const star = (): Player | null => (starChoice === 'create' ? made : source().players.find((p) => p.id === playerId) ?? null);
 
   const playerTile = (t: Team, p: Player) => `<button class="btn star-pick-btn ${p.id === playerId ? 'is-suggested' : ''}" data-player="${esc(p.id)}" ${pressed(p.id === playerId)}>${kitChip(p.position === 'GK' ? t.keeperKit : t.kit, 36)}<span><strong>${esc(p.name)}</strong> #${p.number}<br/><span class="chip chip-pos chip-${p.position.toLowerCase()}">${POSITION_LABELS[p.position]}</span></span></button>`;
@@ -78,6 +79,11 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
           ${teamChoice === 'mine' ? `<label class="field"><span>Which team</span><select id="c-mine">${mine.map((x) => `<option value="${esc(x.id)}" ${x.id === mineId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` : ''}
           <p class="muted small">${s ? `${esc(s.name)} ${source().players.includes(s) && source() === t ? `starts the career with ${esc(t.name)}` : `joins ${esc(t.name)} as a starter`}.` : ''} A copy of the team starts in the Under 5s, so the original is untouched.</p>
         </div>
+        <div class="card options twist-card">
+          <h3>3. How to start</h3>
+          <div class="pills"><button class="pill ${!twist ? 'is-active' : ''}" data-twist="" ${pressed(!twist)}>🌱 The usual way</button>${TWIST_IDS.map((id) => `<button class="pill ${twist === id ? 'is-active' : ''}" data-twist="${id}" ${pressed(twist === id)}>${TWISTS[id].emoji} ${esc(TWISTS[id].name)}</button>`).join('')}</div>
+          <p class="muted small">${twist ? `${esc(TWISTS[twist].blurb)} Finish it for its own sticker.` : 'Start in the Under 5s in the Acorn League. Want a different story? Try a twist.'}</p>
+        </div>
         <div class="card options">
           <div class="field"><span>The journey</span><div class="age-ladder">${CAREER_AGES.map((a) => `<span class="rung-age">${a}</span>`).join('<span class="rung-arrow">→</span>')}</div><p class="muted small">${SEASONS_PER_YEAR} mini seasons a year · promotion and relegation between tiers carry over · stars grow up to each age group's cap.</p></div>
           <div class="field"><span>Computer difficulty</span>
@@ -87,7 +93,7 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
             <div class="pills">${[60, 120, 180, 300].map((n) => `<button class="pill ${n === halfSeconds ? 'is-active' : ''}" data-len="${n}" ${pressed(n === halfSeconds)}>${n / 60} min</button>`).join('')}</div>
           </div>
         </div>
-        <button class="btn btn-primary btn-big btn-kickoff" id="c-go" ${ready ? '' : 'disabled'}>🌱 Start in the Under 5s!</button>
+        <button class="btn btn-primary btn-big btn-kickoff" id="c-go" ${ready ? '' : 'disabled'}>${twist ? TWISTS[twist].emoji : '🌱'} Start in the ${twist === 'late' ? 'Under 7s' : 'Under 5s'}!</button>
       </div>`;
     wire(root, () => router.go({ name: 'menu' }));
     root.querySelectorAll<HTMLElement>('[data-star]').forEach((b) => b.addEventListener('click', () => { starChoice = b.dataset.star as StarChoice; render(); }));
@@ -109,7 +115,8 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
     root.querySelectorAll<HTMLElement>('[data-skin]').forEach((b) => b.addEventListener('click', () => { made.skin = b.dataset.skin!; render(); }));
     root.querySelectorAll<HTMLElement>('[data-hairstyle]').forEach((b) => b.addEventListener('click', () => { made.hairStyle = b.dataset.hairstyle as HairStyle; render(); }));
     root.querySelectorAll<HTMLElement>('[data-hair]').forEach((b) => b.addEventListener('click', () => { made.hair = b.dataset.hair!; render(); }));
-    root.querySelectorAll<HTMLElement>('[data-team]').forEach((b) => b.addEventListener('click', () => { teamChoice = b.dataset.team as TeamChoice; render(); }));
+    root.querySelectorAll<HTMLElement>('[data-team]').forEach((b) => b.addEventListener('click', () => { teamChoice = b.dataset.team as TeamChoice; if (teamChoice !== 'club' && twist === 'town') twist = null; render(); }));
+    root.querySelectorAll<HTMLElement>('[data-twist]').forEach((b) => b.addEventListener('click', () => { twist = (b.dataset.twist || null) as Twist | null; if (twist === 'town') teamChoice = 'club'; render(); }));
     root.querySelector('#c-reroll')?.addEventListener('click', () => { random = generateOpponent('U5', club.kit); render(); });
     root.querySelector<HTMLSelectElement>('#c-mine')?.addEventListener('change', (e) => { mineId = (e.target as HTMLSelectElement).value; render(); });
     root.querySelectorAll<HTMLElement>('[data-help]').forEach((b) => b.addEventListener('click', () => { help = b.dataset.help === '1'; render(); }));
@@ -120,7 +127,7 @@ export function renderCareerStart(root: HTMLElement, router: Router, homeId?: st
       if (getCareer() && !(await askConfirm({ tone: 'warn', title: 'Start a new career?', body: 'Your current career goes into the Hall of Fame, with its Star, trophies and scrapbook.\n\nThe team stays in My Teams.', yes: 'Start new career', no: 'Keep my career' }))) return;
       updateSettings({ beginnerHelp: help, halfLengthSeconds: halfSeconds });
       if (getCareer() && retireCareer()) recordCareer({ hall: getHall().length });
-      const { career, team: you } = createCareer(team(), halfSeconds, { ...chosen, name: chosen.name.trim() });
+      const { career, team: you } = createCareer(team(), halfSeconds, { ...chosen, name: chosen.name.trim() }, twist);
       saveTeam(you);
       setCareer(career);
       recordCareer({ started: true });
